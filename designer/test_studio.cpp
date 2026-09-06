@@ -934,7 +934,8 @@ static void test_debugging(const std::string& openepl, const std::string& design
 
     const std::string cmd =
         "XDG_DATA_HOME=" + dir + "/xdg OPENEPL_DESIGNER_SCRIPT='" +
-        "view:code;bp:6;gutter;dbgrun;waitstop;frames;locals;dbgnext;waitstop;locals;dbgstop' " +
+        "view:code;bp:6;gutter;dbgrun;waitstop;frames;locals;hoverval:6,21;"
+        "dbgnext;waitstop;locals;dbgstop' " +
         designer + " " + src + " " + openepl + " 2>/dev/null";
     std::string out;
     if (FILE* p = popen(cmd.c_str(), "r")) {
@@ -951,6 +952,7 @@ static void test_debugging(const std::string& openepl, const std::string& design
           has(out, "local: total = 0") && has(out, "local: i = 1"));
     check("debug: a step moves to the next statement", has(out, "dbgnext: line 7"));
     check("debug: and the variables move with it", has(out, "local: total = 1"));
+    check("debug: hovering a name shows what it holds", has(out, "hoverval: i = 1"));
     check("debug: the session can be ended", has(out, "dbgstop: done"));
 
     ::system(("rm -rf " + dir).c_str());

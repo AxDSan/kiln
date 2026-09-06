@@ -4004,6 +4004,35 @@ void show_tip(const std::string& markdown, int x, int y) {
     tip->SetProperty("display", "block");
 }
 
+/// The name at a place in the source, or "" when there is not one there.
+///
+/// Its own scan rather than the highlighter's: the highlighter answers what a
+/// run of characters *is*, and the question here is where one name starts and
+/// stops. `$` is deliberately not a name character — the compiler's own
+/// invented names contain one, and they are not the user's to hover.
+std::string identifier_at(int line, int col) {
+    auto* ed = code_editor();
+    if (!ed || line < 0) return "";
+    const std::string all = ed->GetValue();
+    size_t start = 0;
+    for (int i = 0; i < line; i++) {
+        const size_t nl = all.find('\n', start);
+        if (nl == std::string::npos) return "";
+        start = nl + 1;
+    }
+    const size_t end = all.find('\n', start);
+    const std::string text = all.substr(start, end == std::string::npos ? std::string::npos
+                                                                        : end - start);
+    if (col < 0 || (size_t)col >= text.size()) return "";
+    auto part = [](char c) { return std::isalnum((unsigned char)c) || c == '_'; };
+    if (!part(text[col])) return "";
+    size_t from = (size_t)col;
+    while (from > 0 && part(text[from - 1])) from--;
+    size_t to = (size_t)col;
+    while (to + 1 < text.size() && part(text[to + 1])) to++;
+    return text.substr(from, to - from + 1);
+}
+
 /// Ask the server about the spot the pointer has rested on. Called every
 /// frame; sends at most one request per resting place.
 void hover_tick() {
@@ -4014,7 +4043,24 @@ void hover_tick() {
     // it spinning.
     g.hover_asked = true;
     int line = 0, col = 0;
-    if (!g.lsp.running() || !editor_position_at(g.hover_x, g.hover_y, line, col)) return;
+    if (!editor_position_at(g.hover_x, g.hover_y, line, col)) return;
+    // While the program is stopped, hovering a name shows what it holds. That
+    // is the thing people ask a debugger for more than any other, and it costs
+    // nothing here: the values were fetched when it stopped, so there is no
+    // round trip to wait for and no chance of the answer arriving after the
+    // pointer has moved on.
+    if (g.stopped_line > 0) {
+        const std::string word = identifier_at(line, col);
+        if (!word.empty()) {
+            for (const auto& v : g.dbg.locals()) {
+                if (v.name == word) {
+                    show_tip(word + " = " + v.value, g.hover_x, g.hover_y);
+                    return;
+                }
+            }
+        }
+    }
+    if (!g.lsp.running()) return;
     g.hover_line = line;
     g.hover_col = col;
     g.hover_request = g.lsp.hover(line, col);
@@ -6519,6 +6565,19 @@ void run_script(const char* script) {
                 } else {
                     std::printf("gutter: (absent)\n");
                 }
+                std::fflush(stdout);
+            }
+            else if (verb == "hoverval") {
+                // hoverval:<line>,<col> — what hovering a name would show
+                // while the program is stopped, without a pointer to move.
+                int line = 1, col = 1;
+                std::sscanf(arg.c_str(), "%d,%d", &line, &col);
+                const std::string word = identifier_at(line - 1, col - 1);
+                std::string value = "(none)";
+                for (const auto& v : g.dbg.locals()) {
+                    if (v.name == word) value = v.value;
+                }
+                std::printf("hoverval: %s = %s\n", word.c_str(), value.c_str());
                 std::fflush(stdout);
             }
             else if (verb == "dbgstop") {

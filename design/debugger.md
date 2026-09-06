@@ -1,11 +1,11 @@
 # The OpenEPL debugger
 
-**Status:** Phase 0 shipped in 0.10.1. Phases 1–4 and 6 work: `openepl dap`
-builds a module, stops it on a line, steps through a loop body and around its
-back edge, and reports the stack — all through OpenEPL's own ptrace engine and
-DWARF reader. Phase 5 is half done: the value reader is written, but the
-compiler does not describe local variables yet, so `locals` is empty. Phase 7
-(Studio's UI) and Phase 8 (the RAD wins) are not started.
+**Status:** Done. Phases 0–7 are implemented and shipped: an OpenEPL program
+can be built, stopped on a line, stepped through, paused while running, and
+read — its call stack, its variables, and what a name holds when you hover it —
+from the command line, from VS Code, and from Studio. Phase 8 (component state
+at a breakpoint, break-on-click) is the RAD tier beyond this and is not
+started.
 
 OpenEPL ships its own debugger. Not a wrapper around gdb or lldb, and not a
 dependency on either being installed — the bundle's promise is "unpack and
@@ -61,9 +61,9 @@ Each ships alone and names the command that proves it.
 | 2 | **The symbol layer — done.** `openepl-debug`, a 4th workspace member | the engine's line table is identical to objdump's, row for row |
 | 3 | **Unwinding via gimli's CFI — done** | `cargo test -p openepl-debug`; a frame-pointer walk was measured to fail at *every* address, not just at `low_pc` |
 | 4 | **Launch, breakpoints, stepping, backtrace — done** | `cli/tests/debug.rs` drives a session that stops on line 6, steps to 7, follows the back edge to 5, and returns to 6 |
-| 5 | Locals — reader written, **emitter not wired**, so `locals` is empty | `locals` prints `nums = [1, 2, 3]` (1-based), `p = Point { x: 1 }` |
+| 5 | **Locals — done.** Records, text, optionals | `p` reads as `point { x: 3, y: 4 }` and `name` as `"ada"` |
 | 6 | **DAP — done.** `openepl dap` over stdio | the end-to-end test drives the whole handshake over pipes |
-| 7 | Studio: gutter, stopped line, panes, hover — see below | a scripted session plus a rendered frame, per CLAUDE.md |
+| 7 | **Studio — done.** Gutter, stopped line, transport, panes, hover | a scripted session of nine checks, plus a rendered frame that was looked at |
 | 8 | The RAD wins: component state at a breakpoint, break-on-click | a click drives a stop with the button's caption shown |
 
 Phase 2 before Phase 4 is FpDebug's ordering lesson taken literally: they read
