@@ -39,6 +39,24 @@ pub struct Variable {
     /// The address range of the subprogram it belongs to, so a frame can be
     /// matched to the variables in scope there.
     pub low_pc: u64,
+    /// Set when the variable is a record, which is read field by field rather
+    /// than as one value.
+    pub record: Option<RecordFields>,
+}
+
+/// A record's fields, as the compiler described them.
+///
+/// Held beside the variable rather than looked up on demand, because the
+/// answer is fixed for the life of a program and finding it means walking the
+/// type tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordFields {
+    /// Whether the local holds the record itself or a pointer to it. The two
+    /// are read from different places, and one rule for both renders a heap
+    /// record's fields out of the eight bytes of a pointer.
+    pub flat: bool,
+    /// Each field's name and its offset from the start of the storage.
+    pub fields: Vec<(String, u64, String)>,
 }
 
 /// A function, as the linker knows it.
@@ -340,6 +358,7 @@ fn read_variables(
                     continue;
                 };
                 let type_name = type_name_of(dwarf, unit, entry)?;
+                let record = record_fields(dwarf, unit, entry)?;
                 let parameter = if tag == gimli::DW_TAG_formal_parameter {
                     parameters += 1;
                     Some(parameters)
@@ -352,12 +371,79 @@ fn read_variables(
                     type_name,
                     parameter,
                     low_pc,
+                    record,
                 });
             }
             _ => {}
         }
     }
     Ok(found)
+}
+
+/// A record's fields, when the variable is one.
+///
+/// Two shapes reach here. A `c record` local holds the object itself, so its
+/// type is the structure. A `record` local holds a pointer to one on the heap,
+/// so its type is a pointer *to* the structure — and reading the fields out of
+/// the eight bytes of the pointer instead is the mistake this distinguishes.
+fn record_fields(
+    dwarf: &gimli::Dwarf<gimli::EndianSlice<gimli::RunTimeEndian>>,
+    unit: &gimli::Unit<gimli::EndianSlice<gimli::RunTimeEndian>>,
+    entry: &gimli::DebuggingInformationEntry<gimli::EndianSlice<gimli::RunTimeEndian>>,
+) -> Result<Option<RecordFields>, Error> {
+    let Some(gimli::AttributeValue::UnitRef(offset)) = entry.attr_value(gimli::DW_AT_type)? else {
+        return Ok(None);
+    };
+    let described = unit.entry(offset)?;
+    let (structure, flat) = match described.tag() {
+        gimli::DW_TAG_structure_type => (offset, true),
+        gimli::DW_TAG_pointer_type => {
+            let Some(gimli::AttributeValue::UnitRef(inner)) =
+                described.attr_value(gimli::DW_AT_type)?
+            else {
+                return Ok(None);
+            };
+            if unit.entry(inner)?.tag() != gimli::DW_TAG_structure_type {
+                return Ok(None);
+            }
+            (inner, false)
+        }
+        _ => return Ok(None),
+    };
+
+    // The members are the children of the structure, and only its own: a
+    // deeper walk would collect the fields of a record a field points at.
+    let mut fields = Vec::new();
+    let mut entries = unit.entries_at_offset(structure)?;
+    entries.next_dfs()?;
+    while let Some((delta, member)) = entries.next_dfs()? {
+        if delta < 0 {
+            break;
+        }
+        if member.tag() != gimli::DW_TAG_member {
+            continue;
+        }
+        let Some(name) = member.attr(gimli::DW_AT_name)? else {
+            continue;
+        };
+        let Ok(name) = dwarf.attr_string(unit, name.value()) else {
+            continue;
+        };
+        let byte_offset = match member.attr_value(gimli::DW_AT_data_member_location)? {
+            Some(gimli::AttributeValue::Udata(n)) => n,
+            _ => continue,
+        };
+        let type_name = type_name_of(dwarf, unit, &member)?;
+        fields.push((
+            String::from_utf8_lossy(name.slice()).into_owned(),
+            byte_offset,
+            type_name,
+        ));
+    }
+    if fields.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(RecordFields { flat, fields }))
 }
 
 /// The offset in a `DW_OP_fbreg` location, or `None` for any other kind.

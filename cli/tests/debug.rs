@@ -393,6 +393,96 @@ fn a_stopped_program_shows_the_values_of_its_variables() {
     );
 }
 
+/// A record shows its own field names, and text shows its characters.
+///
+/// Both are things only the compiler knows. No field name reaches a shipped
+/// binary, and `text` is a bare pointer that any other debugger would render
+/// as an address — they are here because the compiler wrote them into the
+/// debug information and the reader knows what the language means by them.
+#[test]
+fn a_record_shows_its_fields_and_text_shows_its_characters() {
+    use std::io::{BufReader, Read, Write};
+    use std::process::Stdio;
+
+    let dir = std::env::temp_dir().join("openepl_dap_record_test");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("r.oir"),
+        concat!(
+            "module recs\n\n",
+            "record point\n  x: int\n  y: int\nend\n\n",
+            "sub main\n",
+            "  var p: point = point{x: 3, y: 4}\n",
+            "  var name: text = \"ada\"\n",
+            "  call print_int(p.x)\n",
+            "end\n"
+        ),
+    )
+    .unwrap();
+
+    let mut adapter = Command::new(env!("CARGO_BIN_EXE_openepl"))
+        .arg("dap")
+        .current_dir(&dir)
+        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start the adapter");
+
+    let mut input = adapter.stdin.take().unwrap();
+    let mut seq = 0;
+    let mut send = |command: &str, arguments: &str| {
+        seq += 1;
+        let body = if arguments.is_empty() {
+            format!(r#"{{"seq":{seq},"type":"request","command":"{command}"}}"#)
+        } else {
+            format!(
+                r#"{{"seq":{seq},"type":"request","command":"{command}","arguments":{arguments}}}"#
+            )
+        };
+        input
+            .write_all(format!("Content-Length: {}\r\n\r\n{body}", body.len()).as_bytes())
+            .unwrap();
+        input.flush().unwrap();
+    };
+
+    send("initialize", r#"{"adapterID":"openepl"}"#);
+    send("launch", r#"{"program":"r.oir"}"#);
+    send(
+        "setBreakpoints",
+        r#"{"source":{"path":"r.oir"},"breakpoints":[{"line":11}]}"#,
+    );
+    send("configurationDone", "");
+    send("scopes", r#"{"frameId":0}"#);
+    send("variables", r#"{"variablesReference":1}"#);
+    // The record's own fields, which are children rather than part of the row.
+    send("variables", r#"{"variablesReference":2}"#);
+    send("disconnect", "");
+    drop(input);
+
+    let mut transcript = String::new();
+    BufReader::new(adapter.stdout.take().unwrap())
+        .read_to_string(&mut transcript)
+        .unwrap();
+    let _ = adapter.wait();
+    let dense: String = transcript.chars().filter(|c| !c.is_whitespace()).collect();
+
+    assert!(
+        dense.contains(r#""name":"x","value":"3""#),
+        "the record's first field did not read: {transcript}"
+    );
+    assert!(
+        dense.contains(r#""name":"y","value":"4""#),
+        "the record's second field did not read: {transcript}"
+    );
+    // Quoted characters, not an address.
+    assert!(
+        dense.contains(r#""value":"\"ada\"""#),
+        "text did not read as its characters: {transcript}"
+    );
+}
+
 /// A running program can be stopped, and it says where it was.
 ///
 /// The hard part is that "running" means the engine is blocked waiting for the

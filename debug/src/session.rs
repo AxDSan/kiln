@@ -337,21 +337,49 @@ impl Session {
         let Some(static_pc) = pc.checked_sub(self.bias) else {
             return Ok(Vec::new());
         };
-        let described: Vec<value::Local> = self
-            .program
-            .variables_at(static_pc)
-            .into_iter()
-            .map(|v| value::Local {
-                name: v.name.clone(),
-                frame_offset: v.frame_offset,
-                type_name: v.type_name.clone(),
-            })
-            .collect();
         // The frame base is the frame pointer, which the compiler pins for
         // exactly this reason: it is a register the unwinder recovers for
         // every frame, where the stack pointer in an outer frame would have to
         // be inferred from the call that left it.
-        Ok(value::locals(&described, frame.registers.bp, &self.target))
+        let base = frame.registers.bp;
+        let mut read = Vec::new();
+        for variable in self.program.variables_at(static_pc) {
+            // Names the compiler invented are not the user's. The only one
+            // described at all is an optional's companion, which is what lets
+            // an absent value be told from a zero — and it is joined to its
+            // value rather than shown.
+            if variable.name.contains('$') {
+                continue;
+            }
+            let local = value::Local {
+                name: variable.name.clone(),
+                frame_offset: variable.frame_offset,
+                type_name: variable.type_name.clone(),
+            };
+            let value = match &variable.record {
+                Some(record) => {
+                    let fields: Vec<value::Field> = record
+                        .fields
+                        .iter()
+                        .map(|(name, byte_offset, type_name)| value::Field {
+                            name: name.clone(),
+                            byte_offset: *byte_offset,
+                            type_name: type_name.clone(),
+                        })
+                        .collect();
+                    let shape = if record.flat {
+                        value::RecordShape::Flat
+                    } else {
+                        value::RecordShape::Heap
+                    };
+                    value::read_record(&local, shape, &fields, base, &self.target)
+                }
+                None => value::read(&local, base, &self.target)
+                    .unwrap_or_else(|e| value::Value::Unreadable(e.to_string())),
+            };
+            read.push((local.name, value));
+        }
+        Ok(read)
     }
 
     /// End the session and the program with it.
