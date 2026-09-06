@@ -58,7 +58,7 @@ Each ships alone and names the command that proves it.
 | 4 | Launch, int3 breakpoints, stepping, backtrace | `openepl debug --batch 'break x.oir:5; run; where; next'` |
 | 5 | Locals, rendered in OpenEPL's value model | `locals` prints `nums = [1, 2, 3]` (1-based), `p = Point { x: 1 }` |
 | 6 | DAP, and VS Code for free | `cli/tests/dap.rs` drives the full handshake |
-| 7 | Studio: gutter, stopped line, panes | a scripted session plus a rendered frame, per CLAUDE.md |
+| 7 | Studio: gutter, stopped line, panes, hover — see below | a scripted session plus a rendered frame, per CLAUDE.md |
 | 8 | The RAD wins: component state at a breakpoint, break-on-click | a click drives a stop with the button's caption shown |
 
 Phase 2 before Phase 4 is FpDebug's ordering lesson taken literally: they read
@@ -122,6 +122,105 @@ oracle rather than by reading the code:
 
 `--resolve loops.oir:24` returns `0x400557` — the same address gdb picks for
 `break loops.oir:24`, arrived at independently.
+
+## How Studio wires up (Phases 7 and 8)
+
+Studio talks to `openepl debug` the same way it already talks to
+`openepl lsp`: a subprocess on a pipe, speaking a JSON protocol with
+`Content-Length` framing. `designer/dbgclient.h` is `lspclient.h` again —
+same spawn, same non-blocking read loop, same `updated_`/`has_update()`
+pattern for replies that land between frames.
+
+**Studio never traces the program itself.** Debug-run is a different path from
+Run, not a modified one: `run_app()` keeps its `fork`/`dup2`/`execl` for a
+plain Run, and `debug_app()` spawns the adapter, which owns the debuggee. This
+is not tidiness. `stop_app()` does a blocking `waitpid` on the UI thread
+today, and under ptrace *every* breakpoint hit and *every* single step becomes
+one of those stalls — the exact thing the non-blocking drain was written to
+avoid. Putting the tracer in its own process sidesteps the problem entirely.
+It also quietly fixes `kill(SIGTERM)`, which is wrong for a traced child: it
+stops rather than dies.
+
+**The stopped line is nearly free.** `refresh_highlight()` already picks a row
+class from state — `main.cpp:2343` emits `<div class='badline'>` or `<div>`.
+A stopped row is a third class and one CSS rule beside `main.cpp:977`.
+
+**The gutter is a third sibling, not a layer.** The Code view is two stacked
+elements (`main.cpp:1356`): `#codehl` paints colour underneath and a real
+`<textarea id='fullcode'>` sits on top supplying caret, selection and
+clipboard. A dot drawn inside `#codehl` receives no clicks — the press lands
+on the textarea. So the gutter is a third element to the left of both, with
+the other two shifted right by its width, built in the same loop and sharing
+`theme::CODE_LINE_H` exactly. The file already warns that any typographic
+difference between the layers shows up as text drifting away from its colour,
+and the gutter inherits that discipline. Its scrollbar must be sized or
+hidden: an unstyled RmlUi scrollbar eats clicks, which has broken Studio
+twice.
+
+**The cache key is the trap.** `refresh_highlight()` returns early when the
+text, first line, row count, `marks` and horizontal scroll are all unchanged
+(`main.cpp:2302-2311`). The `marks` string exists precisely because
+diagnostics changing under unchanged text otherwise never repainted — and a
+breakpoint toggled without editing is exactly that case. The breakpoint set
+and the stopped line must join the key, or clicking the gutter silently does
+nothing. This gets its own regression test; it is the kind of bug that passes
+every unit test and fails on screen.
+
+**Marker shapes carry meaning.** Solid dot for a breakpoint bound to an
+address, hollow for one the engine could not bind, arrow for the stopped row.
+A breakpoint that silently never fires is the worst thing a first version can
+do, and the distinction is nearly free once a line table exists.
+
+**New panes** join the existing bottom dock beside PROBLEMS and OUTPUT:
+Variables, Call Stack, Watch — and Components, only when the program has a
+form. Tables rather than a command prompt, which is what this product family's
+users expect. The call stack shows OpenEPL frames by default with a "show
+internal frames" toggle: a click handler's real stack is `main → ECodeStart →
+oe_ui_run → oe_loop_run → ui_pump → Backend::ProcessEvents → [SDL] → [RmlUi
+dispatch] → HandlerBridge::ProcessEvent → oe_evt_on_click_i32 →
+oe_user_on_click`, and showing all twelve makes the pane useless. **Filtering
+is by DWARF producer, not by symbol prefix** — the runtime's C is compiled in
+the same build, so a prefix test would misclassify it.
+
+**Hover a variable to see its value.** Studio already turns an x offset into a
+column and has an identifier lexer in `highlight.h`. Hover sends an `evaluate`
+with `context: "hover"` and renders the tip when the reply lands —
+asynchronously, following the LSP client's `has_update()` pattern rather than
+pumping on mouse-move, which would stutter the frame loop. This is the single
+most-requested debugging behaviour in the 易语言 material.
+
+**Keys** follow the family: F5 debug-run, F9 toggle breakpoint, F10 step over,
+F11 step in, Shift+F11 step out, Shift+F5 stop. F5 is *debug*-run because that
+is the expectation here; Studio already has plain Run on the toolbar.
+
+**Headless testing** adds verbs to the existing script harness — `bp:<line>`,
+`dbgrun`, `dbgstep`, `dbgnext`, `dbgout`, `dbgcont`, `dbgstop`, `waitstop`,
+`frames`, `locals`, `watch:<name>`. `waitstop` blocks on the adapter's
+`stopped` event through the same shape `waitdiag`/`waitdef`/`waitcomplete`
+already use for asynchronous LSP replies, so there is no new machinery.
+Fixtures are **console** programs, so the debuggee never opens a window.
+
+The proof is a rendered frame, not a passing assertion:
+
+```sh
+OPENEPL_DESIGNER_DUMP=/tmp/stop.ppm \
+OPENEPL_DESIGNER_SCRIPT='view:code;bp:12;dbgrun;waitstop;locals;dbgnext;waitstop' \
+  designer/openepl-designer /tmp/fixture.oir target/release/openepl
+```
+
+— and then looking at the frame for the solid dot on 12, the tint on 13, and a
+populated Variables pane. A Studio bug passes tests and fails on screen.
+
+**Phase 8, the part no wrapper can reach.** Right-click a button on the form
+and choose "break when clicked". Handlers are compiler-emitted functions bound
+by pointer, with the surface event name in the component descriptor, so a
+`(component, event) → symbol` table emitted beside the DWARF turns that into a
+symbol lookup — set from the *form designer*, with no idea where the handler's
+first line is. And a Components pane showing `button1.caption` as it is right
+now, because the runtime's property accessors are already string-keyed by
+name. Reading it needs no function-call injection: we link a plain data mirror
+into debug builds and read it out of the stopped process. FpDebug took seven
+years to get call injection; we do not need it, because we own the runtime.
 
 ## Decisions taken
 
