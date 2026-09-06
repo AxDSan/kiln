@@ -47,9 +47,18 @@ constexpr int PROBLEMS_H = 72;
 /// Line box in the output console, so the tail calculation is exact.
 constexpr int LOG_LINE_H = 17;
 constexpr int CODE_PAD_X = 10;
-/// The breakpoint gutter's width. Wide enough for a dot at the code's own
-/// size, and no wider: it sits beside the text on every line.
-constexpr int CODE_GUTTER_W = 18;
+/// The gutter's width: a column for the breakpoint mark, then the line number
+/// right-aligned against the code. Four digits fit, which is more lines than
+/// a module has any business having.
+constexpr int CODE_GUTTER_W = 62;
+/// The mark's own column, at the gutter's left edge — the same place every
+/// editor puts it, and far enough from the text that a click meant for the
+/// gutter is not a click meant for the code.
+constexpr int CODE_MARK_W = 13;
+/// The execution cue's column, beside the mark rather than sharing it: a
+/// breakpoint and the line the program is stopped on are two different facts
+/// and are usually true of the same line at once.
+constexpr int CODE_CUE_W = 13;
 constexpr int CODE_PAD_Y = 8;
 
 inline std::string ACCENT      = "#1e60d5";

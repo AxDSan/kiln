@@ -946,6 +946,10 @@ static void test_debugging(const std::string& openepl, const std::string& design
 
     check("debug: a gutter row carries its own line number", has(out, "oe-bp=\"6\""));
     check("debug: the breakpoint is marked in the gutter", has(out, "class=\"row pending\""));
+    check("debug: the gutter numbers every line",
+          has(out, "<span class=\"num\">6</span>") && has(out, "<span class=\"num\">1</span>"));
+    check("debug: the mark and the execution cue have their own columns",
+          has(out, "class=\"mk\"") && has(out, "class=\"cue\""));
     check("debug: the program stops on the line asked for", has(out, "waitstop: line 6"));
     check("debug: the stack names the subroutine", has(out, "frame: main:6"));
     check("debug: the variables read as the program's own values",

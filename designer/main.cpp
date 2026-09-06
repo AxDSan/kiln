@@ -513,10 +513,16 @@ void relayout() {
     // ran on underneath the preview pane and its last lines could not be seen
     // or scrolled to — they were behind it.
     place("codeview", 0, TABBAR_H, centre_w, canvas_h);
-    // The editor fills the view: it scrolls its own text internally, and the
-    // highlight layer under it is redrawn to match.
-    place("fullcode", 0, 0, centre_w - 2 * CODE_PAD_X, canvas_h - 2 * CODE_PAD_Y);
-    place("codehl", 0, 0, centre_w - 2 * CODE_PAD_X, canvas_h - 2 * CODE_PAD_Y);
+    // The editor fills what the gutter leaves of the view: it scrolls its own
+    // text internally, and the highlight layer under it is redrawn to match.
+    // Both are placed here rather than by the stylesheet, so the gutter's width
+    // has to be subtracted here too — a `left` in the sheet is overwritten by
+    // this and the numbers would be drawn over the code.
+    place("dbggutter", 0, 0, CODE_GUTTER_W, canvas_h - 2 * CODE_PAD_Y);
+    place("fullcode", CODE_GUTTER_W, 0, centre_w - 2 * CODE_PAD_X - CODE_GUTTER_W,
+          canvas_h - 2 * CODE_PAD_Y);
+    place("codehl", CODE_GUTTER_W, 0, centre_w - 2 * CODE_PAD_X - CODE_GUTTER_W,
+          canvas_h - 2 * CODE_PAD_Y);
     place("inspectdock", g.toolbox_w + centre_w, content_y, g.inspect_w, content_h);
     // Panel head, tab strip and context label above the list; the wiring box
     // below it, pinned to the dock's foot.
@@ -992,13 +998,25 @@ std::string build_styles(const std::string& family, const std::string& mono,
     s << "#dbggutter{position:absolute;left:0;top:0;width:" << CODE_GUTTER_W
       << "px;bottom:0;overflow:hidden;background-color:" << PANEL << "}";
     s << "#dbggutter div{height:" << CODE_LINE_H << "px;line-height:" << CODE_LINE_H
-      << "px;text-align:center;font-size:" << (CODE_FONT_PX - 2) << "px;color:" << GUTTER << "}";
+      << "px;font-size:" << (CODE_FONT_PX - 1) << "px;color:" << GUTTER << "}";
+    s << "#dbggutter div:hover{background-color:" << HOVER << "}";
+    s << "#dbggutter .mk{display:inline-block;width:" << CODE_MARK_W
+      << "px;text-align:center}";
+    s << "#dbggutter .cue{display:inline-block;width:" << CODE_CUE_W
+      << "px;text-align:center;color:" << ACCENT << "}";
+    // Right-aligned against the code, so the digits line up whatever their
+    // count and the eye reads down one edge.
+    s << "#dbggutter .num{display:inline-block;width:"
+      << (CODE_GUTTER_W - CODE_MARK_W - CODE_CUE_W - 6)
+      << "px;text-align:right}";
     // Solid for a breakpoint the engine bound, hollow for one it could not.
     // The distinction earns its pixels: a breakpoint that silently never fires
     // is the worst thing a debugger can do to someone.
-    s << "#dbggutter div.bp{color:" << BREAKPOINT << "}";
-    s << "#dbggutter div.pending{color:" << GUTTER << "}";
-    s << "#dbggutter div.cur{color:" << ACCENT << "}";
+    s << "#dbggutter div.bp .mk{color:" << BREAKPOINT << "}";
+    s << "#dbggutter div.pending .mk{color:" << GUTTER << "}";
+    // The stopped row's number is lit too, so the cue survives being scrolled
+    // to the edge of the view where the tint is easy to miss.
+    s << "#dbggutter div.cur .num{color:" << ACCENT << "}";
     s << "#codehl{position:absolute;left:" << CODE_GUTTER_W << "px;top:0;font-family:'" << mono
       << "';font-size:" << CODE_FONT_PX << "px;line-height:" << CODE_LINE_H << "px;padding:" << CODE_PAD_Y << "px "
       << CODE_PAD_X << "px;padding-top:0px;white-space:pre;color:" << TEXT << "}";
@@ -2462,20 +2480,28 @@ void refresh_highlight() {
             const int line = (int)i + 1;
             const bool has = g.breakpoints.count(line) > 0;
             const bool here = line == g.stopped_line;
+            // Three columns: the breakpoint, the execution cue, the number.
+            // The first two are separate because they are separate facts and
+            // are usually true of the same line at once — a program stops
+            // where you put a breakpoint, and hiding one behind the other is
+            // hiding the answer to "did it stop where I asked".
             std::string cls = "row";
-            std::string glyph;
+            std::string mark;
             if (has) {
                 // Hollow until the engine says where it went. A breakpoint the
                 // engine could not place must not look like one that fired.
                 cls += bound_breakpoint(line) ? " bp" : " pending";
-                glyph = bound_breakpoint(line) ? "\xe2\x97\x8f" : "\xe2\x97\x8b";
+                mark = bound_breakpoint(line) ? "\xe2\x97\x8f" : "\xe2\x97\x8b";
             }
+            std::string cue;
             if (here) {
                 cls += " cur";
-                glyph = "\xe2\x96\xb6";
+                cue = "\xe2\x9e\x9c";
             }
-            marks_html += "<div class='" + cls + "' oe-bp='" + std::to_string(line) + "'>" +
-                          glyph + "</div>";
+            marks_html += "<div class='" + cls + "' oe-bp='" + std::to_string(line) + "'>"
+                          "<span class='mk'>" + mark + "</span>"
+                          "<span class='cue'>" + cue + "</span>"
+                          "<span class='num'>" + std::to_string(line) + "</span></div>";
         }
         gutter->SetInnerRML(marks_html);
     }
