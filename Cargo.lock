@@ -118,14 +118,14 @@ dependencies = [
 
 [[package]]
 name = "openepl-backend"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "openepl-ir",
 ]
 
 [[package]]
 name = "openepl-cli"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "lsp-server",
  "lsp-types",
@@ -138,7 +138,7 @@ dependencies = [
 
 [[package]]
 name = "openepl-debug"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "gimli",
  "memmap2",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "openepl-ir"
-version = "0.11.0"
+version = "0.11.1"
 
 [[package]]
 name = "proc-macro2"
