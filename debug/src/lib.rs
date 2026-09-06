@@ -21,7 +21,7 @@ pub mod target;
 pub mod unwind;
 pub mod value;
 
-pub use symbols::{Program, Subprogram, Row};
+pub use symbols::{Program, Row, Subprogram, Variable};
 
 /// Anything that stopped a program being read.
 #[derive(Debug)]

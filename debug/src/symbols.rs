@@ -24,6 +24,23 @@ pub struct Row {
     pub end_sequence: bool,
 }
 
+/// A local variable, as the compiler described it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Variable {
+    pub name: String,
+    /// Its offset from the frame base, which for these binaries is `rbp`.
+    pub frame_offset: i64,
+    /// The type's name as the debug information spells it, which is what the
+    /// value reader dispatches on.
+    pub type_name: String,
+    /// Which parameter this is, counting from one; `None` for a local the
+    /// program declared in the body.
+    pub parameter: Option<usize>,
+    /// The address range of the subprogram it belongs to, so a frame can be
+    /// matched to the variables in scope there.
+    pub low_pc: u64,
+}
+
 /// A function, as the linker knows it.
 ///
 /// These come from the symbol table rather than from DWARF: the compiler emits
@@ -60,6 +77,8 @@ pub struct Program {
     rows: Vec<Row>,
     /// Every user function, sorted by address.
     subs: Vec<Subprogram>,
+    /// Every local the compiler described, in the order it declared them.
+    variables: Vec<Variable>,
 }
 
 impl Program {
@@ -71,6 +90,23 @@ impl Program {
     /// Every user function, in address order.
     pub fn subprograms(&self) -> &[Subprogram] {
         &self.subs
+    }
+
+    /// The locals in scope at an address, in declaration order.
+    ///
+    /// Scope is the whole subroutine: OpenEPL's locals are function-scoped, so
+    /// a name declared anywhere in a body is a name that exists throughout it.
+    /// A debugger showing one before its declaration has run shows whatever
+    /// the slot happens to hold, which is the same thing the language itself
+    /// would read.
+    pub fn variables_at(&self, address: u64) -> Vec<&Variable> {
+        let Some(sub) = self.subprogram_for(address) else {
+            return Vec::new();
+        };
+        self.variables
+            .iter()
+            .filter(|v| v.low_pc == sub.low_pc)
+            .collect()
     }
 
     /// Which source line an address is in.
@@ -180,6 +216,7 @@ pub(crate) fn load(path: &Path) -> Result<Program, Error> {
     let mut source = String::new();
     let mut directory = String::new();
     let mut rows: Vec<Row> = Vec::new();
+    let mut variables: Vec<Variable> = Vec::new();
 
     let mut units = dwarf.units();
     while let Some(header) = units.next()? {
@@ -206,6 +243,7 @@ pub(crate) fn load(path: &Path) -> Result<Program, Error> {
                 directory = String::from_utf8_lossy(dir.slice()).into_owned();
             }
         }
+        variables.extend(read_variables(&dwarf, &unit)?);
         let mut state = program.rows();
         while let Some((_, row)) = state.next_row()? {
             // A row with no line is one the compiler could not attribute. It
@@ -256,7 +294,117 @@ pub(crate) fn load(path: &Path) -> Result<Program, Error> {
         directory,
         rows,
         subs,
+        variables,
     })
+}
+
+/// The locals a compile unit describes, keyed to the function they belong to.
+///
+/// Read from the tree rather than guessed at: the compiler emits a
+/// `DW_TAG_subprogram` per subroutine with its variables beneath it, and the
+/// nesting is what says which function a name belongs to.
+fn read_variables(
+    dwarf: &gimli::Dwarf<gimli::EndianSlice<gimli::RunTimeEndian>>,
+    unit: &gimli::Unit<gimli::EndianSlice<gimli::RunTimeEndian>>,
+) -> Result<Vec<Variable>, Error> {
+    let mut found = Vec::new();
+    let mut low_pc = 0u64;
+    let mut parameters = 0usize;
+    let mut entries = unit.entries();
+    while let Some((_, entry)) = entries.next_dfs()? {
+        match entry.tag() {
+            gimli::DW_TAG_subprogram => {
+                low_pc = match entry.attr_value(gimli::DW_AT_low_pc)? {
+                    Some(gimli::AttributeValue::Addr(a)) => a,
+                    Some(gimli::AttributeValue::DebugAddrIndex(i)) => dwarf.address(unit, i)?,
+                    _ => 0,
+                };
+                parameters = 0;
+            }
+            tag @ (gimli::DW_TAG_variable | gimli::DW_TAG_formal_parameter) => {
+                if low_pc == 0 {
+                    continue;
+                }
+                let Some(name) = entry.attr(gimli::DW_AT_name)? else {
+                    continue;
+                };
+                let Ok(name) = dwarf.attr_string(unit, name.value()) else {
+                    continue;
+                };
+                let name = String::from_utf8_lossy(name.slice()).into_owned();
+                // Only a variable with a plain frame-relative location can be
+                // read. Anything else — a register, a piece of an expression —
+                // is skipped rather than guessed at, and at the optimisation
+                // level a debug build uses there is nothing else.
+                let Some(offset) = frame_offset(entry.attr_value(gimli::DW_AT_location)?) else {
+                    continue;
+                };
+                let type_name = type_name_of(dwarf, unit, entry)?;
+                let parameter = if tag == gimli::DW_TAG_formal_parameter {
+                    parameters += 1;
+                    Some(parameters)
+                } else {
+                    None
+                };
+                found.push(Variable {
+                    name,
+                    frame_offset: offset,
+                    type_name,
+                    parameter,
+                    low_pc,
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(found)
+}
+
+/// The offset in a `DW_OP_fbreg` location, or `None` for any other kind.
+fn frame_offset(
+    location: Option<gimli::AttributeValue<gimli::EndianSlice<gimli::RunTimeEndian>>>,
+) -> Option<i64> {
+    let gimli::AttributeValue::Exprloc(expression) = location? else {
+        return None;
+    };
+    let mut operations = expression.operations(gimli::Encoding {
+        address_size: 8,
+        format: gimli::Format::Dwarf32,
+        version: 5,
+    });
+    match operations.next().ok()?? {
+        gimli::Operation::FrameOffset { offset } => Some(offset),
+        _ => None,
+    }
+}
+
+/// The name of a variable's type, following one level of pointer so that a
+/// heap record is named for the record rather than for the pointer to it.
+fn type_name_of(
+    dwarf: &gimli::Dwarf<gimli::EndianSlice<gimli::RunTimeEndian>>,
+    unit: &gimli::Unit<gimli::EndianSlice<gimli::RunTimeEndian>>,
+    entry: &gimli::DebuggingInformationEntry<gimli::EndianSlice<gimli::RunTimeEndian>>,
+) -> Result<String, Error> {
+    let Some(gimli::AttributeValue::UnitRef(offset)) = entry.attr_value(gimli::DW_AT_type)? else {
+        return Ok(String::new());
+    };
+    let described = unit.entry(offset)?;
+    if let Some(name) = described.attr(gimli::DW_AT_name)? {
+        if let Ok(name) = dwarf.attr_string(unit, name.value()) {
+            return Ok(String::from_utf8_lossy(name.slice()).into_owned());
+        }
+    }
+    // An unnamed type is a pointer to a named one — a `text`, or a record on
+    // the heap. The name that matters is the thing pointed at.
+    if let Some(gimli::AttributeValue::UnitRef(inner)) = described.attr_value(gimli::DW_AT_type)? {
+        let inner = unit.entry(inner)?;
+        if let Some(name) = inner.attr(gimli::DW_AT_name)? {
+            if let Ok(name) = dwarf.attr_string(unit, name.value()) {
+                return Ok(String::from_utf8_lossy(name.slice()).into_owned());
+            }
+        }
+    }
+    Ok(String::new())
 }
 
 #[cfg(test)]
@@ -281,6 +429,13 @@ mod tests {
                 symbol: "oe_user_main".into(),
                 low_pc: 0x1000,
                 size: 0x30,
+            }],
+            variables: vec![Variable {
+                name: "total".into(),
+                frame_offset: -8,
+                type_name: "int".into(),
+                parameter: None,
+                low_pc: 0x1000,
             }],
         }
     }
@@ -335,6 +490,16 @@ mod tests {
 
     /// A function's extent is half-open: the byte one past its last is the
     /// next function's first, and claiming both would put an address in two.
+    /// A local belongs to the whole subroutine, because OpenEPL's locals are
+    /// function-scoped — and to no other.
+    #[test]
+    fn the_locals_of_an_address_are_the_ones_its_function_declared() {
+        let p = program();
+        let names: Vec<&str> = p.variables_at(0x1010).iter().map(|v| v.name.as_str()).collect();
+        assert_eq!(names, vec!["total"]);
+        assert!(p.variables_at(0x9999).is_empty());
+    }
+
     #[test]
     fn a_subprogram_owns_its_addresses_and_not_the_one_past_its_end() {
         let p = program();

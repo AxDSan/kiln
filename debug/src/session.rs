@@ -20,6 +20,15 @@ use crate::value::{self, Value};
 use crate::Error;
 use std::path::Path;
 
+/// Whether a frame is the one the program is actually stopped in.
+///
+/// Compared by identity rather than by index because the caller has already
+/// resolved the frame, and passing both a frame and its position invites the
+/// two to disagree.
+fn frame_index_is_innermost(frame: Frame, stack: &[Frame]) -> bool {
+    stack.first().is_some_and(|first| *first == frame)
+}
+
 /// A breakpoint the user asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Breakpoint {
@@ -291,14 +300,34 @@ impl Session {
             return Ok(Vec::new());
         }
         let stack = self.stack()?;
-        let Some(frame) = stack.get(frame) else {
+        let Some(frame) = stack.get(frame).copied() else {
             return Ok(Vec::new());
         };
-        // The compiler does not yet describe local variables, so there is
-        // nothing to read. Everything below this point is ready for when it
-        // does; returning nothing is honest, and inventing a row is not.
-        let described: Vec<value::Local> = Vec::new();
-        Ok(value::locals(&described, frame.cfa, &self.target))
+        // Every frame but the innermost holds a return address, and the code
+        // it belongs to is the byte before it.
+        let pc = if frame_index_is_innermost(frame, &stack) {
+            frame.registers.pc
+        } else {
+            frame.registers.pc.wrapping_sub(1)
+        };
+        let Some(static_pc) = pc.checked_sub(self.bias) else {
+            return Ok(Vec::new());
+        };
+        let described: Vec<value::Local> = self
+            .program
+            .variables_at(static_pc)
+            .into_iter()
+            .map(|v| value::Local {
+                name: v.name.clone(),
+                frame_offset: v.frame_offset,
+                type_name: v.type_name.clone(),
+            })
+            .collect();
+        // The frame base is the frame pointer, which the compiler pins for
+        // exactly this reason: it is a register the unwinder recovers for
+        // every frame, where the stack pointer in an outer frame would have to
+        // be inferred from the call that left it.
+        Ok(value::locals(&described, frame.registers.bp, &self.target))
     }
 
     /// End the session and the program with it.

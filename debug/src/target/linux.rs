@@ -1235,20 +1235,32 @@ mod tests {
         let Some((mut target, _)) = traced() else {
             return;
         };
-        // The first two rows of the line table are seven bytes apart, so both
-        // addresses fall inside the same eight-byte word `POKEDATA` writes.
-        // This is the case a word-keyed cache gets wrong.
+        // Two addresses inside one eight-byte word — the case a cache keyed by
+        // word rather than by address gets wrong, because the second trap
+        // saves the first one's `0xCC` as if it were the program's own byte.
+        //
+        // The pair is searched for rather than assumed: which line-table rows
+        // happen to share a word is a fact about code layout, and a change to
+        // the compiler's own output would otherwise break this test without
+        // anything being wrong with what it tests.
         let built = fixture().expect("a fixture, since we have a target");
         let program = crate::load(&built).expect("debug information");
-        let rows: Vec<u64> = program
+        let addresses: Vec<u64> = program
             .rows()
             .iter()
             .filter(|r| !r.end_sequence)
             .map(|r| r.address)
-            .take(2)
             .collect();
-        let (first, second) = (rows[0], rows[1]);
-        assert_eq!(first & !7, second & !7, "the two must share one word");
+        let Some((first, second)) = addresses
+            .iter()
+            .zip(addresses.iter().skip(1))
+            .find(|(a, b)| a != b && (*a & !7) == (*b & !7))
+            .map(|(a, b)| (*a, *b))
+        else {
+            // Nothing to test rather than a failure: a build whose statements
+            // all begin in different words is a legitimate build.
+            return;
+        };
 
         let before = target.peek(first & !7).expect("the word before arming");
         target.arm(first).expect("the first trap");

@@ -262,7 +262,14 @@ impl DebugInfo {
         line: usize,
         arg: Option<usize>,
     ) -> Option<usize> {
-        if name.contains('$') {
+        // Names the compiler invented are not the user's and are not shown.
+        // The one exception is an optional's companion: an optional has no
+        // runtime representation beyond a value and a separate truth beside
+        // it, so nothing in memory distinguishes an absent `int` from zero.
+        // Describing the companion is the only way a debugger can print
+        // `nothing` rather than a plausible wrong answer, and the reader
+        // filters it back out of what it shows.
+        if name.contains('$') && !name.ends_with("$has") {
             return None;
         }
         let line = line.max(1);
@@ -772,8 +779,24 @@ mod tests {
         let sp = d.subprogram("main", "oe_user_main", 2);
         let int = d.value_type(Ty::Int, &reg);
         assert!(d.local(sp, "$each$i$0", int, 3, None).is_none());
-        assert!(d.local(sp, "v$has", int, 3, None).is_none());
+        assert!(d.local(sp, "$t7", int, 3, None).is_none());
         assert!(!d.render().contains("DILocalVariable"));
+    }
+
+    /// An optional's companion is the one invented name that is described.
+    ///
+    /// An optional has no runtime representation beyond a value and a truth
+    /// beside it, so nothing in memory tells an absent `int` from a zero. The
+    /// companion is what lets a debugger print `nothing`, and the reader
+    /// filters it back out of what it shows.
+    #[test]
+    fn an_optionals_companion_is_described_so_it_can_be_read() {
+        let reg = Registry::core();
+        let mut d = info();
+        let sp = d.subprogram("main", "oe_user_main", 2);
+        let truth = d.value_type(Ty::Bool, &reg);
+        assert!(d.local(sp, "v$has", truth, 3, None).is_some());
+        assert!(d.render().contains(r#"name: "v$has""#), "{}", d.render());
     }
 
     /// The record is a standalone line: a `, !dbg` on the end of it, which is

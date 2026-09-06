@@ -301,3 +301,94 @@ fn a_debug_session_stops_steps_and_comes_back_round() {
         "the session did not step through the loop and back round: {joined}"
     );
 }
+
+/// A stopped program's variables read as the program's own values.
+///
+/// This is the other half of what a debugger is for, and it goes through the
+/// whole chain: the compiler describing the local, the engine finding it in
+/// the debug information, and the reader taking it out of the stopped
+/// program's memory. A break anywhere along that shows up here.
+#[test]
+fn a_stopped_program_shows_the_values_of_its_variables() {
+    use std::io::{BufReader, Read, Write};
+    use std::process::Stdio;
+
+    let dir = std::env::temp_dir().join("openepl_dap_locals_test");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("v.oir"),
+        "module locals\n\
+         \n\
+         sub main\n\
+         \u{20}\u{20}var total: int = 0\n\
+         \u{20}\u{20}for i in 1..3\n\
+         \u{20}\u{20}\u{20}\u{20}total = total + i\n\
+         \u{20}\u{20}\u{20}\u{20}call print_int(total)\n\
+         \u{20}\u{20}end\n\
+         end\n",
+    )
+    .unwrap();
+
+    let mut adapter = Command::new(env!("CARGO_BIN_EXE_openepl"))
+        .arg("dap")
+        .current_dir(&dir)
+        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start the adapter");
+
+    let mut input = adapter.stdin.take().unwrap();
+    let mut seq = 0;
+    let mut send = |command: &str, arguments: &str| {
+        seq += 1;
+        let body = if arguments.is_empty() {
+            format!(r#"{{"seq":{seq},"type":"request","command":"{command}"}}"#)
+        } else {
+            format!(
+                r#"{{"seq":{seq},"type":"request","command":"{command}","arguments":{arguments}}}"#
+            )
+        };
+        input
+            .write_all(format!("Content-Length: {}\r\n\r\n{body}", body.len()).as_bytes())
+            .unwrap();
+        input.flush().unwrap();
+    };
+
+    send("initialize", r#"{"adapterID":"openepl"}"#);
+    send("launch", r#"{"program":"v.oir"}"#);
+    send(
+        "setBreakpoints",
+        r#"{"source":{"path":"v.oir"},"breakpoints":[{"line":7}]}"#,
+    );
+    send("configurationDone", "");
+    send("scopes", r#"{"frameId":0}"#);
+    send("variables", r#"{"variablesReference":1}"#);
+    send("disconnect", "");
+    drop(input);
+
+    let mut transcript = String::new();
+    BufReader::new(adapter.stdout.take().unwrap())
+        .read_to_string(&mut transcript)
+        .unwrap();
+    let _ = adapter.wait();
+    let dense: String = transcript.chars().filter(|c| !c.is_whitespace()).collect();
+
+    // The first turn of the loop: `i` is 1, and `total` is 0 + 1.
+    assert!(
+        dense.contains(r#""name":"total","value":"1""#),
+        "total did not read as 1: {transcript}"
+    );
+    assert!(
+        dense.contains(r#""name":"i","value":"1""#),
+        "the loop counter did not read as 1: {transcript}"
+    );
+    // The companion the compiler invents beside an optional is described, so
+    // that an absent value can be told from a zero — and filtered back out of
+    // what is shown.
+    assert!(
+        !dense.contains("$has"),
+        "a compiler-invented name was shown: {transcript}"
+    );
+}

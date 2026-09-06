@@ -239,6 +239,7 @@ pub fn lower_module_from(
         body: Body::default(),
         debug: source.map(|p| debug::DebugInfo::new(p, concat!("OpenEPL ", env!("CARGO_PKG_VERSION")))),
         scope: None,
+        stmt_line: 0,
         vars: HashMap::new(),
         used: BTreeSet::new(),
         ui_used: BTreeSet::new(),
@@ -302,6 +303,7 @@ pub fn lower_module_from(
         for (i, (name, ty)) in sub.params.iter().enumerate() {
             let slot = lo.alloca(*ty);
             writeln!(lo.body, "  store {} %p{i}, ptr {slot}", llvm_ty(*ty)).unwrap();
+            lo.describe_local(name, &slot, *ty, false, Some(i + 1));
             lo.vars.insert(name.clone(), (slot, *ty));
         }
         // `defer` is copied to the block exits here, where the sub's return
@@ -332,8 +334,15 @@ pub fn lower_module_from(
         // Everything after this point is the compiler's own code.
         lo.scope = None;
         lo.body.loc = None;
+        // `#0` pins the frame pointer, and it is what makes a local readable
+        // in any frame but the innermost. Without it clang omits the frame
+        // pointer for these functions and describes every local relative to
+        // the stack pointer, whose value in an outer frame has to be inferred
+        // from the call that left it; with it the frame base is `rbp`, which
+        // the unwinder recovers for every frame it walks. It costs one
+        // register in a language whose functions are not register-starved.
         let dbg = match scope {
-            Some(n) => format!(" !dbg !{n}"),
+            Some(n) => format!(" #0 !dbg !{n}"),
             None => String::new(),
         };
         functions.push_str(&format!(
@@ -472,6 +481,9 @@ struct Lowerer<'a> {
     /// name its own source position without the position being threaded
     /// through every call that lowers one.
     scope: Option<usize>,
+    /// The line of the statement being lowered, so a local can be described as
+    /// declared where the user declared it.
+    stmt_line: usize,
     /// Local variables: name -> (alloca pointer, type). Every local is
     /// alloca-backed, `let` and `var` alike — one lowering path, and `opt`'s
     /// mem2reg reconstructs SSA for free when optimisation is enabled.
@@ -919,6 +931,41 @@ impl Lowerer<'_> {
 
     /// Point the instruction stream at a source position. Every instruction
     /// written after this carries it, until it is changed or cleared.
+    /// Describe a named local in the debug information, and bind it to the
+    /// stack slot holding it.
+    ///
+    /// Does nothing when the build carries no debug information, which is what
+    /// makes this safe to call from every place a local is bound. A name the
+    /// compiler invented is refused by `local` rather than filtered here, so
+    /// there is one rule about which names are the user's.
+    ///
+    /// `flat` is a c-record, whose slot holds the object itself; everything
+    /// else holds a value or a pointer to one. Getting that wrong renders a
+    /// record's fields out of the eight bytes of a pointer.
+    fn describe_local(&mut self, name: &str, slot: &str, ty: Ty, flat: bool, arg: Option<usize>) {
+        let (Some(scope), Some(loc)) = (self.scope, self.body.loc) else {
+            return;
+        };
+        // The line the statement is on, which is where the user declared it.
+        let line = self.stmt_line;
+        let reg = self.reg;
+        let Some(debug) = self.debug.as_mut() else {
+            return;
+        };
+        let ty = match (flat, ty) {
+            (true, Ty::Record(record)) => debug.c_storage_type(record, reg),
+            (_, ty) => debug.value_type(ty, reg),
+        };
+        let Some(var) = debug.local(scope, name, ty, line, arg) else {
+            return;
+        };
+        let record = debug::DebugInfo::declare(slot, var, loc);
+        // Written through the instruction stream like everything else. It is a
+        // record rather than an instruction, and the stream knows not to give
+        // one a trailing location.
+        write!(self.body, "{record}").unwrap();
+    }
+
     fn set_loc(&mut self, scope: Option<usize>, line: usize, column: usize) {
         self.body.loc = match (scope, self.debug.as_mut()) {
             (Some(sp), Some(d)) => Some(d.location(sp, line, column)),
@@ -1031,12 +1078,17 @@ impl Lowerer<'_> {
     /// statement of its body.
     fn stmt(&mut self, s: &openepl_ir::Stmt) -> Result<(), LowerError> {
         let enclosing = self.body.loc;
+        let enclosing_line = self.stmt_line;
+        if s.line > 0 {
+            self.stmt_line = s.line;
+        }
         if self.scope.is_some() && s.line > 0 {
             let scope = self.scope;
             self.set_loc(scope, s.line, s.span.col.max(1));
         }
         let result = self.stmt_at(s);
         self.body.loc = enclosing;
+        self.stmt_line = enclosing_line;
         result
     }
 
@@ -1072,6 +1124,7 @@ impl Lowerer<'_> {
                             "  store [{size} x i8] zeroinitializer, ptr {slot}"
                         )
                         .unwrap();
+                        self.describe_local(name, &slot, *ty, true, None);
                         self.vars.insert(name.clone(), (slot, *ty));
                         return Ok(());
                     }
@@ -1084,6 +1137,8 @@ impl Lowerer<'_> {
                 if let Ty::Optional(elem) = ty {
                     let slot = self.alloca(elem.ty());
                     let has = self.alloca(Ty::Bool);
+                    self.describe_local(name, &slot, elem.ty(), false, None);
+                    self.describe_local(&has_name(name), &has, Ty::Bool, false, None);
                     self.vars.insert(name.clone(), (slot, *ty));
                     self.vars.insert(has_name(name), (has, Ty::Bool));
                     return self.store_optional(name, *elem, value);
@@ -1104,6 +1159,7 @@ impl Lowerer<'_> {
                     v.operand
                 )
                 .unwrap();
+                self.describe_local(name, &slot, *ty, false, None);
                 self.vars.insert(name.clone(), (slot, *ty));
                 Ok(())
             }
@@ -1335,6 +1391,7 @@ impl Lowerer<'_> {
                 let lv = self.alloca(Ty::Int);
                 let lval = self.eval(limit)?;
                 writeln!(self.body, "  store i32 {}, ptr {lv}", lval.operand).unwrap();
+                self.describe_local(var, &iv, Ty::Int, false, None);
                 self.vars.insert(var.clone(), (iv.clone(), Ty::Int));
 
                 let head = self.fresh_label("for");
@@ -4174,6 +4231,7 @@ impl Lowerer<'_> {
         }
         if let Some(d) = &self.debug {
             if !d.is_empty() {
+                out.push_str("\nattributes #0 = { \"frame-pointer\"=\"all\" }\n");
                 out.push_str(&d.render());
             }
         }
@@ -4604,7 +4662,7 @@ mod tests {
             "{ll}"
         );
         assert!(ll.contains("scopeLine: 3,"), "{ll}");
-        assert!(ll.contains("define void @oe_user_greet() !dbg !6 {"), "{ll}");
+        assert!(ll.contains("define void @oe_user_greet() #0 !dbg !6 {"), "{ll}");
         // and `main`, three lines lower, gets its own subprogram
         assert!(
             ll.contains(r#"!DISubprogram(name: "main", linkageName: "oe_user_main""#),
