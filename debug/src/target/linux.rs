@@ -250,14 +250,24 @@ impl LinuxTarget {
         &self.program
     }
 
-    /// Everything the program has written to its stdout and stderr so far.
+    /// Whatever the program has written to its stdout and stderr since this
+    /// was last called.
+    ///
+    /// Taken rather than copied. The caller forwards these bytes to whoever is
+    /// watching, and handing back everything written so far on every call
+    /// would print the program's output again at every stop, growing by the
+    /// whole history each time.
     ///
     /// The debuggee's output never touches ours. A byte of it reaching the
     /// adapter's stdout corrupts the protocol stream permanently, and there is
     /// no recovering a `Content-Length` framing that has had "42\n" inserted
     /// into it.
-    pub fn output(&self) -> Vec<u8> {
-        self.output.lock().expect("output buffer").clone()
+    ///
+    /// Note that a program writing to a pipe has its own buffering, so its
+    /// output usually arrives in a rush when it flushes rather than line by
+    /// line as it runs. That is the program's libc, not this.
+    pub fn output(&mut self) -> Vec<u8> {
+        std::mem::take(&mut *self.output.lock().expect("output buffer"))
     }
 
     /// Whether the program is still there.
@@ -1203,7 +1213,7 @@ mod tests {
 
     #[test]
     fn a_launched_program_is_stopped_before_it_has_run() {
-        let Some((target, _)) = traced() else { return };
+        let Some((mut target, _)) = traced() else { return };
         let registers = target.registers().expect("registers of a stopped program");
         // The first instruction is the dynamic loader's, not the program's,
         // and either way the program counter is somewhere real.

@@ -312,6 +312,15 @@ trait Debuggee {
 
     fn locals(&mut self, frame: usize) -> Result<Vec<(String, Value)>, String>;
 
+    /// Whatever the program has written since this was last called.
+    ///
+    /// Drained rather than copied: it is forwarded to the client, and
+    /// forwarding the same bytes twice is worse than losing them. It never
+    /// reaches the adapter's own stdout — one stray byte there desynchronises
+    /// the protocol permanently — which is the whole reason the session holds
+    /// the pipe rather than letting the program inherit ours.
+    fn program_output(&mut self) -> Vec<u8>;
+
     fn stop(&mut self) -> Result<(), String>;
 
     /// Which line of which source an address belongs to.
@@ -470,6 +479,10 @@ impl Debuggee for Live {
 
     fn stop(&mut self) -> Result<(), String> {
         self.session.stop().map_err(|e| e.to_string())
+    }
+
+    fn program_output(&mut self) -> Vec<u8> {
+        self.session.output()
     }
 
     fn describe(&self, address: u64) -> Option<Location> {
@@ -1202,6 +1215,14 @@ impl Adapter {
         // References describe where the program was, so they stop meaning
         // anything the moment it moves.
         self.variables.clear();
+        // What the program printed while it ran, before the stop is announced:
+        // a client that draws its console on a stop should already have it.
+        if let Some(d) = self.debuggee.as_mut() {
+            let written = d.program_output();
+            if !written.is_empty() {
+                out.send(output("stdout", &String::from_utf8_lossy(&written)));
+            }
+        }
         match outcome {
             Ok(Stopped::Breakpoint(id)) => {
                 out.send(self.stopped_event("breakpoint", None, Some(id)))
@@ -1376,9 +1397,15 @@ mod tests {
         /// Every line the adapter asked for, for checking what was passed
         /// through the line-base conversion.
         asked: Vec<u32>,
+        /// What the program has written and the adapter has not yet forwarded.
+        printed: Vec<u8>,
     }
 
     impl Debuggee for FakeDebuggee {
+        fn program_output(&mut self) -> Vec<u8> {
+            std::mem::take(&mut self.printed)
+        }
+
         fn set_breakpoints(&mut self, lines: &[u32]) -> Result<Vec<Breakpoint>, String> {
             self.asked = lines.to_vec();
             let mut bound: Vec<Breakpoint> = lines

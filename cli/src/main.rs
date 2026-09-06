@@ -25,6 +25,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 
+mod dap;
 mod debug;
 mod header;
 mod kit;
@@ -77,6 +78,7 @@ fn run(args: &[String]) -> i32 {
         "run" => cmd_build(rest, true),
         "emit" => cmd_emit(rest),
         "inspect" => cmd_inspect(rest),
+        "dap" => dap::run(),
         "debug" => debug::run(rest),
         "lsp" => lsp::run(),
         "commands" => match find_repo_root() {
