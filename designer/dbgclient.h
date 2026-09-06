@@ -46,7 +46,7 @@ namespace openepl::dbg {
 /// It is spelled once, here, because the toolchain has not settled whether the
 /// Debug Adapter Protocol is served by `openepl debug` or by an `openepl dap`
 /// of its own. Changing this string is the whole of the change.
-inline constexpr const char* ADAPTER_SUBCOMMAND = "debug";
+inline constexpr const char* ADAPTER_SUBCOMMAND = "dap";
 
 /// The thread the adapter reports. It debugs one program with one thread of
 /// user code, and DAP still requires a thread id on every stop.

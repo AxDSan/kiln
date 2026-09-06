@@ -907,6 +907,55 @@ static void test_build_artifacts(const std::string& openepl, const std::string& 
     ::system(("rm -rf " + dir).c_str());
 }
 
+/// Debugging, from Studio.
+///
+/// The whole chain: a breakpoint set by clicking a gutter row, a program built
+/// and traced by `openepl dap`, a stop drawn on the line it stopped at, the
+/// variables it holds, and a step that moves both.
+static void test_debugging(const std::string& openepl, const std::string& designer) {
+    std::printf("debugging\n");
+
+    static int n = 0;
+    const std::string dir = "/tmp/openepl_debug_studio_" + std::to_string(++n);
+    ::system(("rm -rf " + dir).c_str());
+    ::mkdir(dir.c_str(), 0755);
+    const std::string src = dir + "/t.oir";
+    {
+        std::ofstream f(src, std::ios::trunc);
+        f << "module demo\n\n"
+             "sub main\n"
+             "  var total: int = 0\n"
+             "  for i in 1..3\n"
+             "    total = total + i\n"
+             "    call print_int(total)\n"
+             "  end\n"
+             "end\n";
+    }
+
+    const std::string cmd =
+        "XDG_DATA_HOME=" + dir + "/xdg OPENEPL_DESIGNER_SCRIPT='" +
+        "view:code;bp:6;gutter;dbgrun;waitstop;frames;locals;dbgnext;waitstop;locals;dbgstop' " +
+        designer + " " + src + " " + openepl + " 2>/dev/null";
+    std::string out;
+    if (FILE* p = popen(cmd.c_str(), "r")) {
+        char buf[4096];
+        while (fgets(buf, sizeof buf, p)) out += buf;
+        pclose(p);
+    }
+
+    check("debug: a gutter row carries its own line number", has(out, "oe-bp=\"6\""));
+    check("debug: the breakpoint is marked in the gutter", has(out, "class=\"row pending\""));
+    check("debug: the program stops on the line asked for", has(out, "waitstop: line 6"));
+    check("debug: the stack names the subroutine", has(out, "frame: main:6"));
+    check("debug: the variables read as the program's own values",
+          has(out, "local: total = 0") && has(out, "local: i = 1"));
+    check("debug: a step moves to the next statement", has(out, "dbgnext: line 7"));
+    check("debug: and the variables move with it", has(out, "local: total = 1"));
+    check("debug: the session can be ended", has(out, "dbgstop: done"));
+
+    ::system(("rm -rf " + dir).c_str());
+}
+
 int main(int argc, char** argv) {
     const std::string openepl = argc > 1 ? argv[1] : "./target/debug/openepl";
     const std::string designer = argc > 2 ? argv[2] : "designer/openepl-designer";
@@ -915,6 +964,7 @@ int main(int argc, char** argv) {
         test_sessions(openepl, designer);
         test_settings(openepl, designer);
         test_build_artifacts(openepl, designer);
+        test_debugging(openepl, designer);
     } else {
         std::printf("sessions: %s not built, skipped\n", designer.c_str());
     }

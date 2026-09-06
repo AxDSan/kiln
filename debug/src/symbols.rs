@@ -522,6 +522,7 @@ mod tests {
                 type_name: "int".into(),
                 parameter: None,
                 low_pc: 0x1000,
+                record: None,
             }],
         }
     }

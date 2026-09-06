@@ -30,6 +30,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include <signal.h>
+#include <set>
 #include <sstream>
 #ifndef _WIN32
 #include <sys/wait.h>
@@ -55,6 +56,7 @@
 #include "settings_page.h"
 #include "theme.h"
 #include "lspclient.h"
+#include "dbgclient.h"
 #include "welcome.h"
 #include "ui_mapping.h"
 
@@ -84,6 +86,15 @@ inline const std::vector<Menu>& menus() {
                   {"Delete", "delete", "Del"}}},
         {"View", {{"Designer", "view-designer", ""}, {"Code", "view-code", ""}}},
         {"Build", {{"Build Binary", "build", ""}, {"Run", "run", ""}, {"Stop", "stop", ""}}},
+        // A key nobody has been told about does not exist, which is what the
+        // menu is for as much as the clicking.
+        {"Debug", {{"Debug", "debug", "F5"},
+                   {"Toggle Breakpoint", "togglebp", "F9"},
+                   {"Step Over", "dbgstepover", "F10"},
+                   {"Step In", "dbgstepin", "F11"},
+                   {"Step Out", "dbgstepout", "Shift+F11"},
+                   {"Continue", "dbgcontinue", "F5"},
+                   {"Stop Debugging", "dbgstop", "Shift+F5"}}},
         {"Tools", {{"Settings…", "settings", "Ctrl+,"}}},
         {"Help", {{"About OpenEPL", "about", ""}}},
     };
@@ -164,6 +175,17 @@ struct Designer {
     /// The language server. Studio is a client of the same `openepl lsp` that
     /// other editors use, so it never grows a private second analysis path.
     openepl::lsp::Client lsp;
+    /// The debugger, spoken to exactly as the language server is: a subprocess
+    /// on a pipe. Studio never traces the program itself — `openepl dap` owns
+    /// it — because a blocking wait belongs anywhere but the frame loop.
+    openepl::dbg::Client dbg;
+    /// Lines the user has put a breakpoint on, in the open module. Kept here
+    /// rather than in the `.oir`: a breakpoint is a fact about debugging this
+    /// program now, not about the program, and writing them into the source
+    /// would put them in the user's next commit.
+    std::set<int> breakpoints;
+    /// The line the program is stopped on, or 0 when it is not stopped.
+    int stopped_line = 0;
     std::vector<openepl::lsp::Diagnostic> diagnostics;
 
     /// The build, when one is in flight. The build MUST be asynchronous: run
@@ -426,6 +448,15 @@ SDL_HitTestResult window_hit_test(SDL_Window* win, const SDL_Point* p, void*) {
 
 void size_output_pane();
 void refresh_highlight();
+bool bound_breakpoint(int line);
+void render_locals();
+void jump_to(int line, int col);
+void set_view(const std::string& view);
+bool caret_position(int& line, int& col);
+void toggle_breakpoint(int line);
+void start_debug();
+void stop_debug();
+void poll_debug();
 int code_char_width();
 size_t byte_offset(const std::string& text, int line, int character);
 
@@ -860,6 +891,9 @@ std::string build_styles(const std::string& family, const std::string& mono,
     // ---- action toolbar -------------------------------------------------
     s << "#toolbar{left:0;top:" << (TITLEBAR_H + MENUBAR_H) << "px;width:" << WIN_W << "px;height:"
       << TOOLBAR_H << "px;background-color:" << CHROME_ALT << ";border-bottom:1px " << BORDER << "}";
+    // An icon-only button is square: the label's padding would leave it
+    // looking like a button someone forgot to write the text on.
+    s << ".tb.ico{padding:5px 6px 0 6px}";
     s << ".tb{display:inline-block;height:26px;margin:7px 2px 0 2px;padding:5px 10px 0 10px;"
          "border-radius:5px;font-size:12px;color:" << TEXT << "}";
     s << ".tb:hover{background-color:" << HOVER_STRONG << "}";
@@ -951,7 +985,21 @@ std::string build_styles(const std::string& family, const std::string& mono,
     s << "sliderarrowdec,sliderarrowinc{width:0px;height:0px}";
     // Both layers share typography exactly. Any difference in family, size,
     // line-height or padding shows up as text drifting away from its colour.
-    s << "#codehl{position:absolute;left:0;top:0;font-family:'" << mono
+    // The breakpoint gutter, left of both layers. `overflow:hidden` and never
+    // an RmlUi scrollbar: an unstyled one covers its owner and eats every
+    // click, which has broken Studio twice. It is scrolled by rendering the
+    // rows the code view is showing, not by scrolling the element.
+    s << "#dbggutter{position:absolute;left:0;top:0;width:" << CODE_GUTTER_W
+      << "px;bottom:0;overflow:hidden;background-color:" << PANEL << "}";
+    s << "#dbggutter div{height:" << CODE_LINE_H << "px;line-height:" << CODE_LINE_H
+      << "px;text-align:center;font-size:" << (CODE_FONT_PX - 2) << "px;color:" << GUTTER << "}";
+    // Solid for a breakpoint the engine bound, hollow for one it could not.
+    // The distinction earns its pixels: a breakpoint that silently never fires
+    // is the worst thing a debugger can do to someone.
+    s << "#dbggutter div.bp{color:" << BREAKPOINT << "}";
+    s << "#dbggutter div.pending{color:" << GUTTER << "}";
+    s << "#dbggutter div.cur{color:" << ACCENT << "}";
+    s << "#codehl{position:absolute;left:" << CODE_GUTTER_W << "px;top:0;font-family:'" << mono
       << "';font-size:" << CODE_FONT_PX << "px;line-height:" << CODE_LINE_H << "px;padding:" << CODE_PAD_Y << "px "
       << CODE_PAD_X << "px;padding-top:0px;white-space:pre;color:" << TEXT << "}";
     // Relative, so a diagnostic's underline can be placed within its row.
@@ -975,6 +1023,17 @@ std::string build_styles(const std::string& family, const std::string& mono,
     // column is a multiple of one glyph's width and the bar lands under
     // exactly the name the server meant.
     s << "#codehl div.badline{background-color:" << BADLINE << "}";
+    // The line the program is stopped on. Brighter than a diagnostic's tint,
+    // because it is where the user is looking rather than something to notice.
+    s << "#codehl div.stopline{background-color:" << STOPLINE << "}";
+    // The Variables pane. Rows are plain text at the code's own size, because
+    // a value is read rather than skimmed.
+    s << "#vars{position:absolute;left:0;right:0;top:26px;bottom:0;overflow:auto;padding:4px 10px;"
+         "font-family:'" << mono << "';font-size:" << (CODE_FONT_PX - 1) << "px}";
+    s << "#vars .varrow{padding:1px 0;color:" << TEXT << "}";
+    s << "#vars .varname{color:" << ACCENT << "}";
+    s << "#vars .frame{color:" << TEXT << "}";
+    s << "#vars .dim{color:" << TEXT_MUTED << "}";
     // The row's content, shifted left when the line is scrolled sideways. The
     // row clips it, so the layer stays inside the view whatever the offset.
     // Positioned, so a diagnostic's bar measures its column from the same
@@ -1035,7 +1094,7 @@ std::string build_styles(const std::string& family, const std::string& mono,
     // Positioned, so it paints ABOVE the highlight layer. Left unpositioned it
     // sits below an absolutely-positioned sibling — taking the caret and the
     // selection with it, which is an editor you cannot see yourself typing in.
-    s << "#fullcode{position:absolute;left:0;top:0;font-family:'" << mono << "';line-height:" << CODE_LINE_H << "px;font-size:" << CODE_FONT_PX << "px;padding:"
+    s << "#fullcode{position:absolute;left:" << CODE_GUTTER_W << "px;top:0;font-family:'" << mono << "';line-height:" << CODE_LINE_H << "px;font-size:" << CODE_FONT_PX << "px;padding:"
       // Top padding is zero on BOTH layers: the vertical offset is applied to
       // each layer's `top` instead. Leaving it on one and not the other put the
       // two half a line apart — every glyph doubled.
@@ -1329,6 +1388,28 @@ std::string build_chrome(const std::string& family, const std::string& mono,
          "<div class='tb run' oe-action='run'>" + icon_img("run", 16, "tbi") + "Run</div>"
          "<div class='tb' oe-action='build'>" + icon_img("build", 16, "tbi") + "Build Binary</div>"
          "<div class='tb stop' oe-action='stop'>" + icon_img("stop", 16, "tbi") + "Stop</div>"
+         // The debugging controls. Hidden until a session starts, so the
+         // toolbar of someone who never debugs is the toolbar they had —
+         // and they replace nothing, because Run and Debug are different
+         // things and a user who wants one does not want the other.
+         "<div class='sep'/>"
+         "<div class='tb' oe-action='debug'>" + icon_img("debug", 16, "tbi") + "Debug</div>"
+         // The transport is icons alone. Seven labelled buttons is more
+         // toolbar than the window has, and these are the glyphs every
+         // debugger uses — the Debug menu beside them carries the words and
+         // the keys for anyone who wants them spelled out.
+         "<div class='tb ico dbgctl' id='btn_dbgcontinue' oe-action='dbgcontinue' style='display:none'>" +
+             icon_img("continue", 16, "tbi") + "</div>"
+         "<div class='tb ico dbgctl' id='btn_dbgpause' oe-action='dbgpause' style='display:none'>" +
+             icon_img("pause", 16, "tbi") + "</div>"
+         "<div class='tb ico dbgctl' id='btn_dbgstepover' oe-action='dbgstepover' style='display:none'>" +
+             icon_img("stepover", 16, "tbi") + "</div>"
+         "<div class='tb ico dbgctl' id='btn_dbgstepin' oe-action='dbgstepin' style='display:none'>" +
+             icon_img("stepin", 16, "tbi") + "</div>"
+         "<div class='tb ico dbgctl' id='btn_dbgstepout' oe-action='dbgstepout' style='display:none'>" +
+             icon_img("stepout", 16, "tbi") + "</div>"
+         "<div class='tb ico dbgctl stop' id='btn_dbgstop' oe-action='dbgstop' style='display:none'>" +
+             icon_img("stop", 16, "tbi") + "</div>"
          "</div>";
 
     s << "<div id='toolbox'><div class='panelhead'>TOOLBOX</div>"
@@ -1353,6 +1434,11 @@ std::string build_chrome(const std::string& family, const std::string& mono,
          // `wrap='nowrap'` is structural, not cosmetic: a wrapped line in one
          // layer and not the other would desynchronise every line below it.
          "<div id='codeview' style='display:none'>"
+         // Three siblings, not two layers plus a decoration. A dot drawn
+         // inside `#codehl` would receive no clicks: the textarea is stacked
+         // over it and the press lands there. The gutter sits beside both, and
+         // both are shifted right by its width.
+         "<div id='dbggutter'/>"
          "<div id='codehl'/><textarea id='fullcode' wrap='nowrap'/></div>"
          "<div id='canvasarea'>"
          << (asset_path("openepl-wordmark.png").empty() ? std::string() :
@@ -1384,7 +1470,14 @@ std::string build_chrome(const std::string& family, const std::string& mono,
          "<div class='pane' id='codepane' style='left:0;width:" << half
       << "px;border-right:1px " << BORDER << "'>"
          "<div class='panehead' id='codehead'>CODE PREVIEW</div>"
-         "<div id='code' oe-view='code'/></div>"
+         "<div id='code' oe-view='code'/>"
+         // The stopped program's stack and its variables, in the pane the
+         // code preview otherwise has. They take it over rather than being
+         // squeezed in beside it: while the program is stopped, what it holds
+         // is what the user is reading, and a preview of source they are
+         // already looking at is not.
+         "<div class='panehead' id='varhead' style='display:none'>VARIABLES</div>"
+         "<div id='vars' style='display:none'/></div>"
          "<div class='pane' id='logpane' style='left:" << half << "px;width:"
       << (centre_w - half) << "px'>"
          "<div class='panehead' id='problemcount'>PROBLEMS</div>"
@@ -2284,6 +2377,13 @@ void refresh_highlight() {
                  std::to_string(d.range.end_line) + ":" + std::to_string(d.range.end_character) +
                  (d.severity == 1 ? "e;" : "w;");
     }
+    // And the debugger's marks. Both change with the text untouched — a
+    // breakpoint is set by clicking, and the stopped line moves on every step
+    // — and the early return below is keyed on this string. Left out, clicking
+    // the gutter would do nothing visible.
+    marks += "|bp";
+    for (int line : g.breakpoints) marks += std::to_string(line) + ",";
+    marks += "|st" + std::to_string(g.stopped_line);
     // Sideways offset, read from the control every time. The control scrolls
     // itself when the caret walks past the right edge and tells nobody, so this
     // is the only moment it can be noticed — and it belongs in the cache key
@@ -2340,11 +2440,85 @@ void refresh_highlight() {
             g.code_scroll_x > 0
                 ? "<span class='sh' style='left:" + std::to_string(-g.code_scroll_x) + "px'>"
                 : "<span class='sh'>";
-        html += std::string(bad ? "<div class='badline'>" : "<div>") + shift +
+        // Three states, in the order that matters: the line the program is
+        // stopped on wins over an error on the same line, because the user is
+        // looking at where it stopped.
+        const char* row_class = (int)i + 1 == g.stopped_line ? "<div class='stopline'>"
+                                : bad                        ? "<div class='badline'>"
+                                                             : "<div>";
+        html += std::string(row_class) + shift +
                 (lines[i].empty() ? std::string("&nbsp;") : highlight_line(lines[i])) + bars +
                 "</span></div>";
     }
     layer->SetInnerRML(html);
+
+    // The gutter renders the same rows, so the two cannot drift apart: they
+    // are built from one loop bound and share `CODE_LINE_H`. It is scrolled by
+    // rendering what is on screen rather than by scrolling the element, which
+    // is what keeps an RmlUi scrollbar out of it.
+    if (Rml::Element* gutter = by_id("dbggutter")) {
+        std::string marks_html;
+        for (size_t i = first_line; i < lines.size() && i < first_line + rows; i++) {
+            const int line = (int)i + 1;
+            const bool has = g.breakpoints.count(line) > 0;
+            const bool here = line == g.stopped_line;
+            std::string cls = "row";
+            std::string glyph;
+            if (has) {
+                // Hollow until the engine says where it went. A breakpoint the
+                // engine could not place must not look like one that fired.
+                cls += bound_breakpoint(line) ? " bp" : " pending";
+                glyph = bound_breakpoint(line) ? "\xe2\x97\x8f" : "\xe2\x97\x8b";
+            }
+            if (here) {
+                cls += " cur";
+                glyph = "\xe2\x96\xb6";
+            }
+            marks_html += "<div class='" + cls + "' oe-bp='" + std::to_string(line) + "'>" +
+                          glyph + "</div>";
+        }
+        gutter->SetInnerRML(marks_html);
+    }
+}
+
+/// Draw what the stopped program holds, and where it stopped.
+///
+/// Both panes come and go with the session rather than sitting empty: a
+/// Variables pane showing nothing is indistinguishable from one that is broken.
+void render_locals() {
+    Rml::Element* head = by_id("varhead");
+    Rml::Element* body = by_id("vars");
+    if (!head || !body) return;
+    const bool stopped = g.stopped_line > 0 && g.dbg.running();
+    head->SetProperty("display", stopped ? "block" : "none");
+    body->SetProperty("display", stopped ? "block" : "none");
+    // The preview steps aside rather than sharing the pane: two scrolling
+    // lists in one half-height box gives each too little to be read.
+    if (Rml::Element* e = by_id("codehead")) {
+        e->SetProperty("display", stopped ? "none" : "block");
+    }
+    if (Rml::Element* e = by_id("code")) {
+        e->SetProperty("display", stopped ? "none" : "block");
+    }
+    if (!stopped) {
+        body->SetInnerRML("");
+        return;
+    }
+    std::string html;
+    // Where it stopped, first: the call stack answers "how did I get here",
+    // and it is the question a breakpoint in an event handler raises.
+    for (const auto& f : g.dbg.frames()) {
+        html += "<div class='varrow frame'>" + esc(f.name) + "  <span class='dim'>" +
+                esc(g.model.path) + ":" + std::to_string(f.line) + "</span></div>";
+    }
+    for (const auto& v : g.dbg.locals()) {
+        html += "<div class='varrow'><span class='varname'>" + esc(v.name) +
+                "</span> = " + esc(v.value) + "</div>";
+    }
+    if (g.dbg.locals().empty()) {
+        html += "<div class='varrow dim'>no variables here</div>";
+    }
+    body->SetInnerRML(html);
 }
 
 /// Split the output pane between PROBLEMS and the build log.
@@ -2914,6 +3088,118 @@ void clear_run_artifacts() {
     // put something of their own in there keeps it.
     openepl::sys::remove_dir(run_dir());
     openepl::sys::remove_dir(project_dir() + "/.openepl");
+}
+
+/// Whether the engine placed a breakpoint on a line, so the gutter can draw
+/// one it could not differently from one that will fire.
+///
+/// Unknown until the engine answers, and unknown draws as not-yet-bound: a
+/// mark that promises to stop and does not is worse than one that looks
+/// tentative for a moment.
+bool bound_breakpoint(int line) {
+    for (const auto& b : g.dbg.breakpoints()) {
+        if (b.line == line) return b.verified;
+    }
+    return false;
+}
+
+/// Show or hide the debugging controls, and say what the session is doing.
+void update_debug_controls() {
+    const bool live = g.dbg.running();
+    // By id rather than by class: these carry three classes each, and a
+    // lookup that has to match one of several is a lookup that can quietly
+    // match none.
+    for (const char* id : {"btn_dbgcontinue", "btn_dbgpause", "btn_dbgstepover",
+                           "btn_dbgstepin", "btn_dbgstepout", "btn_dbgstop"}) {
+        if (Rml::Element* e = by_id(id)) {
+            e->SetProperty("display", live ? "inline-block" : "none");
+        }
+    }
+}
+
+/// Start a debugging session on the open module.
+void start_debug() {
+    if (g.dbg.running()) { set_status("already debugging"); return; }
+    // Saved first: a breakpoint on line 12 of text that has been edited and
+    // not written is a breakpoint on a line the built program does not have.
+    save();
+    g.log_lines.clear();
+    log("> debugging " + g.model.path, "muted");
+    std::vector<int> lines(g.breakpoints.begin(), g.breakpoints.end());
+    if (!g.dbg.start(g.openepl_bin, g.model.path)) {
+        log("could not start the debugger", "err");
+        return;
+    }
+    g.dbg.set_breakpoints(lines);
+    update_debug_controls();
+    set_status("debugging");
+    set_activity("Debugging");
+}
+
+/// End the session, and put the editor back the way it was.
+void stop_debug() {
+    if (!g.dbg.running()) { set_status("not debugging"); return; }
+    g.dbg.stop();
+    g.stopped_line = 0;
+    update_debug_controls();
+    refresh_highlight();
+    render_locals();
+    set_activity(nullptr);
+    set_status("debugging ended");
+}
+
+/// Take whatever the debugger has said since the last frame.
+void poll_debug() {
+    if (!g.dbg.running() && g.stopped_line == 0) return;
+    g.dbg.poll();
+    if (!g.dbg.has_update()) return;
+    g.dbg.clear_update();
+
+    for (const auto& line : g.dbg.output()) {
+        log(line.text, line.category == "stderr" ? "err" : nullptr);
+    }
+    g.dbg.clear_output();
+
+    // A breakpoint on a blank line or a comment runs nothing, and the engine
+    // moves it to the next line that does. The mark moves with it: a dot on a
+    // line that will never be reached lies about where the program will stop.
+    for (const auto& b : g.dbg.breakpoints()) {
+        if (b.verified && !g.breakpoints.count(b.line)) {
+            g.breakpoints.insert(b.line);
+        }
+    }
+
+    const int was = g.stopped_line;
+    g.stopped_line = g.dbg.stopped_line();
+    if (g.stopped_line != was) {
+        // Follow the program: a stop on a line that is scrolled away is a stop
+        // the user cannot see.
+        if (g.stopped_line > 0) {
+            if (g.view != "code") set_view("code");
+            jump_to(g.stopped_line - 1, 0);
+        }
+        refresh_highlight();
+    }
+    render_locals();
+    if (!g.dbg.running()) {
+        update_debug_controls();
+        set_activity(nullptr);
+    }
+}
+
+/// Toggle a breakpoint on a line, and tell the engine if one is running.
+void toggle_breakpoint(int line) {
+    if (line <= 0) return;
+    if (g.breakpoints.count(line)) {
+        g.breakpoints.erase(line);
+    } else {
+        g.breakpoints.insert(line);
+    }
+    if (g.dbg.running()) {
+        std::vector<int> lines(g.breakpoints.begin(), g.breakpoints.end());
+        g.dbg.set_breakpoints(lines);
+    }
+    refresh_highlight();
 }
 
 /// Start a build. Returns immediately; poll_build() reports progress.
@@ -4821,6 +5107,10 @@ struct Listener : Rml::EventListener {
                     rebuild_inspector();
                     return;
                 }
+                if (e->HasAttribute("oe-bp")) {
+                    toggle_breakpoint(e->GetAttribute<int>("oe-bp", 0));
+                    return;
+                }
                 if (e->HasAttribute("oe-win")) {
                     window_control(e->GetAttribute<Rml::String>("oe-win", ""));
                     return;
@@ -4831,6 +5121,17 @@ struct Listener : Rml::EventListener {
                     else if (a == "run") build_binary(true);
                     else if (a == "build") build_binary(false);
                     else if (a == "stop") stop_app();
+                    else if (a == "debug") start_debug();
+                    else if (a == "togglebp") {
+                        int line = 0, col = 0;
+                        if (caret_position(line, col)) toggle_breakpoint(line + 1);
+                    }
+                    else if (a == "dbgcontinue") g.dbg.continue_();
+                    else if (a == "dbgstepover") g.dbg.step_over();
+                    else if (a == "dbgstepin") g.dbg.step_in();
+                    else if (a == "dbgstepout") g.dbg.step_out();
+                    else if (a == "dbgpause") g.dbg.pause();
+                    else if (a == "dbgstop") stop_debug();
                     else if (a == "undo") undo();
                     else if (a == "redo") redo();
                     else if (a == "copy") copy_selection();
@@ -5153,6 +5454,30 @@ struct KeyGate : Rml::EventListener {
         // would never hear an F12 pressed in the editor.
         if (key == Rml::Input::KI_F12) {
             shift ? find_references() : goto_definition();
+            ev.StopImmediatePropagation();
+            return;
+        }
+        // The debugging keys, in the capture phase for the same reason: the
+        // textarea swallows every keydown it sees, and these are pressed in
+        // the editor more than anywhere else.
+        if (key == Rml::Input::KI_F5) {
+            shift ? stop_debug() : (g.dbg.running() ? g.dbg.continue_() : start_debug());
+            ev.StopImmediatePropagation();
+            return;
+        }
+        if (key == Rml::Input::KI_F9) {
+            int line = 0, col = 0;
+            if (caret_position(line, col)) toggle_breakpoint(line + 1);
+            ev.StopImmediatePropagation();
+            return;
+        }
+        if (key == Rml::Input::KI_F10) {
+            g.dbg.step_over();
+            ev.StopImmediatePropagation();
+            return;
+        }
+        if (key == Rml::Input::KI_F11) {
+            shift ? g.dbg.step_out() : g.dbg.step_in();
             ev.StopImmediatePropagation();
             return;
         }
@@ -6125,6 +6450,80 @@ void run_script(const char* script) {
                 std::printf("lamp display=%s opacity %.2f -> %.2f (%s)\n",
                             e ? e->GetProperty(Rml::PropertyId::Display)->ToString().c_str() : "?",
                             o1, o2, o1 != o2 ? "PULSING" : "STATIC");
+                std::fflush(stdout);
+            }
+            // The debugging verbs. `waitstop` blocks on the adapter's own
+            // `stopped` event through the same pump the LSP verbs use for an
+            // asynchronous reply, so there is no new machinery here.
+            else if (verb == "bp") {
+                toggle_breakpoint(std::atoi(arg.c_str()));
+                std::printf("bp: %s -> %s\n", arg.c_str(),
+                            g.breakpoints.count(std::atoi(arg.c_str())) ? "set" : "cleared");
+                std::fflush(stdout);
+            }
+            else if (verb == "dbgrun") {
+                start_debug();
+                for (int i = 0; i < 2000 && g.dbg.running() && g.stopped_line == 0; i++) {
+                    poll_debug();
+                    g.context->Update();
+                    usleep(20000);
+                }
+            }
+            else if (verb == "waitstop") {
+                const int was = g.stopped_line;
+                for (int i = 0; i < 1000 && g.dbg.running() &&
+                                (g.stopped_line == was || g.stopped_line == 0);
+                     i++) {
+                    poll_debug();
+                    g.context->Update();
+                    usleep(20000);
+                }
+                std::printf("waitstop: line %d\n", g.stopped_line);
+                std::fflush(stdout);
+            }
+            else if (verb == "dbgnext" || verb == "dbgstep" || verb == "dbgout" ||
+                     verb == "dbgcont") {
+                if (verb == "dbgnext") g.dbg.step_over();
+                else if (verb == "dbgstep") g.dbg.step_in();
+                else if (verb == "dbgout") g.dbg.step_out();
+                else g.dbg.continue_();
+                const int was = g.stopped_line;
+                for (int i = 0; i < 1000 && g.dbg.running() &&
+                                (g.stopped_line == was || g.stopped_line == 0);
+                     i++) {
+                    poll_debug();
+                    g.context->Update();
+                    usleep(20000);
+                }
+                std::printf("%s: line %d\n", verb.c_str(), g.stopped_line);
+                std::fflush(stdout);
+            }
+            else if (verb == "locals") {
+                for (const auto& v : g.dbg.locals()) {
+                    std::printf("local: %s = %s\n", v.name.c_str(), v.value.c_str());
+                }
+                std::printf("locals: %d\n", (int)g.dbg.locals().size());
+                std::fflush(stdout);
+            }
+            else if (verb == "frames") {
+                for (const auto& f : g.dbg.frames()) {
+                    std::printf("frame: %s:%d\n", f.name.c_str(), f.line);
+                }
+                std::fflush(stdout);
+            }
+            else if (verb == "gutter") {
+                // What the gutter is actually showing, which is the thing a
+                // rendered frame is checked against.
+                if (Rml::Element* e = by_id(arg.empty() ? "dbggutter" : arg.c_str())) {
+                    std::printf("gutter: %s\n", e->GetInnerRML().c_str());
+                } else {
+                    std::printf("gutter: (absent)\n");
+                }
+                std::fflush(stdout);
+            }
+            else if (verb == "dbgstop") {
+                stop_debug();
+                std::printf("dbgstop: done\n");
                 std::fflush(stdout);
             }
             else if (verb == "build" || verb == "run") {
@@ -7173,6 +7572,7 @@ int main(int argc, char** argv) {
     while (Backend::ProcessEvents(g.context, &on_key_down, idle())) {
         poll_build();
         poll_app();
+        poll_debug();
         if (g.view == "code") sync_highlight_scroll();
         g.lsp.poll();
         if (g.lsp.has_update()) {

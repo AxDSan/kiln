@@ -47,6 +47,9 @@ constexpr int PROBLEMS_H = 72;
 /// Line box in the output console, so the tail calculation is exact.
 constexpr int LOG_LINE_H = 17;
 constexpr int CODE_PAD_X = 10;
+/// The breakpoint gutter's width. Wide enough for a dot at the code's own
+/// size, and no wider: it sits beside the text on every line.
+constexpr int CODE_GUTTER_W = 18;
 constexpr int CODE_PAD_Y = 8;
 
 inline std::string ACCENT      = "#1e60d5";
@@ -88,6 +91,9 @@ inline std::string DISABLED     = "#aeb6c2";
 inline std::string DISABLED_ICO = "#c9d0da";
 /// The code editor's line numbers, and an unset property's note.
 inline std::string GUTTER       = "#9aa3b0";
+/// The line the debugger is stopped on, and the dot marking a breakpoint.
+inline std::string STOPLINE     = "#fff3c4";
+inline std::string BREAKPOINT   = "#d1242f";
 /// The line a diagnostic is on.
 inline std::string BADLINE      = "#fff6f6";
 inline std::string SYN_KEYWORD = "#6f42c1";
@@ -155,6 +161,8 @@ inline void set_palette(bool dark) {
     DISABLED = dark ? "#484f58" : "#aeb6c2";
     DISABLED_ICO = dark ? "#3d444d" : "#c9d0da";
     GUTTER = dark ? "#6e7681" : "#9aa3b0";
+    STOPLINE = dark ? "#3a3316" : "#fff3c4";
+    BREAKPOINT = dark ? "#f85149" : "#d1242f";
     BADLINE = dark ? "#2d1618" : "#fff6f6";
     SYN_KEYWORD = dark ? "#d2a8ff" : "#6f42c1";
     SYN_METHOD = dark ? "#79c0ff" : "#0550ae";
