@@ -104,8 +104,11 @@ off in a Windows build.
 * **A release build is hardened, not hidden.** `openepl build --release`
   optimises, hardens and strips what you build. A native binary can still be
   disassembled — the flag buys a smaller, harder-to-attack program, not secrecy.
-* **No debugger.** You get a program's output and its exit code in the IDE
-  console, not breakpoints or stepping.
+* **The debugger is Linux-only.** Set a breakpoint in Studio's gutter, press
+  Debug, and the program stops on the line with its call stack and variables
+  beside it. `openepl dap` is the same debugger for any editor that speaks the
+  Debug Adapter Protocol, and the bundled VS Code extension is wired to it.
+  The engine is `ptrace`, so a Windows build cannot be debugged yet.
 * **No TLS in this bundle.** It ships no TLS stack, so `net_http_get` on an
   `https://` URL fails with a message rather than downgrading to plaintext,
   and the `httpserver` component is plaintext regardless. Building the

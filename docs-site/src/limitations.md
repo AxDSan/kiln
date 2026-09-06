@@ -60,8 +60,12 @@ freed then. A program that runs and stops never notices; a window that runs all
 day, or a server that answers requests for weeks, grows with the work it has
 done. Restart it, or put it behind something that will.
 
-**No debugger.** You get a program's output and its exit code in the console,
-not breakpoints, stepping or variable inspection.
+**The debugger is Linux-only, and stops at the statement.** Breakpoints,
+stepping, the call stack, variables and hover all work — but the engine is
+`ptrace`, so a Windows build has no debugger yet, and there is no expression
+evaluation: you can see what a name holds, not compute with it. A `--release`
+build carries no debug information and cannot be stepped through, which is
+what `--release` is for.
 
 ## The language
 

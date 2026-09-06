@@ -153,6 +153,43 @@ Hello from OpenEPL.
 
 A console program has no window: it runs, prints into that pane, and finishes.
 
+## Debugging
+
+Click a line's gutter — the narrow strip left of the code — to put a
+breakpoint on it, then press **Debug**. The program is built, started under
+the debugger, and stops on that line: the line is tinted, an arrow marks it in
+the gutter, and the pane below shows the call stack and every variable in
+scope with what it currently holds.
+
+The transport sits beside Debug on the toolbar, and the keys are the ones
+every other IDE uses:
+
+| Key | Does |
+| --- | --- |
+| `F5` | start debugging, or continue from a stop |
+| `Shift+F5` | stop debugging |
+| `F9` | put a breakpoint on the line the caret is in, or take one away |
+| `F10` | step over — the next statement in this subroutine |
+| `F11` | step into — the subroutine being called |
+| `Shift+F11` | step out — back to the caller |
+
+**Hover a name while the program is stopped** and its value appears, which is
+the quickest way to answer "what is in there". Records show their own field
+names, `text` shows its characters, and an array is numbered from 1 — the same
+way the language counts.
+
+A breakpoint on a blank line or a comment runs nothing, so it moves to the
+next line that does and the mark moves with it. A mark stays hollow until the
+debugger has bound it to a real address: a dot that promises to stop and does
+not would be worse than no dot at all.
+
+Breakpoints belong to the session, not to the file. They are not written into
+your `.oir`, so they cannot end up in a commit.
+
+The same debugger is `openepl dap`, which speaks the Debug Adapter Protocol —
+so VS Code debugs OpenEPL through the bundled extension with nothing to
+configure, and any editor that speaks the protocol can too.
+
 ## Undo
 
 **Ctrl+Z** and **Ctrl+Shift+Z**, or the toolbar buttons. Designer edits —

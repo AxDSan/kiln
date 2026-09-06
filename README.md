@@ -262,8 +262,10 @@ OpenEPL is young, and honest about it:
   reach the UI library; the drawn window is unverified). Studio is
   Linux-only, nothing is built natively on Windows yet, and macOS and arm64
   are not supported.
-- **No debugger for the programs you build.** `--release` optimises, hardens
-  and strips; what it cannot do is let you step through the result.
+- **The debugger is Linux-only.** Breakpoints, stepping, the call stack and
+  variables work in Studio, in VS Code and from the command line; the engine
+  underneath is `ptrace`, and Windows needs its own. `--release` strips the
+  debug information along with everything else it strips.
 - **TLS is opt-in.** `https://` works once `tools/fetch-mbedtls.sh` has
   vendored mbedTLS, and the call fails rather than downgrading without it;
   the `httpserver` component is plaintext either way.
