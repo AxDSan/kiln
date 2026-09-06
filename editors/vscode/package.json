@@ -1,20 +1,32 @@
 {
   "name": "openepl",
   "displayName": "OpenEPL",
-  "description": "OpenEPL language support: syntax highlighting plus the openepl language server (diagnostics, completion, hover, go-to-definition, references).",
+  "description": "OpenEPL language support: syntax highlighting, the openepl language server (diagnostics, completion, hover, go-to-definition, references), and debugging (breakpoints, stepping, variables).",
   "version": "0.10.1",
   "publisher": "openepl",
   "license": "MIT",
-  "engines": { "vscode": "^1.75.0" },
-  "categories": ["Programming Languages"],
-  "activationEvents": ["onLanguage:openepl"],
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers"
+  ],
+  "activationEvents": [
+    "onLanguage:openepl",
+    "onDebugResolve:openepl"
+  ],
   "main": "./extension.js",
   "contributes": {
     "languages": [
       {
         "id": "openepl",
-        "aliases": ["OpenEPL"],
-        "extensions": [".oir"],
+        "aliases": [
+          "OpenEPL"
+        ],
+        "extensions": [
+          ".oir"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -34,7 +46,82 @@
           "description": "Path to the openepl executable. The extension runs `<path> lsp`."
         }
       }
-    }
+    },
+    "breakpoints": [
+      {
+        "language": "openepl"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "openepl",
+        "label": "OpenEPL",
+        "languages": [
+          "openepl"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "The .oir file to debug.",
+                "default": "${file}"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Arguments passed to the program.",
+                "default": []
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Where the program runs.",
+                "default": "${workspaceFolder}"
+              },
+              "noBuild": {
+                "type": "boolean",
+                "description": "Debug the existing binary instead of building first.",
+                "default": false
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Stop before the first statement runs.",
+                "default": false
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "openepl",
+            "request": "launch",
+            "name": "Debug the current file",
+            "program": "${file}",
+            "cwd": "${workspaceFolder}"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "OpenEPL: debug a file",
+            "description": "Build an .oir file and debug it.",
+            "body": {
+              "type": "openepl",
+              "request": "launch",
+              "name": "${2:Debug the current file}",
+              "program": "^\"\\${1:\\${file}}\"",
+              "cwd": "^\"\\${workspaceFolder}\""
+            }
+          }
+        ]
+      }
+    ]
   },
-  "dependencies": { "vscode-languageclient": "^9.0.1" }
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
 }

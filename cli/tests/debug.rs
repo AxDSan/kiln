@@ -392,3 +392,101 @@ fn a_stopped_program_shows_the_values_of_its_variables() {
         "a compiler-invented name was shown: {transcript}"
     );
 }
+
+/// A running program can be stopped, and it says where it was.
+///
+/// The hard part is that "running" means the engine is blocked waiting for the
+/// program, which is exactly when nothing is reading requests. An adapter that
+/// reads only between operations can never act on a pause, and a program that
+/// does not stop on its own — a form idling in its event loop, which is the
+/// whole point of a RAD debugger — would wedge the session for good.
+///
+/// The stack matters as much as the stop. The program is inside the C library
+/// when it is paused, and the unwinder has to walk out of it to reach the
+/// user's own frame.
+#[test]
+fn a_running_program_can_be_paused_and_says_where_it_stopped() {
+    use std::io::{BufReader, Read, Write};
+    use std::process::Stdio;
+
+    let dir = std::env::temp_dir().join("openepl_dap_pause_test");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("idle.oir"),
+        "module idle\n\
+         \n\
+         use system\n\
+         \n\
+         sub main\n\
+         \u{20}\u{20}for i in 1..600\n\
+         \u{20}\u{20}\u{20}\u{20}call sys_sleep_ms(100)\n\
+         \u{20}\u{20}end\n\
+         end\n",
+    )
+    .unwrap();
+
+    let mut adapter = Command::new(env!("CARGO_BIN_EXE_openepl"))
+        .arg("dap")
+        .current_dir(&dir)
+        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start the adapter");
+
+    let mut input = adapter.stdin.take().unwrap();
+    let mut seq = 0;
+    let mut send = |command: &str, arguments: &str| {
+        seq += 1;
+        let body = if arguments.is_empty() {
+            format!(r#"{{"seq":{seq},"type":"request","command":"{command}"}}"#)
+        } else {
+            format!(
+                r#"{{"seq":{seq},"type":"request","command":"{command}","arguments":{arguments}}}"#
+            )
+        };
+        input
+            .write_all(format!("Content-Length: {}\r\n\r\n{body}", body.len()).as_bytes())
+            .unwrap();
+        input.flush().unwrap();
+    };
+
+    send("initialize", r#"{"adapterID":"openepl"}"#);
+    send("launch", r#"{"program":"idle.oir"}"#);
+    send("configurationDone", "");
+    // Long enough for the build to finish and the program to be running. The
+    // pause has to arrive *while* it runs — sent before the program exists it
+    // would be refused, and that is not what this is testing.
+    std::thread::sleep(std::time::Duration::from_secs(8));
+    // Sent while the program is running and the engine is blocked waiting for
+    // it. Nothing here waits for a stop first, because there will not be one.
+    send("pause", r#"{"threadId":1}"#);
+    send("stackTrace", r#"{"threadId":1}"#);
+    send("disconnect", "");
+    drop(input);
+
+    let mut transcript = String::new();
+    BufReader::new(adapter.stdout.take().unwrap())
+        .read_to_string(&mut transcript)
+        .unwrap();
+    let _ = adapter.wait();
+    let dense: String = transcript.chars().filter(|c| !c.is_whitespace()).collect();
+
+    assert!(
+        dense.contains(r#""reason":"pause""#),
+        "the program was never paused: {transcript}"
+    );
+    // Exactly one. The thread that reads requests stops the program and the
+    // blocked run reports it; announcing a second would tell the client the
+    // program stopped twice.
+    assert_eq!(
+        dense.matches(r#""reason":"pause""#).count(),
+        1,
+        "the pause was reported more than once: {transcript}"
+    );
+    assert!(
+        dense.contains(r#""name":"main""#),
+        "the stack did not reach the user's own frame: {transcript}"
+    );
+}

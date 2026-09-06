@@ -171,6 +171,35 @@ struct Thread {
 }
 
 /// A program we launched and are tracing.
+/// A way to stop a traced program that can be held anywhere.
+///
+/// Deliberately tiny — a process id and nothing else — because it crosses a
+/// thread boundary and anything else in it would need locking.
+#[derive(Debug, Clone, Copy)]
+pub struct Interrupt {
+    pid: i32,
+}
+
+impl Interrupt {
+    /// A handle attached to nothing, for a caller that has no program yet.
+    pub fn none() -> Interrupt {
+        Interrupt { pid: 0 }
+    }
+
+    /// Ask the program to stop. Silent on failure: the program having already
+    /// ended is the ordinary reason, and it is not something to report.
+    ///
+    /// A process id of zero is refused rather than passed on. `kill` reads it
+    /// as "every process in my group", which would stop the debugger, the
+    /// editor that started it, and the terminal they share.
+    pub fn stop(&self) {
+        if self.pid <= 0 {
+            return;
+        }
+        unsafe { kill(self.pid, SIGSTOP) };
+    }
+}
+
 pub struct LinuxTarget {
     pid: i32,
     /// The thread that reported the current stop. Registers and memory are
@@ -268,6 +297,17 @@ impl LinuxTarget {
     /// line as it runs. That is the program's libc, not this.
     pub fn output(&mut self) -> Vec<u8> {
         std::mem::take(&mut *self.output.lock().expect("output buffer"))
+    }
+
+    /// A way to stop the program from another thread.
+    ///
+    /// Pausing is the one thing that must work *while* the debugger is blocked
+    /// waiting for the program, so it cannot go through `&mut self` — whoever
+    /// holds that is inside the wait. Signalling needs nothing but the process
+    /// id, and the stop it causes is collected by the waiting thread like any
+    /// other.
+    pub fn interrupt_handle(&self) -> Interrupt {
+        Interrupt { pid: self.pid }
     }
 
     /// Whether the program is still there.
@@ -913,9 +953,7 @@ impl Target for LinuxTarget {
         if self.exited.is_some() {
             return Ok(());
         }
-        if unsafe { kill(self.pid, SIGSTOP) } < 0 {
-            return Err(failed("could not interrupt the program"));
-        }
+        self.interrupt_handle().stop();
         Ok(())
     }
 

@@ -43,11 +43,13 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value as Json};
 
 use openepl_debug::session::{Breakpoint, Session, Stopped};
 use openepl_debug::step::Step;
+use openepl_debug::target::linux::Interrupt;
 use openepl_debug::unwind::Frame;
 use openepl_debug::value::Value;
 
@@ -64,27 +66,56 @@ pub fn run() -> i32 {
     // Everything diagnostic goes to stderr. stdout is the protocol channel and
     // a stray `println!` on it corrupts the stream for good.
     eprintln!("openepl-dap: starting on stdio");
-    let stdin = io::stdin();
-    let mut input = BufReader::new(stdin.lock());
     let mut out = Out::new(io::stdout());
     let mut adapter = Adapter::new(Box::new(Cli));
-    loop {
-        match read_message(&mut input) {
-            Ok(Some(message)) => {
-                if let Some(request) = Request::parse(&message) {
-                    adapter.handle(&request, &mut out);
+
+    // Requests are read on their own thread.
+    //
+    // Handling one means running the program, and running the program means
+    // blocking until it stops. Reading on this thread would mean nothing is
+    // read while the program runs — so a pause, a stop or a disconnect sent to
+    // a program that never stops on its own would never be seen at all, and a
+    // form idling in its event loop would wedge the session for good.
+    //
+    // The thread does one thing besides forwarding: a request that means
+    // "stop what you are doing" fires the interrupt handle as it passes, which
+    // is what turns the blocked wait on the other thread into a stop.
+    let (sender, requests) = std::sync::mpsc::channel();
+    let reading = adapter.interrupt_shared();
+    std::thread::spawn(move || {
+        let stdin = io::stdin();
+        let mut input = BufReader::new(stdin.lock());
+        loop {
+            match read_message(&mut input) {
+                Ok(Some(message)) => {
+                    if let Some(request) = Request::parse(&message) {
+                        if matches!(request.command.as_str(), "pause" | "terminate" | "disconnect")
+                        {
+                            let handle: Option<Interrupt> =
+                                *reading.lock().expect("interrupt handle");
+                            if let Some(handle) = handle {
+                                handle.stop();
+                            }
+                        }
+                        if sender.send(request).is_err() {
+                            break;
+                        }
+                    }
+                }
+                // The client closed the pipe. That is how a session normally
+                // ends when the editor is shut down rather than stopped, so it
+                // is not an error.
+                Ok(None) => break,
+                Err(e) => {
+                    eprintln!("openepl-dap: {e}");
+                    break;
                 }
             }
-            // The client closed the pipe. That is how a session normally ends
-            // when the editor is shut down rather than stopped, so it is not
-            // an error.
-            Ok(None) => break,
-            Err(e) => {
-                eprintln!("openepl-dap: {e}");
-                adapter.shutdown();
-                return 1;
-            }
         }
+    });
+
+    for request in requests {
+        adapter.handle(&request, &mut out);
         if adapter.finished || out.broken {
             break;
         }
@@ -321,6 +352,10 @@ trait Debuggee {
     /// the pipe rather than letting the program inherit ours.
     fn program_output(&mut self) -> Vec<u8>;
 
+    /// A way to stop the program from another thread, so a pause that arrives
+    /// while it is running is acted on rather than queued behind it.
+    fn interrupt_handle(&self) -> Interrupt;
+
     fn stop(&mut self) -> Result<(), String>;
 
     /// Which line of which source an address belongs to.
@@ -485,6 +520,10 @@ impl Debuggee for Live {
         self.session.output()
     }
 
+    fn interrupt_handle(&self) -> Interrupt {
+        self.session.interrupt_handle()
+    }
+
     fn describe(&self, address: u64) -> Option<Location> {
         let row = self.program.line_for(address)?;
         Some(Location {
@@ -606,6 +645,13 @@ struct Adapter {
     /// would show the user the previous stop's values.
     variables: HashMap<i64, Node>,
     next_reference: i64,
+    /// Ids for breakpoints the engine could not place. Started well above
+    /// anything the engine hands out, so the two ranges cannot meet.
+    next_unbound: i64,
+    /// Shared with whoever reads requests, so a pause arriving while the
+    /// program runs can stop it. Published the moment there is a program,
+    /// which must be before anything blocks waiting for one.
+    interrupt: Arc<Mutex<Option<Interrupt>>>,
     /// Set once the program has exited, so `disconnect` does not try to stop a
     /// process that is already gone.
     exited: bool,
@@ -625,6 +671,8 @@ impl Adapter {
             stop_on_entry: false,
             variables: HashMap::new(),
             next_reference: 1,
+            next_unbound: 1 << 20,
+            interrupt: Arc::new(Mutex::new(None)),
             exited: false,
             finished: false,
         }
@@ -658,6 +706,24 @@ impl Adapter {
 
     /// Stop the program if it is still running. Called on every exit path,
     /// including the one where the client vanished.
+    /// The handle for stopping the program, when there is one to stop.
+    /// An id for a breakpoint the engine could not place.
+    ///
+    /// Drawn from above everything the engine hands out rather than from the
+    /// same 1..n space: two breakpoints alive at once would otherwise share an
+    /// id, and `hitBreakpointIds` is the client's only way of saying which one
+    /// fired.
+    fn unbound_id(&mut self) -> i64 {
+        self.next_unbound += 1;
+        self.next_unbound
+    }
+
+    /// The shared slot holding the way to stop the program, for whoever reads
+    /// requests on another thread.
+    fn interrupt_shared(&self) -> Arc<Mutex<Option<Interrupt>>> {
+        Arc::clone(&self.interrupt)
+    }
+
     fn shutdown(&mut self) {
         if let Some(debuggee) = self.debuggee.as_mut() {
             if !self.exited {
@@ -719,6 +785,18 @@ impl Adapter {
     }
 
     fn on_launch(&mut self, request: &Request, out: &mut dyn Sink) {
+        // A second launch is refused rather than allowed to replace the first.
+        // Taking it would overwrite the outstanding request's sequence number
+        // — leaving the client waiting on a reply that can never be sent — and
+        // drop a traced program without stopping it.
+        if self.pending_launch.is_some() || self.debuggee.is_some() {
+            out.send(failure(
+                request,
+                "already debugging",
+                "this session already has a program. Disconnect before launching another.",
+            ));
+            return;
+        }
         let Some(program) = request.arg("program").and_then(Json::as_str) else {
             out.send(failure(
                 request,
@@ -771,7 +849,15 @@ impl Adapter {
         }
 
         match self.backend.launch(&binary, &args) {
-            Ok(debuggee) => self.debuggee = Some(debuggee),
+            Ok(debuggee) => {
+                // Published before anything can block on the program: the
+                // resume that follows does not return until it stops, and a
+                // pause handle that arrives after that is a pause that can
+                // never be acted on.
+                *self.interrupt.lock().expect("interrupt handle") =
+                    Some(debuggee.interrupt_handle());
+                self.debuggee = Some(debuggee);
+            }
             Err(e) => {
                 out.send(failure(request, "the program could not be started", &e));
                 out.send(event("terminated", None));
@@ -844,7 +930,7 @@ impl Adapter {
         // every breakpoint onto somebody else's line.
         let mut taken = vec![false; bound.len()];
         let mut answers = Vec::with_capacity(requested.len());
-        for (index, line) in requested.iter().enumerate() {
+        for (_index, line) in requested.iter().enumerate() {
             let matched = bound
                 .iter()
                 .enumerate()
@@ -874,9 +960,10 @@ impl Adapter {
                     answers.push(answer);
                 }
                 None => answers.push(json!({
-                    // Ids stay stable within one request even for the ones
-                    // that did not bind, so the client can tell them apart.
-                    "id": index as i64 + 1,
+                    // From the adapter's own range, never the engine's: a
+                    // breakpoint that did not bind is still a distinct
+                    // breakpoint as far as the client is concerned.
+                    "id": self.unbound_id(),
                     "verified": false,
                     "line": self.client_line(*line),
                     "message": unbound.unwrap_or("this breakpoint could not be placed"),
@@ -1109,14 +1196,13 @@ impl Adapter {
             out.send(failure(request, "not running", "there is no program to pause"));
             return;
         }
-        // The adapter reads a request only between operations, so by the time
-        // this is seen the program is already stopped. The stop is reported
-        // again so the client's view catches up; a pause that arrives while
-        // the program is running is answered when it next stops, and making it
-        // interrupt a run needs a handle on the process that the session does
-        // not yet offer.
+        // Answered, and nothing more. The thread that reads requests has
+        // already stopped the program — that is what makes a pause work while
+        // it is running — and the run that was blocked has already reported
+        // the stop it came back with. Announcing a second one here would tell
+        // the client the program stopped twice, and it would draw the second
+        // stop over whatever the user had already begun looking at.
         out.send(response(request, true, None));
-        out.send(self.stopped_event("pause", None, None));
     }
 
     fn on_evaluate(&mut self, request: &Request, out: &mut dyn Sink) {
@@ -1395,19 +1481,26 @@ mod tests {
         locals: Vec<(String, Value)>,
         source: Option<String>,
         /// Every line the adapter asked for, for checking what was passed
-        /// through the line-base conversion.
-        asked: Vec<u32>,
+        /// through the line-base conversion. Shared rather than owned, because
+        /// the fake goes into a box the test cannot reach back into — and a
+        /// field the test cannot read is scaffolding that implies coverage
+        /// which does not exist.
+        asked: Arc<Mutex<Vec<u32>>>,
         /// What the program has written and the adapter has not yet forwarded.
         printed: Vec<u8>,
     }
 
     impl Debuggee for FakeDebuggee {
+        fn interrupt_handle(&self) -> Interrupt {
+            Interrupt::none()
+        }
+
         fn program_output(&mut self) -> Vec<u8> {
             std::mem::take(&mut self.printed)
         }
 
         fn set_breakpoints(&mut self, lines: &[u32]) -> Result<Vec<Breakpoint>, String> {
-            self.asked = lines.to_vec();
+            *self.asked.lock().expect("asked") = lines.to_vec();
             let mut bound: Vec<Breakpoint> = lines
                 .iter()
                 .enumerate()
@@ -1718,8 +1811,10 @@ mod tests {
 
     #[test]
     fn zero_based_clients_get_their_own_line_numbers_back() {
+        let asked = Arc::new(Mutex::new(Vec::new()));
         let mut adapter = Adapter::new(Box::new(FakeBackend::with(FakeDebuggee {
             source: Some("/tmp/x.oir".to_string()),
+            asked: Arc::clone(&asked),
             ..Default::default()
         })));
         let mut out = Recorder::new();
@@ -1749,6 +1844,14 @@ mod tests {
         assert_eq!(
             bound[0]["line"], 11,
             "it goes back out in the base it came in"
+        );
+        // And it went *in* converted. Asserting only the round trip would pass
+        // just as well with no conversion at all, and a zero-based client's
+        // breakpoints would then be planted one line off, silently.
+        assert_eq!(
+            *asked.lock().expect("asked"),
+            vec![12],
+            "the engine was asked for the wrong line"
         );
     }
 

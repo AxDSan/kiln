@@ -20,6 +20,11 @@ use crate::value::{self, Value};
 use crate::Error;
 use std::path::Path;
 
+/// The signals that mean a person asked for the program to stop, rather than
+/// something the program should be told about.
+const SIGINT: i32 = 2;
+const SIGSTOP: i32 = 19;
+
 /// Whether a frame is the one the program is actually stopped in.
 ///
 /// Compared by identity rather than by index because the caller has already
@@ -59,7 +64,14 @@ pub enum Stopped {
 pub struct Session {
     program: Program,
     target: LinuxTarget,
-    unwinder: Unwinder,
+    /// Built on the first stack walk, not at launch.
+    ///
+    /// A program stopped at its entry point has not run its dynamic loader
+    /// yet, so the only objects mapped are the program and the loader itself.
+    /// Reading the list then leaves out the C library — and every shared
+    /// object a GUI program uses — so a stack that passes through one ends at
+    /// the first frame, looking exactly like unwind information running out.
+    unwinder: Option<Unwinder>,
     breakpoints: Vec<Breakpoint>,
     next_id: u32,
     /// What to add to an address in the debug information to reach the address
@@ -79,15 +91,10 @@ impl Session {
         let program = crate::load(binary)?;
         let target = LinuxTarget::launch(binary, args)?;
         let bias = target.load_bias();
-        // The modules are read once, here, rather than at every stop: the list
-        // is settled by the time the program is stopped at its entry point,
-        // and re-reading it would mean re-reading every mapped object's CFI
-        // off disk for each step.
-        let unwinder = Unwinder::new(target.modules()?);
         Ok(Session {
             program,
             target,
-            unwinder,
+            unwinder: None,
             breakpoints: Vec::new(),
             next_id: 1,
             bias,
@@ -108,12 +115,14 @@ impl Session {
         self.target.output()
     }
 
-    /// Stop a running program, for a Pause button.
+    /// A way to stop the program from another thread.
     ///
-    /// The only method that may be called while another is blocked inside
-    /// `resume`, because it signals rather than traces.
-    pub fn interrupt(&mut self) -> Result<(), Error> {
-        self.target.interrupt()
+    /// Pause is the one gesture that must work *while* the session is blocked
+    /// waiting for the program, which is exactly when `&mut self` is held by
+    /// the waiting thread. The handle carries no borrow, so a reader thread
+    /// can hold one and fire it the moment a pause request arrives.
+    pub fn interrupt_handle(&self) -> crate::target::linux::Interrupt {
+        self.target.interrupt_handle()
     }
 
     /// Replace the breakpoint set.
@@ -244,7 +253,16 @@ impl Session {
                 Ok(Stopped::Exited(code))
             }
             Stop::Step => Ok(Stopped::Step),
-            Stop::Signal(_) => Ok(Stopped::Pause),
+            // Only a signal that means "stop" is a stop. A program is sent
+            // signals in the ordinary course of running — a child of its own
+            // exiting, a timer, a sleep being interrupted — and reporting each
+            // as a pause makes a debugger appear to stop at random. The rest
+            // are the program's own business and are delivered to it.
+            Stop::Signal(SIGSTOP | SIGINT) => Ok(Stopped::Pause),
+            Stop::Signal(_) => {
+                let stop = self.target.resume()?;
+                self.classify(stop)
+            }
             Stop::Breakpoint => {
                 let pc = self.target.registers()?.pc;
                 match self.breakpoints.iter().find(|b| b.address == Some(pc)) {
@@ -271,7 +289,13 @@ impl Session {
             return Ok(Vec::new());
         }
         let top = self.target.registers()?;
-        let frames = self.unwinder.walk(top, &self.target)?;
+        // Built on demand and then kept: reading every mapped object's unwind
+        // information off disk at every step would cost more than the step.
+        if self.unwinder.is_none() {
+            self.unwinder = Some(Unwinder::new(self.target.modules()?));
+        }
+        let unwinder = self.unwinder.as_mut().expect("just built");
+        let frames = unwinder.walk(top, &self.target)?;
         let bias = self.bias;
         let program = &self.program;
         Ok(frames

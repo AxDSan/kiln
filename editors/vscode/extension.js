@@ -1,14 +1,19 @@
-// Thin LSP client: everything intelligent lives in `openepl lsp`,
-// so this file only starts the server and gets out of the way.
-const { workspace } = require("vscode");
+// Thin client: everything intelligent lives in `openepl lsp` and
+// `openepl dap`, so this file only starts them and gets out of the way.
+const { workspace, debug, DebugAdapterExecutable } = require("vscode");
 const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
 
 let client;
 
+/// The toolchain binary, which is both the language server and the debug
+/// adapter. One setting rather than two: they are the same program, and two
+/// paths that could disagree would be two ways to get it wrong.
+function toolchain() {
+  return workspace.getConfiguration("openepl").get("serverPath", "openepl");
+}
+
 function activate(context) {
-  const command = workspace
-    .getConfiguration("openepl")
-    .get("serverPath", "openepl");
+  const command = toolchain();
 
   const serverOptions = {
     run: { command, args: ["lsp"], transport: TransportKind.stdio },
@@ -22,6 +27,42 @@ function activate(context) {
     { documentSelector: [{ scheme: "file", language: "openepl" }] }
   );
   context.subscriptions.push(client.start());
+
+  // The adapter is a subprocess on stdio, exactly like the language server.
+  // Resolved at launch rather than named in package.json so that the setting
+  // is read then, and a user who moves their toolchain does not have to
+  // reinstall the extension.
+  context.subscriptions.push(
+    debug.registerDebugAdapterDescriptorFactory("openepl", {
+      createDebugAdapterDescriptor() {
+        return new DebugAdapterExecutable(toolchain(), ["dap"]);
+      },
+    })
+  );
+
+  // Pressing F5 with no launch.json debugs the file in front of you. Without
+  // this VS Code asks the user to write a configuration first, which is a
+  // poor answer for a language whose programs are usually one file.
+  context.subscriptions.push(
+    debug.registerDebugConfigurationProvider("openepl", {
+      resolveDebugConfiguration(folder, config) {
+        if (config.type || config.request || config.name) {
+          return config;
+        }
+        const editor = require("vscode").window.activeTextEditor;
+        if (!editor || editor.document.languageId !== "openepl") {
+          return config;
+        }
+        return {
+          type: "openepl",
+          request: "launch",
+          name: "Debug the current file",
+          program: editor.document.fileName,
+          cwd: folder ? folder.uri.fsPath : undefined,
+        };
+      },
+    })
+  );
 }
 
 function deactivate() {
