@@ -189,9 +189,54 @@ asynchronously, following the LSP client's `has_update()` pattern rather than
 pumping on mouse-move, which would stutter the frame loop. This is the single
 most-requested debugging behaviour in the 易语言 material.
 
-**Keys** follow the family: F5 debug-run, F9 toggle breakpoint, F10 step over,
-F11 step in, Shift+F11 step out, Shift+F5 stop. F5 is *debug*-run because that
-is the expectation here; Studio already has plain Run on the toolbar.
+**Transport controls, on the toolbar.** The toolbar today is
+`Run | Build Binary | Stop`. Debugging adds a strip that is hidden until a
+debug session starts and replaces nothing:
+
+```
+Run  Build Binary  Stop  │  Debug  ‖ Pause  ▶ Continue  ⤼ Step Over  ⤵ Step In  ⤴ Step Out  ■ Stop
+```
+
+Each is a `<div class='tb' oe-action='...'>` beside the existing three, going
+through the same `oe-action` dispatch — so every one is reachable from the
+scripted harness by the verb that already presses toolbar buttons, and none of
+them needs new event plumbing. Buttons are disabled (greyed, not hidden) while
+the program is running rather than stopped, so the controls do not jump around
+under the pointer.
+
+This needs five new icons at 16 and 32 px — `debug`, `pause`, `continue`,
+`stepover`, `stepin`, `stepout` — in the same hand-drawn set as `run`, `build`
+and `stop`. They are a real deliverable, not an afterthought: a toolbar with
+three drawn icons and five missing ones looks broken.
+
+**Keys** follow the family and mirror the buttons exactly: F5 debug-run, F9
+toggle breakpoint, F10 step over, F11 step in, Shift+F11 step out, Shift+F5
+stop. F5 is *debug*-run because that is the expectation here; Studio already
+has plain Run on the toolbar. The menu bar gains a Debug menu carrying the
+same actions with their shortcuts shown, because a control that exists only as
+a key nobody has been told about does not exist.
+
+**Breakpoints live on `.oir` lines, and the file is the source of truth.**
+Studio's Code view shows the whole module, so gutter row *N* is `.oir` line
+*N* is the line the DWARF names — there is no mapping layer and nothing to
+drift. Two consequences that have to be handled or the feature lies:
+
+- **Debug-run saves first.** A breakpoint on line 12 of text that has been
+  edited but not written is a breakpoint on a line the binary does not have.
+  `build_binary()` already calls `save()` before building; debug-run takes the
+  same path, so what runs is always what is on screen.
+- **Editing above a breakpoint moves it.** Breakpoints are held as line
+  numbers, and inserting a line above one silently retargets it at whatever
+  moved into that row. They are adjusted with the same edit that shifts the
+  text — the undo stack already snapshots the model on every mutation, so
+  there is one place to do it — and a breakpoint whose line is deleted
+  outright is removed rather than left pointing at someone else's code.
+
+**Where breakpoints are stored.** In the session, not in the `.oir`: a
+breakpoint is a thing about *debugging this program now*, not a fact about the
+program, and writing them into the source would put them in the user's next
+commit. They persist across a rebuild within a session and are gone when
+Studio closes, which is what every IDE in this family does.
 
 **Headless testing** adds verbs to the existing script harness — `bp:<line>`,
 `dbgrun`, `dbgstep`, `dbgnext`, `dbgout`, `dbgcont`, `dbgstop`, `waitstop`,
