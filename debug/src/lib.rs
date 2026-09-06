@@ -32,6 +32,9 @@ pub enum Error {
     Object(object::Error),
     /// The DWARF inside it is malformed.
     Dwarf(gimli::Error),
+    /// This platform has no process-control engine yet. Reading a program's
+    /// debug information works everywhere; running one under control does not.
+    Unsupported,
     /// The file is an object this can read, and carries no debug information.
     /// Separate from a malformed one because the answer is different: this is
     /// what a `--release` build looks like, and the fix is to build without it.
@@ -44,6 +47,11 @@ impl std::fmt::Display for Error {
             Error::Io(e) => write!(f, "{e}"),
             Error::Object(e) => write!(f, "not an object file this can read: {e}"),
             Error::Dwarf(e) => write!(f, "malformed debug information: {e}"),
+            Error::Unsupported => write!(
+                f,
+                "debugging is not supported on this platform yet — the engine is `ptrace`, \
+                 and Windows needs one of its own"
+            ),
             Error::NoDebugInfo => write!(
                 f,
                 "this program carries no debug information — it was built with `--release`, \

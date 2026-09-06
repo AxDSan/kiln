@@ -9,6 +9,18 @@ use crate::Error;
 use std::path::Path;
 
 pub mod linux;
+#[cfg(not(target_os = "linux"))]
+pub mod unsupported;
+
+/// The engine for this platform.
+///
+/// Named rather than chosen at each use, so that everything above knows one
+/// type and a second engine is one line here rather than a `cfg` in every
+/// file that runs a program.
+#[cfg(target_os = "linux")]
+pub use linux::{Interrupt, LinuxTarget as Native};
+#[cfg(not(target_os = "linux"))]
+pub use unsupported::{Interrupt, UnsupportedTarget as Native};
 
 /// Why a program stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

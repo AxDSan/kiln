@@ -49,7 +49,7 @@ use serde_json::{json, Value as Json};
 
 use openepl_debug::session::{Breakpoint, Session, Stopped};
 use openepl_debug::step::Step;
-use openepl_debug::target::linux::Interrupt;
+use openepl_debug::target::Interrupt;
 use openepl_debug::unwind::Frame;
 use openepl_debug::value::Value;
 

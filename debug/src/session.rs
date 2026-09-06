@@ -14,7 +14,7 @@
 
 use crate::step::{Plan, Step};
 use crate::symbols::Program;
-use crate::target::{linux::LinuxTarget, Stop, Target};
+use crate::target::{Interrupt, Native, Stop, Target};
 use crate::unwind::{Frame, Unwinder};
 use crate::value::{self, Value};
 use crate::Error;
@@ -63,7 +63,7 @@ pub enum Stopped {
 
 pub struct Session {
     program: Program,
-    target: LinuxTarget,
+    target: Native,
     /// Built on the first stack walk, not at launch.
     ///
     /// A program stopped at its entry point has not run its dynamic loader
@@ -89,7 +89,7 @@ impl Session {
     /// can be planted before anything runs.
     pub fn launch(binary: &Path, args: &[String]) -> Result<Session, Error> {
         let program = crate::load(binary)?;
-        let target = LinuxTarget::launch(binary, args)?;
+        let target = Native::launch(binary, args)?;
         let bias = target.load_bias();
         Ok(Session {
             program,
@@ -121,7 +121,7 @@ impl Session {
     /// waiting for the program, which is exactly when `&mut self` is held by
     /// the waiting thread. The handle carries no borrow, so a reader thread
     /// can hold one and fire it the moment a pause request arrives.
-    pub fn interrupt_handle(&self) -> crate::target::linux::Interrupt {
+    pub fn interrupt_handle(&self) -> Interrupt {
         self.target.interrupt_handle()
     }
 
