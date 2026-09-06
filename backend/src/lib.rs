@@ -57,7 +57,13 @@ impl std::fmt::Write for Body {
             // A completed line. Instructions are indented and labels are not,
             // and metadata attaches to an instruction only.
             if let Some(n) = self.loc {
-                if self.pending.starts_with("  ") && !self.pending.contains("!dbg") {
+                // A debug record is not an instruction and takes no trailing
+                // metadata: `#dbg_declare` carries its location as its fourth
+                // argument, and appending one makes the module fail to parse.
+                // It is skipped by name rather than by the `!dbg` test below,
+                // because the record's own spelling is `#dbg`, not `!dbg`.
+                let record = self.pending.trim_start().starts_with("#dbg_");
+                if self.pending.starts_with("  ") && !record && !self.pending.contains("!dbg") {
                     self.pending.push_str(&format!(", !dbg !{n}"));
                 }
             }
@@ -232,6 +238,7 @@ pub fn lower_module_from(
         strings: Vec::new(),
         body: Body::default(),
         debug: source.map(|p| debug::DebugInfo::new(p, concat!("OpenEPL ", env!("CARGO_PKG_VERSION")))),
+        scope: None,
         vars: HashMap::new(),
         used: BTreeSet::new(),
         ui_used: BTreeSet::new(),
@@ -289,6 +296,7 @@ pub fn lower_module_from(
         // The parameter copies belong to the `sub` line: they are the
         // prologue, and a debugger stopping at the start of the function
         // should show the header, not the first statement.
+        lo.scope = scope;
         lo.set_loc(scope, sub.line.max(1), 1);
         let prologue_loc = lo.body.loc;
         for (i, (name, ty)) in sub.params.iter().enumerate() {
@@ -301,11 +309,6 @@ pub fn lower_module_from(
         // `return` is carrying has been computed.
         let body = openepl_ir::expand_defer(&sub.body, sub.ret);
         for stmt in &body {
-            // A statement whose line was lost is attributed to the `sub`
-            // header rather than to line 0, which a debugger reads as "no
-            // line at all" and steps straight past.
-            let line = if stmt.line > 0 { stmt.line } else { sub.line };
-            lo.set_loc(scope, line.max(1), stmt.span.col.max(1));
             lo.stmt(stmt)?;
         }
         // A value-returning sub ends in `unreachable`: the validator has proven
@@ -327,6 +330,7 @@ pub fn lower_module_from(
             }
         };
         // Everything after this point is the compiler's own code.
+        lo.scope = None;
         lo.body.loc = None;
         let dbg = match scope {
             Some(n) => format!(" !dbg !{n}"),
@@ -464,6 +468,10 @@ struct Lowerer<'a> {
     /// Debug metadata, when the module is being lowered with a source path to
     /// name. `None` leaves every instruction bare, exactly as before.
     debug: Option<debug::DebugInfo>,
+    /// The subprogram whose statements are being lowered, so a statement can
+    /// name its own source position without the position being threaded
+    /// through every call that lowers one.
+    scope: Option<usize>,
     /// Local variables: name -> (alloca pointer, type). Every local is
     /// alloca-backed, `let` and `var` alike — one lowering path, and `opt`'s
     /// mem2reg reconstructs SSA for free when optimisation is enabled.
@@ -1004,7 +1012,35 @@ impl Lowerer<'_> {
         .unwrap();
     }
 
+    /// Lower one statement, at its own place in the source.
+    ///
+    /// The position is set here rather than by the caller, because statements
+    /// nest: a `for` lowers the statements of its body through this same
+    /// function, and positioning only the outermost ones gave a whole loop
+    /// body the loop header's line. There was then no row in the line table
+    /// for anything inside a block — a breakpoint could not be put inside a
+    /// loop, and stepping through one was impossible.
+    ///
+    /// A statement whose line was lost keeps the position of whatever encloses
+    /// it, rather than reporting line 0, which a debugger reads as "no line
+    /// here" and steps straight past.
+    ///
+    /// The enclosing position is restored afterwards, so a compound
+    /// statement's own trailing instructions — a loop's increment, its branch
+    /// back — belong to the statement that owns them rather than to the last
+    /// statement of its body.
     fn stmt(&mut self, s: &openepl_ir::Stmt) -> Result<(), LowerError> {
+        let enclosing = self.body.loc;
+        if self.scope.is_some() && s.line > 0 {
+            let scope = self.scope;
+            self.set_loc(scope, s.line, s.span.col.max(1));
+        }
+        let result = self.stmt_at(s);
+        self.body.loc = enclosing;
+        result
+    }
+
+    fn stmt_at(&mut self, s: &openepl_ir::Stmt) -> Result<(), LowerError> {
         use openepl_ir::StmtKind;
         match &s.kind {
             // Erased by the desugar; reaching one means the module was lowered
@@ -4623,6 +4659,23 @@ mod tests {
         assert!(!entry.starts_with(" !dbg"), "{ll}");
         let body = entry.split("\n}").next().unwrap();
         assert!(!body.contains("!dbg"), "entry point carried locations: {body}");
+    }
+
+    /// A debug record carries its location as an argument, not as trailing
+    /// metadata. Appending `!dbg` to one makes the whole module fail to parse,
+    /// and the instruction stream cannot tell the difference by the `!dbg`
+    /// test alone, because a record's spelling is `#dbg`.
+    #[test]
+    fn a_debug_record_is_not_given_trailing_metadata() {
+        use std::fmt::Write as _;
+        let mut body = Body { loc: Some(7), ..Body::default() };
+        writeln!(body, "  store i32 1, ptr %v0").unwrap();
+        writeln!(body, "  #dbg_declare(ptr %v0, !8, !DIExpression(), !7)").unwrap();
+        let text = body.as_str();
+        assert!(text.contains("store i32 1, ptr %v0, !dbg !7"), "{text}");
+        for line in text.lines().filter(|l| l.contains("#dbg_")) {
+            assert!(!line.ends_with(", !dbg !7"), "record carried metadata: {line}");
+        }
     }
 
     /// Every `alloca` belongs to the `entry:` block, and this is not a matter
