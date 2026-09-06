@@ -1,6 +1,9 @@
 # The OpenEPL debugger
 
-**Status:** Phase 0 shipped in 0.10.1. Phases 1 and 2 done. Phases 3–8 planned.
+**Status:** Phase 0 shipped in 0.10.1. Phases 1 and 2 done. Phases 3–6 written
+against the interfaces below and **not yet wired**: `Session` is still the stub
+that joins them, so nothing runs a program end to end yet. Phase 7's Studio
+client exists; its UI does not.
 
 OpenEPL ships its own debugger. Not a wrapper around gdb or lldb, and not a
 dependency on either being installed — the bundle's promise is "unpack and
