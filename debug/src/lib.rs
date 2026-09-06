@@ -14,7 +14,12 @@
 
 use std::path::Path;
 
+pub mod session;
+pub mod step;
 mod symbols;
+pub mod target;
+pub mod unwind;
+pub mod value;
 
 pub use symbols::{Program, Subprogram, Row};
 
