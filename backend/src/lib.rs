@@ -62,6 +62,9 @@ impl std::fmt::Write for Body {
                 // argument, and appending one makes the module fail to parse.
                 // It is skipped by name rather than by the `!dbg` test below,
                 // because the record's own spelling is `#dbg`, not `!dbg`.
+                // The intrinsic spelling of the same thing *is* an instruction
+                // and does end in `, !dbg !N` — the test below is what keeps it
+                // from being given a second one.
                 let record = self.pending.trim_start().starts_with("#dbg_");
                 if self.pending.starts_with("  ") && !record && !self.pending.contains("!dbg") {
                     self.pending.push_str(&format!(", !dbg !{n}"));
@@ -192,6 +195,20 @@ pub fn lower_module(m: &Module, reg: &Registry) -> Result<String, LowerError> {
     lower_module_from(m, reg, None)
 }
 
+/// How a variable declaration is spelled in the debug information.
+///
+/// LLVM changed the spelling and then removed the old one: records arrived in
+/// LLVM 19 and the `llvm.dbg.*` intrinsics were deleted in LLVM 21, so there
+/// is no single form every supported toolchain accepts. The caller knows which
+/// clang will assemble the module and so the caller chooses.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DebugFormat {
+    /// `#dbg_declare(...)` — LLVM 19 and later.
+    Records,
+    /// `call void @llvm.dbg.declare(...)` — LLVM 18 and earlier.
+    Intrinsics,
+}
+
 /// Lower, naming the source the module was parsed from.
 ///
 /// The path is what a debugger is told to open when it stops on a line, so it
@@ -201,6 +218,19 @@ pub fn lower_module_from(
     m: &Module,
     reg: &Registry,
     source: Option<&str>,
+) -> Result<String, LowerError> {
+    lower_module_with(m, reg, source, DebugFormat::Records)
+}
+
+/// Lower, naming the source *and* the spelling its debug information uses.
+///
+/// `lower_module_from` assumes a current LLVM. This is the same thing for a
+/// caller that has asked the toolchain which one it has.
+pub fn lower_module_with(
+    m: &Module,
+    reg: &Registry,
+    source: Option<&str>,
+    debug_format: DebugFormat,
 ) -> Result<String, LowerError> {
     // User subroutines are callable names too. The validator has already proven
     // none of them collides with a library command, so registering them here
@@ -237,7 +267,13 @@ pub fn lower_module_from(
         reg,
         strings: Vec::new(),
         body: Body::default(),
-        debug: source.map(|p| debug::DebugInfo::new(p, concat!("Kiln ", env!("CARGO_PKG_VERSION")))),
+        debug: source.map(|p| {
+            debug::DebugInfo::new(
+                p,
+                concat!("Kiln ", env!("CARGO_PKG_VERSION")),
+                debug_format == DebugFormat::Records,
+            )
+        }),
         scope: None,
         stmt_line: 0,
         vars: HashMap::new(),
@@ -959,10 +995,10 @@ impl Lowerer<'_> {
         let Some(var) = debug.local(scope, name, ty, line, arg) else {
             return;
         };
-        let record = debug::DebugInfo::declare(slot, var, loc);
-        // Written through the instruction stream like everything else. It is a
-        // record rather than an instruction, and the stream knows not to give
-        // one a trailing location.
+        let record = debug.declare(slot, var, loc);
+        // Written through the instruction stream like everything else. The
+        // stream knows not to give a record a trailing location, and not to
+        // give a second one to the intrinsic, which arrives carrying its own.
         write!(self.body, "{record}").unwrap();
     }
 

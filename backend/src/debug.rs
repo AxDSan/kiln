@@ -75,14 +75,26 @@ pub(crate) struct DebugInfo {
     globals: Option<usize>,
     /// The `!DIGlobalVariableExpression` of each module variable, by name — the
     /// node its `@` definition is annotated with.
+    ///
+    /// Built and unit-tested, but nothing in the lowering annotates a `@`
+    /// definition yet, so a module variable is not inspectable in a debugger.
+    /// Kept rather than deleted because the half that is hard — the two-node
+    /// shape and the compile unit's `globals` list — is the half that is done.
+    #[allow(dead_code)]
     global_exprs: HashMap<String, usize>,
+    /// Emit variable declarations as debug *records* (`#dbg_declare`) rather
+    /// than as calls to `@llvm.dbg.declare`. The two spellings are not
+    /// interchangeable and neither is universally accepted: records were
+    /// introduced in LLVM 19 and the intrinsics were removed in LLVM 21, so
+    /// the toolchain that will assemble this module decides which one it gets.
+    records: bool,
 }
 
 impl DebugInfo {
     /// `path` is the source as the user named it. It is split into a file and
     /// a directory because DWARF stores them separately, and a debugger that
     /// is handed a bare name cannot find the file to show.
-    pub(crate) fn new(path: &str, producer: &str) -> Self {
+    pub(crate) fn new(path: &str, producer: &str, records: bool) -> Self {
         let (directory, filename) = match path.rfind('/') {
             Some(i) => (path[..i].to_string(), path[i + 1..].to_string()),
             None => (".".to_string(), path.to_string()),
@@ -98,6 +110,7 @@ impl DebugInfo {
             retained: HashMap::new(),
             globals: None,
             global_exprs: HashMap::new(),
+            records,
         }
     }
 
@@ -288,16 +301,29 @@ impl DebugInfo {
         Some(n)
     }
 
-    /// The record binding a variable to the stack slot holding it.
+    /// The line binding a variable to the stack slot holding it.
     ///
     /// This is a whole line, indentation and newline included, and it must
-    /// reach the function body *verbatim*: `#dbg_declare` is a record rather
-    /// than an instruction, so a trailing `, !dbg !N` — which the instruction
-    /// stream appends to every indented line it is given — makes it
-    /// unparseable. The location is the fourth argument instead, and it must
-    /// be one scoped to the same subprogram as `var`.
-    pub(crate) fn declare(slot: &str, var: usize, loc: usize) -> String {
-        format!("  #dbg_declare(ptr {slot}, !{var}, !DIExpression(), !{loc})\n")
+    /// reach the function body *verbatim*.
+    ///
+    /// In the record form `#dbg_declare` is not an instruction, so a trailing
+    /// `, !dbg !N` — which the instruction stream appends to every indented
+    /// line it is given — makes it unparseable; the location is the fourth
+    /// argument instead. In the intrinsic form it is an ordinary call and the
+    /// location *is* the trailing `!dbg`, written here rather than left to the
+    /// stream because the stream attaches the location of the enclosing
+    /// statement, which is not necessarily the one this variable was declared
+    /// at. Either way the location must be scoped to the same subprogram as
+    /// `var`.
+    pub(crate) fn declare(&self, slot: &str, var: usize, loc: usize) -> String {
+        if self.records {
+            format!("  #dbg_declare(ptr {slot}, !{var}, !DIExpression(), !{loc})\n")
+        } else {
+            format!(
+                "  call void @llvm.dbg.declare(metadata ptr {slot}, metadata !{var}, \
+                 metadata !DIExpression()), !dbg !{loc}\n"
+            )
+        }
     }
 
     /// Declare a module variable and return the `!DIGlobalVariableExpression`
@@ -307,6 +333,7 @@ impl DebugInfo {
     /// the compile unit's `globals` list is what makes a debugger look for it.
     /// Without them a module variable is unreadable however good the engine
     /// reading it.
+    #[allow(dead_code)]
     pub(crate) fn global(&mut self, name: &str, ty: usize, line: usize) -> usize {
         let line = line.max(1);
         // Module variables are `internal`, which is what `isLocal` says.
@@ -333,6 +360,7 @@ impl DebugInfo {
 
     /// The node a module variable's definition is annotated with, once
     /// [`Self::global`] has declared it.
+    #[allow(dead_code)]
     pub(crate) fn global_expr(&self, name: &str) -> Option<usize> {
         self.global_exprs.get(name).copied()
     }
@@ -499,6 +527,11 @@ impl DebugInfo {
     pub(crate) fn render(&self) -> String {
         let mut out = String::new();
         out.push('\n');
+        // The intrinsic is an ordinary function and must be declared before it
+        // is called. The record form is syntax and needs nothing.
+        if !self.records {
+            out.push_str("declare void @llvm.dbg.declare(metadata, metadata, metadata)\n\n");
+        }
         writeln!(out, "!llvm.dbg.cu = !{{!{CU}}}").unwrap();
         writeln!(
             out,
@@ -598,7 +631,7 @@ mod tests {
     }
 
     fn info() -> DebugInfo {
-        DebugInfo::new("examples/demo.kiln", "Kiln test")
+        DebugInfo::new("examples/demo.kiln", "Kiln test", true)
     }
 
     /// A unit that describes nothing but lines must say so. Claiming
@@ -804,9 +837,38 @@ mod tests {
     #[test]
     fn a_declare_record_is_a_whole_line_with_the_location_inside_it() {
         assert_eq!(
-            DebugInfo::declare("%v0", 12, 9),
+            info().declare("%v0", 12, 9),
             "  #dbg_declare(ptr %v0, !12, !DIExpression(), !9)\n"
         );
+    }
+
+    /// The intrinsic is the opposite in both respects: an ordinary call, whose
+    /// location is the trailing `!dbg` the record could not have.
+    #[test]
+    fn a_declare_intrinsic_is_a_call_carrying_a_trailing_location() {
+        let d = DebugInfo::new("examples/demo.kiln", "Kiln test", false);
+        assert_eq!(
+            d.declare("%v0", 12, 9),
+            "  call void @llvm.dbg.declare(metadata ptr %v0, metadata !12, \
+             metadata !DIExpression()), !dbg !9\n"
+        );
+    }
+
+    /// And it is a function, so it must be declared. Nothing declares it for
+    /// the record form, which is syntax.
+    #[test]
+    fn the_intrinsic_form_declares_the_intrinsic_and_the_record_form_does_not() {
+        let reg = Registry::core();
+        let mut records = DebugInfo::new("a.kiln", "Kiln test", true);
+        let mut calls = DebugInfo::new("a.kiln", "Kiln test", false);
+        for d in [&mut records, &mut calls] {
+            let sp = d.subprogram("main", "ECodeStart", 1);
+            let ty = d.value_type(Ty::Int, &reg);
+            d.local(sp, "v", ty, 1, None);
+        }
+        let want = "declare void @llvm.dbg.declare(metadata, metadata, metadata)";
+        assert!(calls.render().contains(want), "{}", calls.render());
+        assert!(!records.render().contains(want), "{}", records.render());
     }
 
     #[test]

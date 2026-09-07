@@ -16,7 +16,7 @@ sub main
   # `text * n` repeats, `text + text` joins, and a `{hole}` interpolates.
   var rule = "=" * 10
   call print_text(rule)                 # ==========
-  var who = "Open" + "EPL"
+  var who = "Ki" + "ln"
   call print_text("hello, {who}")       # hello, Kiln
 
   # A range loop counts inclusively from 1; the binding is the value.

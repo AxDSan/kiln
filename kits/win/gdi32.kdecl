@@ -388,12 +388,12 @@ const PS_NULL = 5
 const PS_INSIDEFRAME = 6
 
 # Brush styles, for LOGBRUSH.
-const KN_SOLID = 0
-const KN_NULL = 1
-const KN_HOLLOW = 1
-const KN_HATCHED = 2
-const KN_PATTERN = 3
-const KN_DIBPATTERN = 5
+const BS_SOLID = 0
+const BS_NULL = 1
+const BS_HOLLOW = 1
+const BS_HATCHED = 2
+const BS_PATTERN = 3
+const BS_DIBPATTERN = 5
 
 # Hatch patterns, for CreateHatchBrush.
 const HS_HORIZONTAL = 0

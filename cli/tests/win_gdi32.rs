@@ -358,7 +358,7 @@ sub main
   call say("type.memdc", GetObjectType(dc))
 
   var lb: LOGBRUSH
-  lb.style = KN_SOLID
+  lb.style = BS_SOLID
   lb.color = 65280
   call say("type.brushindirect", GetObjectType(CreateBrushIndirect(lb)))
 
@@ -754,8 +754,8 @@ _Static_assert(CAPTUREBLT == 1073741824, "CAPTUREBLT");
 _Static_assert(TRANSPARENT == 1 && OPAQUE == 2, "bk modes");
 _Static_assert(PS_SOLID == 0 && PS_DASH == 1 && PS_DOT == 2 && PS_DASHDOT == 3
     && PS_DASHDOTDOT == 4 && PS_NULL == 5 && PS_INSIDEFRAME == 6, "pen styles");
-_Static_assert(KN_SOLID == 0 && KN_NULL == 1 && KN_HOLLOW == 1 && KN_HATCHED == 2
-    && KN_PATTERN == 3 && KN_DIBPATTERN == 5, "brush styles");
+_Static_assert(BS_SOLID == 0 && BS_NULL == 1 && BS_HOLLOW == 1 && BS_HATCHED == 2
+    && BS_PATTERN == 3 && BS_DIBPATTERN == 5, "brush styles");
 _Static_assert(HS_HORIZONTAL == 0 && HS_VERTICAL == 1 && HS_FDIAGONAL == 2
     && HS_BDIAGONAL == 3 && HS_CROSS == 4 && HS_DIAGCROSS == 5, "hatch styles");
 _Static_assert(WHITE_BRUSH == 0 && LTGRAY_BRUSH == 1 && GRAY_BRUSH == 2
@@ -897,7 +897,7 @@ fn commands_lists_the_gdi32_bundle() {
         "const: PS_SOLID",
         "const: WHITE_BRUSH",
         "const: DC_BRUSH",
-        "const: KN_SOLID",
+        "const: BS_SOLID",
     ] {
         assert!(
             listed.lines().any(|l| l.starts_with(want)),

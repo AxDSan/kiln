@@ -37,7 +37,7 @@ mod templates;
 
 use std::collections::HashMap;
 
-use kiln_backend::lower_module_from;
+use kiln_backend::{lower_module_with, DebugFormat};
 use kiln_ir::registry::Registry;
 use kiln_ir::validate::{validate_with, Hints};
 use kiln_ir::{parse_with, Module, ParseOptions, Target};
@@ -946,7 +946,8 @@ fn compile_with(
     } else {
         input.to_str()
     };
-    let ll = lower_module_from(&module, &plan.registry, source).map_err(|e| e.to_string())?;
+    let ll = lower_module_with(&module, &plan.registry, source, debug_format())
+        .map_err(|e| e.to_string())?;
     Ok((ll, plan, target, module))
 }
 
@@ -1152,6 +1153,47 @@ fn output_for_os(out: PathBuf, target: Target, os: Os) -> PathBuf {
     } else {
         out
     }
+}
+
+/// Which spelling of the debug-info declaration the installed clang can read.
+///
+/// LLVM 19 introduced debug records and LLVM 21 deleted the intrinsics they
+/// replaced, so there is no form both ends of the supported range accept: a
+/// module written for clang 21 does not parse under clang 18, which is what
+/// Ubuntu 24.04 still ships. Since debug information is on by default, getting
+/// this wrong is not a degraded build but a build that fails outright, so the
+/// version is asked for rather than assumed.
+///
+/// An unreadable answer means records — the modern form, and the one every
+/// clang from 19 on accepts. `KILN_CLANG_MAJOR` overrides the probe, which is
+/// how the emitted IR is tested against a version that is not installed.
+fn debug_format() -> DebugFormat {
+    match clang_major() {
+        Some(n) if n < 19 => DebugFormat::Intrinsics,
+        _ => DebugFormat::Records,
+    }
+}
+
+/// The major version of `clang`, from the first line of `clang --version`.
+///
+/// Vendors rewrite that line freely — "Ubuntu clang version 18.1.3", "Apple
+/// clang version 17.0.0" — so rather than parse the prose this takes the first
+/// dotted number after the word `version`. Anything it cannot read is `None`
+/// rather than a guess.
+fn clang_major() -> Option<u32> {
+    if let Ok(forced) = std::env::var("KILN_CLANG_MAJOR") {
+        return forced.trim().parse().ok();
+    }
+    let out = Command::new("clang").arg("--version").output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let line = text.lines().next()?;
+    let after = line.split("version").nth(1)?;
+    let num: String = after
+        .trim_start()
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    num.parse().ok()
 }
 
 /// Is the mingw-w64 cross compiler installed? One line naming the package
