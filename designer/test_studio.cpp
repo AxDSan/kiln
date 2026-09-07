@@ -309,9 +309,9 @@ static void test_sessions(const std::string& kiln, const std::string& designer) 
     {
         const std::string out = session(designer, kiln, "examples/tcpchat.kiln", "rclick:link;menu");
         check("menu: a tray component lists its events",
-              has(out, "menu: open rows=7\n  link (tcpclient)\n  Events\n  connect \xe2\x86\x92 on_connect\n"
+              has(out, "menu: open rows=8\n  link (tcpclient)\n  Events\n  connect \xe2\x86\x92 on_connect\n"
                        "  disconnect \xe2\x86\x92 on_disconnect\n  receive \xe2\x86\x92 on_receive\n"
-                       "  error \xe2\x86\x92 on_error\n  Delete\n"));
+                       "  receive_bytes\n  error \xe2\x86\x92 on_error\n  Delete\n"));
     }
 
     // Hover, definition and references through the language server.

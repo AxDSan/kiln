@@ -7662,6 +7662,14 @@ std::string run_welcome(const std::string& family) {
         dump_to(shot);
         std::printf("welcomedump: %s\n", shot);
         std::fflush(stdout);
+        // Closed before returning, like every other exit from here. `pick` is
+        // a local of this function: leaving the document alive leaves it
+        // holding a listener whose object is gone the moment we return, and
+        // `Rml::Shutdown()` walks that list — the crash was a segfault in
+        // DetachAllEvents at the very end of a run that had otherwise done
+        // everything right, which is the kind that gets blamed on the dump.
+        doc->Close();
+        g.context->Update();
         return "";
     }
 
