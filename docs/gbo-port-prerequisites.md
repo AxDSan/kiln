@@ -178,6 +178,16 @@ concatenate. Passing every parameter as text and letting the driver coerce is wh
 `MYSQL_STMT` with `MYSQL_TYPE_STRING` binds do anyway, and it is what keeps the surface to one
 type. A typed `db_exec_int` family can come later if a column ever needs it.
 
+**NULL has to be writable, and `text[]` cannot say it.** The one UPDATE on this path writes
+`last_login_ip` and `last_login_mac` as **NULL, not `""`**, when the client sent nothing
+(`AccountRepository.RecordSuccessfulLoginAsync` → `Truncate(...)` answers null on empty), and
+`db_is_null` above only covers the read side. Decide it in the surface rather than at the first
+port: add a companion `db_exec_n(h, sql, params: text[], nulls: bool[]) -> int` (and `db_query_n`)
+where `nulls[i] = true` binds parameter `i` as SQL NULL whatever `params[i]` holds. The two-array
+form is what keeps the plain call one type wide. The alternative — the Kiln port writing `""`
+where .NET writes NULL — is drift the website's admin pages would show as a blank IP rather than
+"never", so it is not taken.
+
 **Implementation notes, measured on this machine.**
 
 - Two handle kinds are needed and the header says kinds are assigned in `abi/kiln_abi.h`, not in
