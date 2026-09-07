@@ -56,14 +56,14 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "kiln-backend"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "kiln-ir",
 ]
 
 [[package]]
 name = "kiln-cli"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "kiln-backend",
  "kiln-debug",
@@ -76,7 +76,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-debug"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "gimli",
  "memmap2",
@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-ir"
-version = "1.0.0"
+version = "1.0.1"
 
 [[package]]
 name = "libc"

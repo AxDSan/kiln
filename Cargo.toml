@@ -7,7 +7,7 @@ resolver = "2"
 members = ["ir", "backend", "cli", "debug"]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 license = "MIT OR BSD-3-Clause"
 repository = "https://github.com/kiln/kiln"
