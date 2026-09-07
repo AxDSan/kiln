@@ -1,0 +1,26 @@
+# P2 rerun, after item 1: a byte-set arrives whole and goes back whole.
+#
+#   kiln run docs/gbo-port-probes/p2_bytes_round_trip.kiln
+#   printf "\x04\x00\x11\x27" | nc 127.0.0.1 9231 | od -An -tx1
+#
+# Before `receive_bytes` existed this printed `received length=1` and the peer
+# got one byte back. It now prints 4, and the peer gets 04 00 11 27.
+module p2_bytes_round_trip
+use net
+
+tcpserver s
+  name = "s"
+  port = 9231
+  delimiter = ""
+  active = true
+  on receive_bytes: on_bytes
+end
+
+sub on_bytes(client: int, data: bytes)
+  call print_text("received length={bytes_count(data)}")
+  call tcpserver_send_bytes("s", client, data)
+end
+
+sub main
+  call print_text("listening")
+end

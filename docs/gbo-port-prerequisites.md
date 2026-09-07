@@ -21,11 +21,12 @@ line are given so it can be rechecked rather than believed.
 The page below was written on 2026-09-06 from reading. This section is what a day of probing the
 built binary (`target/release/kiln`, commit `3c547c7`) against the real LoginServer source turned
 up, and it is ordered as **work items**: each one says what to change, where, and how to know it is
-done. Nothing on the 09-06 list has been implemented yet — `libs/` is still
-`config file hash hello json math net process random system text time ui`, and `tcpserver` still
-delivers text.
+done. When it was written, nothing on the 09-06 list had been implemented — `libs/` was
+`config file hash hello json math net process random system text time ui`, and `tcpserver` only
+delivered text. Item 1 is now done; items 2 and 3 are not.
 
 Two things are better than the page said, one is worse, and one is missing from it entirely.
+**Item 1 has since been implemented** — see its heading below.
 
 | | 09-06 said | 09-07 measured |
 |---|---|---|
@@ -81,10 +82,30 @@ padding after a 33-byte prefix happens to be the 3 bytes the protocol leaves the
 
 ---
 
-### Item 1 — `tcpserver`/`tcpclient` byte-set delivery, both directions
+### Item 1 — `tcpserver`/`tcpclient` byte-set delivery, both directions — **done, 2026-09-07**
 
-**The blocker for the login slice, and the smallest.** The 09-06 page had the receive half; the
-send half is new.
+**Shipped.** `receive_bytes` and `tcpserver_send_bytes` / `tcpclient_send_bytes` exist, and
+`docs/gbo-port-probes/p2_bytes_round_trip.kiln` is the rerun: the same
+`printf '\x04\x00\x11\x27'` now prints `received length=4` and the peer gets `04 00 11 27`
+back, where before it was 1 byte each way. `receive` is untouched, so `examples/tcpecho.kiln`,
+`examples/tcpchat.kiln` and every sample on the networking page still build and still behave
+as they did.
+
+It was C only, as predicted: `libs/net/net_tcp_component.c` and `libs/net/net_libinfo.c`, nothing
+in `ir/`, `cli/` or `backend/`. One thing the plan below did not foresee — `net_peer_deliver`
+copies the unit into a scratch buffer and frees it after the callback, rather than handing over
+the `net_text` allocation, because the two exits want different values built from the same bytes
+and the bytes must leave the input buffer before user code runs.
+
+The rule as implemented: `receive_bytes` wins when both are wired, and `receive` does not fire.
+The delimiter still decides what a unit is and is still stripped; a partial unit left by a peer
+that closed is still delivered.
+
+What remains from this item's own text: the plan below is kept as written, because the reasoning
+for the design is still the reasoning, and because the "not part of this item" note at the end is
+still true — TCP still splits and merges, and the accumulator is program code.
+
+**The plan as written on 09-07.** The 09-06 page had the receive half; the send half is new.
 
 **Where.** `libs/net/net_tcp_component.c` and `libs/net/net_libinfo.c`. Nothing in `ir/`, `cli/`
 or `backend/`: this was checked, not assumed —

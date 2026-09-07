@@ -45,7 +45,7 @@ list.
 | `delimiter` | text |
 | `timeout_ms` | int |
 
-**Events:** `connect`,`disconnect` `receive`,`error`
+**Events:** `connect`,`disconnect` `receive`,`receive_bytes` `error`
 
 ## tcpserver
 
@@ -58,7 +58,7 @@ list.
 | `max_clients` | int |
 | `delimiter` | text |
 
-**Events:** `connect`,`disconnect` `receive`,`error`
+**Events:** `connect`,`disconnect` `receive`,`receive_bytes` `error`
 
 
 # ui

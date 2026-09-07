@@ -30,6 +30,12 @@
  */
 #include "net_internal.h"
 
+/* kiln_core.h rather than the ABI header alone, for kn_bin_new: a byte-set is
+ * allocated by the runtime, and its constructor is a runtime internal the same
+ * way kn_empty_text is. `libs/file/file_cmds.c` includes it for the same
+ * reason. */
+#include "kiln_core.h"
+
 #define NET_TCP_PERIOD_MS       5           /* 0 would spin the loop at 100% */
 #define NET_TCP_BACKLOG         64
 #define NET_TCP_NAME_MAX        63
@@ -58,6 +64,11 @@ typedef void (*NetIdFn)(int32_t);
 typedef void (*NetIdTextFn)(int32_t, char *);
 typedef void (*NetTextFn)(char *);
 typedef void (*NetPlainFn)(void);
+/* The byte-set forms of the two `receive` shapes.  A byte-set reaches a
+ * handler as an LLVM `ptr` exactly as text does, so `void *` is the honest C
+ * type for the parameter — the callee reads it as a Kiln_Bin. */
+typedef void (*NetIdBinFn)(int32_t, void *);
+typedef void (*NetBinFn)(void *);
 
 /* --- one byte stream, either side ----------------------------------------
  * What a server's client and the client component have in common: a
@@ -160,10 +171,16 @@ static const char *net_find(const char *p, size_t n, const char *delim, size_t d
 
 /* Hand the owner every complete unit waiting in `in`: one per delimiter with
  * the delimiter stripped, or — with no delimiter — everything, as one piece.
- * The text is copied out and the bytes consumed BEFORE the callback runs,
+ * The unit is copied out and the bytes consumed BEFORE the callback runs,
  * because the callback is user code and may tear the stream down; after it,
- * only `dead` is looked at.  Answers 0 when the callback said to stop. */
-typedef int (*NetDeliverFn)(void *ctx, char *text);
+ * only `dead` is looked at.  Answers 0 when the callback said to stop.
+ *
+ * The callback is handed the raw `(pointer, length)` rather than a finished
+ * text, and builds whichever value its event wants.  That is what lets one
+ * delivery path have two exits — `receive` makes a text, `receive_bytes` a
+ * byte-set — instead of two paths that have to be kept agreeing about
+ * delimiters, partial flushes and teardown. */
+typedef int (*NetDeliverFn)(void *ctx, const char *p, size_t n);
 
 static int net_peer_deliver(NetPeer *p, const char *delim, void *ctx, NetDeliverFn deliver) {
     size_t dl = strlen(delim);
@@ -176,12 +193,20 @@ static int net_peer_deliver(NetPeer *p, const char *delim, void *ctx, NetDeliver
             if (!hit) return 1;
             n = (size_t)(hit - p->in.p);
         }
-        char *text = net_text(p->in.p, n);
+        char *copy = (char *)malloc(n + 1);
+        if (!copy) {
+            kn_error_set(KN_ERR_TABLE_FULL, "out of memory delivering received data");
+            return 0;
+        }
+        memcpy(copy, p->in.p, n);
+        copy[n] = '\0';
         size_t used = n + dl;
         memmove(p->in.p, p->in.p + used, p->in.n - used);
         p->in.n -= used;
         p->in.p[p->in.n] = '\0';
-        if (!deliver(ctx, text)) return 0;
+        int go = deliver(ctx, copy, n);
+        free(copy);
+        if (!go) return 0;
     }
 }
 
@@ -191,10 +216,19 @@ static int net_peer_deliver(NetPeer *p, const char *delim, void *ctx, NetDeliver
  * reason the program could see. */
 static int net_peer_flush_partial(NetPeer *p, void *ctx, NetDeliverFn deliver) {
     if (p->dead || p->in.n == 0) return !p->dead;
-    char *text = net_text(p->in.p, p->in.n);
+    size_t n = p->in.n;
+    char *copy = (char *)malloc(n + 1);
+    if (!copy) {
+        kn_error_set(KN_ERR_TABLE_FULL, "out of memory delivering received data");
+        return 0;
+    }
+    memcpy(copy, p->in.p, n);
+    copy[n] = '\0';
     p->in.n = 0;
     p->in.p[0] = '\0';
-    return deliver(ctx, text);
+    int go = deliver(ctx, copy, n);
+    free(copy);
+    return go;
 }
 
 /* "ip:port" for a socket address, the v6 host in brackets so the colons of
@@ -260,7 +294,7 @@ typedef struct {
      * the pump, or `active = false` called from inside a handler the pump
      * called.  No sweep and no source removal happens while it is. */
     int      busy;
-    Kiln_HandlerFn on_connect, on_disconnect, on_receive, on_error;
+    Kiln_HandlerFn on_connect, on_disconnect, on_receive, on_receive_bytes, on_error;
 } NetTcpServer;
 
 static NetTcpServer g_tcpservers[NET_TCPSERVERS_MAX];
@@ -418,9 +452,31 @@ static void net_tcpserver_accept(NetTcpServer *s) {
 
 typedef struct { NetTcpServer *s; NetClient *c; } NetServerDeliver;
 
-static int net_server_deliver(void *ctx, char *text) {
+/* A delivered unit as a byte-set: every byte of it, NULs included, which is
+ * the whole reason `receive_bytes` exists.  NULL when the allocation failed,
+ * and the caller treats that as nothing to deliver rather than as a handler
+ * it must call with garbage. */
+static void *net_bin_from(const char *p, size_t n) {
+    void *b = kn_bin_new((int32_t)n);
+    if (!b) {
+        kn_error_set(KN_ERR_TABLE_FULL, "out of memory building the received byte-set");
+        return NULL;
+    }
+    memcpy((Kiln_Bin *)b + 1, p, n);
+    return b;
+}
+
+/* One unit, one exit.  `receive_bytes` wins when both are wired: a program
+ * that asked for bytes asked because text loses what it needs, and firing
+ * both would hand the same unit twice under two shapes. */
+static int net_server_deliver(void *ctx, const char *p, size_t n) {
     NetServerDeliver *d = (NetServerDeliver *)ctx;
-    if (d->s->on_receive) ((NetIdTextFn)d->s->on_receive)(d->c->id, text);
+    if (d->s->on_receive_bytes) {
+        void *b = net_bin_from(p, n);
+        if (b) ((NetIdBinFn)d->s->on_receive_bytes)(d->c->id, b);
+    } else if (d->s->on_receive) {
+        ((NetIdTextFn)d->s->on_receive)(d->c->id, net_text(p, n));
+    }
     return d->s->active && !d->c->peer.dead;
 }
 
@@ -557,6 +613,7 @@ int32_t net_tcpserver_on(void *obj, const char *event, Kiln_HandlerFn fn) {
     if (strcmp(event, "connect") == 0)    { s->on_connect = fn;    return 0; }
     if (strcmp(event, "disconnect") == 0) { s->on_disconnect = fn; return 0; }
     if (strcmp(event, "receive") == 0)    { s->on_receive = fn;    return 0; }
+    if (strcmp(event, "receive_bytes") == 0) { s->on_receive_bytes = fn; return 0; }
     if (strcmp(event, "error") == 0)      { s->on_error = fn;      return 0; }
     return 1;
 }
@@ -605,6 +662,21 @@ void tcpserver_send(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     if (!c) { kn_ret_bool(ret, 0); return; }
     const char *data = net_nz(kn_arg_text(argv, 2));
     kn_ret_bool(ret, net_peer_send(&c->peer, data, strlen(data)));
+}
+
+/* tcpserver_send_bytes(server, client, data) -> bool
+ *
+ * The byte-set half of `tcpserver_send`, and the reason it exists: the text
+ * form measures its argument with strlen, so a reply carrying a NUL reached
+ * the peer cut off at it.  A byte-set carries its own length. */
+void tcpserver_send_bytes(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+    NetTcpServer *s = net_tcpserver_named(kn_arg_text(argv, 0));
+    NetClient *c = s ? net_client_by_id(s, kn_arg_int(argv, 1)) : NULL;
+    if (!c) { kn_ret_bool(ret, 0); return; }
+    Kiln_Bin *b = (Kiln_Bin *)kn_arg_ptr(argv, 2);
+    if (!b) { kn_ret_bool(ret, 0); kn_error_set(KN_ERR_INVALID_ARG, "no bytes to send"); return; }
+    kn_ret_bool(ret, net_peer_send(&c->peer, (const char *)(b + 1), (size_t)b->len));
 }
 
 /* tcpserver_send_all(server, data) -> int: how many clients it was queued
@@ -700,7 +772,7 @@ typedef struct {
     int64_t  deadline;
     int32_t  source;
     int      busy;
-    Kiln_HandlerFn on_connect, on_disconnect, on_receive, on_error;
+    Kiln_HandlerFn on_connect, on_disconnect, on_receive, on_receive_bytes, on_error;
 } NetTcpClient;
 
 static NetTcpClient g_tcpclients[NET_TCPCLIENTS_MAX];
@@ -856,9 +928,14 @@ static void net_tcpclient_poll(NetTcpClient *c) {
     if (net_now_ms() > c->deadline) net_tcpclient_fail(c, NET_ETIMEDOUT, NULL);
 }
 
-static int net_tcpclient_deliver(void *ctx, char *text) {
+static int net_tcpclient_deliver(void *ctx, const char *p, size_t n) {
     NetTcpClient *c = (NetTcpClient *)ctx;
-    if (c->on_receive) ((NetTextFn)c->on_receive)(text);
+    if (c->on_receive_bytes) {
+        void *b = net_bin_from(p, n);
+        if (b) ((NetBinFn)c->on_receive_bytes)(b);
+    } else if (c->on_receive) {
+        ((NetTextFn)c->on_receive)(net_text(p, n));
+    }
     return c->state == NET_CL_CONNECTED && !c->peer.dead;
 }
 
@@ -977,6 +1054,7 @@ int32_t net_tcpclient_on(void *obj, const char *event, Kiln_HandlerFn fn) {
     if (strcmp(event, "connect") == 0)    { c->on_connect = fn;    return 0; }
     if (strcmp(event, "disconnect") == 0) { c->on_disconnect = fn; return 0; }
     if (strcmp(event, "receive") == 0)    { c->on_receive = fn;    return 0; }
+    if (strcmp(event, "receive_bytes") == 0) { c->on_receive_bytes = fn; return 0; }
     if (strcmp(event, "error") == 0)      { c->on_error = fn;      return 0; }
     return 1;
 }
@@ -1007,6 +1085,21 @@ void tcpclient_send(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     }
     const char *data = net_nz(kn_arg_text(argv, 1));
     kn_ret_bool(ret, net_peer_send(&c->peer, data, strlen(data)));
+}
+
+/* tcpclient_send_bytes(client, data) -> bool.  The byte-set half of
+ * `tcpclient_send`, measured by the set's own length rather than by strlen. */
+void tcpclient_send_bytes(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+    NetTcpClient *c = net_tcpclient_named(kn_arg_text(argv, 0));
+    if (!c || c->state != NET_CL_CONNECTED) {
+        if (c) kn_error_set(KN_ERR_INVALID_ARG, "the client is not connected");
+        kn_ret_bool(ret, 0);
+        return;
+    }
+    Kiln_Bin *b = (Kiln_Bin *)kn_arg_ptr(argv, 1);
+    if (!b) { kn_ret_bool(ret, 0); kn_error_set(KN_ERR_INVALID_ARG, "no bytes to send"); return; }
+    kn_ret_bool(ret, net_peer_send(&c->peer, (const char *)(b + 1), (size_t)b->len));
 }
 
 /* tcpclient_connect(client) -> bool: `active = true` as a call.  True means

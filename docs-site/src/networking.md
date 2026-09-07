@@ -199,6 +199,49 @@ protocol that insists, or to `""` to be handed whatever bytes arrived, as they
 arrived. What is left when a peer closes without a final delimiter is delivered
 as one last `receive`, then `disconnect`.
 
+**Text is the default unit, and bytes are the honest one.** `receive` hands a
+`text`, and a text is a C string: it stops at the first NUL. For a line
+protocol that is exactly right and costs nothing. For a binary protocol it is
+data loss — a frame whose second byte is `0x00` arrives one byte long.
+
+So a `tcpserver` and a `tcpclient` each have a second delivery event,
+`receive_bytes`, which hands the same unit as a `bytes` value with every byte
+of it intact, and a matching `tcpserver_send_bytes` / `tcpclient_send_bytes`
+that measure what they send by the byte-set's own length rather than by
+`strlen`. Both directions truncated at a NUL before these existed.
+
+```
+module frames
+use net
+
+tcpserver s
+  name = "s"
+  port = 9101
+  delimiter = ""            # deliver whatever arrived, unsplit
+  active = true
+  on receive_bytes: on_bytes
+end
+
+sub on_bytes(client: int, data: bytes)
+  call print_int(bytes_count(data))
+  call tcpserver_send_bytes("s", client, data)     # echo it back, all of it
+end
+
+sub main
+  call print_text("listening on 9101")
+end
+```
+
+Wire one or the other, not both: when `receive_bytes` has a handler the unit
+goes there and `receive` does not fire, because the same arrival delivered
+twice under two shapes is one arrival a program would handle twice. Everything
+else is unchanged — the delimiter still decides what a unit *is*, it is still
+stripped, and a partial unit left by a peer that closed is still delivered.
+
+TCP still splits and merges, so a program reading frames keeps its own
+accumulator: append each `receive_bytes` to a `bytes` buffer, read the length
+prefix, take one frame at a time. That is program code, not library code.
+
 **The commands take the component's `name`.** `tcpserver_send("echo", ...)`
 finds the server whose `name` property is `"echo"`, the same way `grid_cell`
 finds a grid — nothing else a program can write names a component, and the
@@ -222,11 +265,13 @@ message saying which line to add.
 | `connect` | `client: int` |
 | `disconnect` | `client: int` |
 | `receive` | `client: int, data: text` |
+| `receive_bytes` | `client: int, data: bytes` — the same unit, un-truncated |
 | `error` | `message: text` |
 
 | Command | Answers |
 |---|---|
 | `tcpserver_send(server, client, data)` | `bool` — queued; the pump drains it |
+| `tcpserver_send_bytes(server, client, data)` | `bool` — the same, for a `bytes` |
 | `tcpserver_send_all(server, data)` | `int` — how many clients it went to |
 | `tcpserver_disconnect(server, client)` | `bool` |
 | `tcpserver_client_count(server)` | `int` |
@@ -304,11 +349,13 @@ the client gives up.
 | `connect` | nothing |
 | `disconnect` | nothing |
 | `receive` | `data: text` |
+| `receive_bytes` | `data: bytes` — the same unit, un-truncated |
 | `error` | `message: text` |
 
 | Command | Answers |
 |---|---|
 | `tcpclient_send(client, data)` | `bool` — false with `10005` when not connected |
+| `tcpclient_send_bytes(client, data)` | `bool` — the same, for a `bytes` |
 | `tcpclient_connect(client)` | `bool` — `active = true` as a call |
 | `tcpclient_disconnect(client)` | `bool` — false with code 0 when there was nothing to close |
 | `tcpclient_connected(client)` | `bool` |

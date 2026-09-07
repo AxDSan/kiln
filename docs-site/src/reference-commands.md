@@ -809,13 +809,53 @@ end
 | `tcpclient_connected` | text | bool |
 | `tcpclient_connect` | text | bool |
 | `tcpclient_disconnect` | text | bool |
+| [`tcpclient_send_bytes`](#tcpclient_send_bytes) | text, bytes | bool |
 | `tcpclient_send` | text, text | bool |
 | `tcpserver_client_address` | text, int | text |
 | `tcpserver_client_count` | text | int |
 | `tcpserver_client` | text, int | int |
 | `tcpserver_disconnect` | text, int | bool |
 | `tcpserver_send_all` | text, text | int |
+| [`tcpserver_send_bytes`](#tcpserver_send_bytes) | text, int, bytes | bool |
 | `tcpserver_send` | text, int, text | bool |
+
+### `tcpclient_send_bytes`
+
+`tcpclient_send_bytes(text, bytes) -> bool`
+
+Send a byte-set to the server, every byte of it.
+
+```kiln
+module example
+use net
+
+sub main
+  var frame: bytes = bytes_new(4)
+  call bytes_set(frame, 1, 4)
+  if tcpclient_send_bytes("feed", frame)
+    call print_text("sent")
+  end
+end
+```
+
+### `tcpserver_send_bytes`
+
+`tcpserver_send_bytes(text, int, bytes) -> bool`
+
+Send a byte-set to one client, every byte of it.
+
+```kiln
+module example
+use net
+
+sub main
+  var frame: bytes = bytes_new(4)
+  call bytes_set(frame, 1, 4)
+  if tcpserver_send_bytes("chat", 1, frame)
+    call print_text("sent")
+  end
+end
+```
 
 ## process
 

@@ -45,11 +45,13 @@ void net_req_query(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 void net_req_reply(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 void net_req_reply_as(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 void tcpserver_send(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
+void tcpserver_send_bytes(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 void tcpserver_send_all(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 void tcpserver_disconnect(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 void tcpserver_client_count(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 void tcpserver_client_address(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 void tcpserver_client(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
+void tcpclient_send_bytes(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 void tcpclient_send(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 void tcpclient_connect(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 void tcpclient_disconnect(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
@@ -65,6 +67,8 @@ static const int32_t P_II[]  = { KN_SDT_INT,  KN_SDT_INT };
 static const int32_t P_TT[]  = { KN_SDT_TEXT, KN_SDT_TEXT };
 static const int32_t P_TTT[] = { KN_SDT_TEXT, KN_SDT_TEXT, KN_SDT_TEXT };
 static const int32_t P_TIT[] = { KN_SDT_TEXT, KN_SDT_INT,  KN_SDT_TEXT };
+static const int32_t P_TIB[] = { KN_SDT_TEXT, KN_SDT_INT,  KN_SDT_BIN  };
+static const int32_t P_TB[]  = { KN_SDT_TEXT, KN_SDT_BIN };
 
 static const Kiln_CommandDesc NET_COMMANDS[] = {
     /* --- TCP ---------------------------------------------------------- */
@@ -103,12 +107,26 @@ static const Kiln_CommandDesc NET_COMMANDS[] = {
      * command that starts with the type it addresses reads as a method on
      * it.  The prefixes are this library's; see libs/README.md. */
     { "tcpserver_send",           "tcpserver_send",           KN_SDT_BOOL, 3, P_TIT },
+    { "tcpserver_send_bytes",     "tcpserver_send_bytes",     KN_SDT_BOOL, 3, P_TIB,
+      "Send a byte-set to one client, every byte of it",
+      "var frame: bytes = bytes_new(4)\n"
+      "call bytes_set(frame, 1, 4)\n"
+      "if tcpserver_send_bytes(\"chat\", 1, frame)\n"
+      "  call print_text(\"sent\")\n"
+      "end" },
     { "tcpserver_send_all",       "tcpserver_send_all",       KN_SDT_INT,  2, P_TT  },
     { "tcpserver_disconnect",     "tcpserver_disconnect",     KN_SDT_BOOL, 2, P_TI  },
     { "tcpserver_client_count",   "tcpserver_client_count",   KN_SDT_INT,  1, P_T   },
     { "tcpserver_client_address", "tcpserver_client_address", KN_SDT_TEXT, 2, P_TI  },
     { "tcpserver_client",         "tcpserver_client",         KN_SDT_INT,  2, P_TI  },
     { "tcpclient_send",           "tcpclient_send",           KN_SDT_BOOL, 2, P_TT  },
+    { "tcpclient_send_bytes",     "tcpclient_send_bytes",     KN_SDT_BOOL, 2, P_TB,
+      "Send a byte-set to the server, every byte of it",
+      "var frame: bytes = bytes_new(4)\n"
+      "call bytes_set(frame, 1, 4)\n"
+      "if tcpclient_send_bytes(\"feed\", frame)\n"
+      "  call print_text(\"sent\")\n"
+      "end" },
     { "tcpclient_connect",        "tcpclient_connect",        KN_SDT_BOOL, 1, P_T   },
     { "tcpclient_disconnect",     "tcpclient_disconnect",     KN_SDT_BOOL, 1, P_T   },
     { "tcpclient_connected",      "tcpclient_connected",      KN_SDT_BOOL, 1, P_T   },
@@ -149,10 +167,13 @@ static const Kiln_PropertyDesc TCPSERVER_PROPS[] = {
 static const int32_t EV_I[]  = { KN_SDT_INT };
 static const int32_t EV_IT[] = { KN_SDT_INT, KN_SDT_TEXT };
 static const int32_t EV_T[]  = { KN_SDT_TEXT };
+static const int32_t EV_IB[] = { KN_SDT_INT, KN_SDT_BIN };
+static const int32_t EV_B[]  = { KN_SDT_BIN };
 static const Kiln_EventDesc TCPSERVER_EVENTS[] = {
     { "connect",    1, EV_I  },
     { "disconnect", 1, EV_I  },
     { "receive",    2, EV_IT },
+    { "receive_bytes", 2, EV_IB },
     { "error",      1, EV_T  },
 };
 
@@ -170,6 +191,7 @@ static const Kiln_EventDesc TCPCLIENT_EVENTS[] = {
     { "connect",    0, NULL },
     { "disconnect", 0, NULL },
     { "receive",    1, EV_T },
+    { "receive_bytes", 1, EV_B },
     { "error",      1, EV_T },
 };
 
