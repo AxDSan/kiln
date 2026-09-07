@@ -262,7 +262,7 @@ fn meminfo_reads_its_own_memory_under_wine() {
 }
 
 /// The window proof: a class registered, a window created, a message loop
-/// pumped, and an Kiln subroutine called back by Windows itself with
+/// pumped, and a Kiln subroutine called back by Windows itself with
 /// WM_PAINT and WM_DESTROY.
 ///
 /// `paint` and `destroy` are printed from *inside* the WNDPROC, so seeing them
@@ -320,7 +320,7 @@ fn registry_round_trips_under_wine() {
     );
 }
 
-/// The process proof: a thread whose ThreadProc is an Kiln subroutine
+/// The process proof: a thread whose ThreadProc is a Kiln subroutine
 /// Windows calls on a stack it made, and a child process started through the
 /// STARTUPINFOA / PROCESS_INFORMATION pair whose exit code comes back.
 #[test]

@@ -7,7 +7,7 @@
 //!
 //! It reads CFI — `.eh_frame` — rather than following the frame-pointer chain.
 //! A frame-pointer walk is right only when a frame pointer is live at the
-//! moment you stop, and in an Kiln program it is never live: clang omits
+//! moment you stop, and in a Kiln program it is never live: clang omits
 //! the frame pointer, so `kn_user_main` opens with `sub $0x238, %rsp` and
 //! `ECodeStart` with `push %rax`, and neither ever writes `rbp`. Stopped
 //! anywhere in the user's own code, `rbp` therefore still holds *`main`'s*

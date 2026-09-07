@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Reads the debug information an Kiln build emits: line tables, and the functions they belong to."
+description = "Reads the debug information a Kiln build emits: line tables, and the functions they belong to."
 
 [dependencies]
 # DWARF. `gimli` is a reader, not a debugger — it parses the line program and

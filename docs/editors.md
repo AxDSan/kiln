@@ -1,7 +1,7 @@
 # Editors and the language server
 
 Kiln ships a language server, `kiln lsp`, that speaks LSP over stdio. Any
-LSP-capable editor becomes an Kiln editor by pointing it at that command —
+LSP-capable editor becomes a Kiln editor by pointing it at that command —
 the intelligence lives in one server rather than in any single editor.
 
 ## What works today

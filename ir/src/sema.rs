@@ -1149,7 +1149,7 @@ fn type_of_expr_bare(
             // Every parameter and the return must be a C-representable scalar,
             // in the same set a `dll` signature allows — a C caller passes and
             // receives these by value, and there is no honest machine layout for
-            // an Kiln array, record or dictionary crossing that call.
+            // a Kiln array, record or dictionary crossing that call.
             let bad = sig
                 .params
                 .iter()

@@ -115,7 +115,7 @@ std::unordered_map<uint64_t, uint64_t> g_action_of;   /* widget -> action handle
  * bindings wait here and are claimed when an action takes that name. */
 std::vector<std::pair<uint64_t, std::string>> g_pending_bindings;
 
-/* Disabled is an Kiln concept, not an RCSS property, and RmlUi's `disabled`
+/* Disabled is a Kiln concept, not an RCSS property, and RmlUi's `disabled`
  * attribute means nothing on a plain <button> element: the events still fire
  * and the hover shading still lights up. So the state is held here and every
  * listener asks — a control that answers the mouse while disabled is disabled
@@ -137,7 +137,7 @@ void set_widget_enabled(Kiln_Widget w, bool on) {
     if (auto* fc = rmlui_dynamic_cast<Rml::ElementFormControl*>(e)) fc->SetDisabled(!on);
 }
 
-/* Adapts an Kiln function-pointer handler to an RmlUi listener. Handlers are
+/* Adapts a Kiln function-pointer handler to an RmlUi listener. Handlers are
  * bound by pointer, never by name, so no user identifier ships (G8). */
 struct HandlerBridge : Rml::EventListener {
     Kiln_EventFn fn;

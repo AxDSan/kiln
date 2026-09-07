@@ -61,7 +61,7 @@ constexpr int CODE_MARK_W = 13;
 constexpr int CODE_CUE_W = 13;
 constexpr int CODE_PAD_Y = 8;
 
-inline std::string ACCENT      = "#1e60d5";
+inline std::string ACCENT      = "#c2410c";
 inline std::string ACCENT_TEXT = "#ffffff";
 /// The selection on the canvas: its box, its anchors, its wiring badge and
 /// the frame of a selected form. GitHub's link blue, not the IDE's accent.
@@ -147,7 +147,10 @@ constexpr int WIRE_H     = 84;
 /// ones are its light default: they are a matched pair, contrasted together
 /// rather than a light palette with its lightness inverted.
 inline void set_palette(bool dark) {
-    ACCENT = dark ? "#4d8bff" : "#1e60d5";
+    // Kiln heat, at weights that carry text on their own ground: #c2410c is
+    // 5.18:1 on white, #fb923c is 8.36:1 on the dark panel. The brand's own
+    // amber (#D97706) is a display colour and fails on white at 3.19:1.
+    ACCENT = dark ? "#fb923c" : "#c2410c";
     ACCENT_TEXT = dark ? "#0d1117" : "#ffffff";
     SELECT = dark ? "#58a6ff" : "#0969da";
     PANEL = dark ? "#0d1117" : "#ffffff";

@@ -3,7 +3,7 @@
 //! an ELF constructor on Linux — so the library runs the instant it is mapped,
 //! with no host code asking it to.
 //!
-//! The worked example (examples/hook/) is the headline: an Kiln library that,
+//! The worked example (examples/hook/) is the headline: a Kiln library that,
 //! on load, installs a function-pointer detour into a C library the host is
 //! already calling, so the host's next call returns a hooked value — proof that
 //! `dll`, `address of` and `dll_attach` compose into a real in-process hook. A
@@ -41,7 +41,7 @@ fn scratch(tag: &str) -> PathBuf {
     dir
 }
 
-/// Build an Kiln source to `out` for the host platform; assert it succeeds.
+/// Build a Kiln source to `out` for the host platform; assert it succeeds.
 fn build_native(src: &Path, out: &Path, extra: &[&str]) {
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", out.to_str().unwrap()])

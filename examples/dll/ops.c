@@ -2,7 +2,7 @@
  *
  * A uniform signature is what makes a table of these callable in a loop — the
  * program picks a slot and calls it, and every slot means the same prototype.
- * Each function is C's own operator, so an Kiln program that computes the
+ * Each function is C's own operator, so a Kiln program that computes the
  * same thing with `band`, `bor`, `bxor`, `shl` and `ushr` has something real to
  * check itself against.
  *

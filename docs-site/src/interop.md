@@ -74,7 +74,7 @@ it reads better than passing an offset to every call.
 `ptr_of_text` hands back the `char*` behind a text, to pass to a C function that
 takes a string. It is borrowed: valid only while that text is, and pointing at
 read-only bytes when the text is a literal. `ptr_read_text` does the reverse,
-copying a NUL-terminated C string at an address into an Kiln text you own:
+copying a NUL-terminated C string at an address into a Kiln text you own:
 
 ```kiln
 module strings
@@ -170,7 +170,7 @@ The types that cross the boundary are `int`, `int64`, `double`, `bool`, `text`
 and `ptr`. A `text` is passed as a C `char *` and a returned `char *` is copied
 into a managed text; a `ptr` is passed straight through. A parameter may also be
 a [C-struct record](#c-struct-records), which passes a pointer to a real struct
-— the way a C API that takes a `RECT *` or a `MSG *` is reached. An Kiln
+— the way a C API that takes a `RECT *` or a `MSG *` is reached. A Kiln
 array or dictionary, and a plain (non-`is c`) record, are runtime-owned objects
 with no by-value C shape — pass a `ptr` to bytes you laid out instead.
 
@@ -328,7 +328,7 @@ call through (ptr_read_ptr(vtable, 24))(obj)      # any expression
 ```
 
 A table of function pointers lives in a c-record's inline `ptr[N]`, as `vt.fn`
-above does — an Kiln list holds no `ptr`, so that and `ptr_read_ptr` at a
+above does — a Kiln list holds no `ptr`, so that and `ptr_read_ptr` at a
 counted offset are the two ways to index one.
 
 That last line is the whole of a COM method call. A COM object is a pointer to a
@@ -537,7 +537,7 @@ lays it out. `size of Mixed` reports that number, and it is the number to pass t
 
 A `text` field is a `char *`. Reading one copies the C string into a managed
 text you own — a NULL field reads as the empty text — so the value outlives the
-struct. Writing one stores the borrowed pointer behind an Kiln text: it is
+struct. Writing one stores the borrowed pointer behind a Kiln text: it is
 valid only while that text is, the same bargain `ptr_of_text` makes, so keep the
 text alive as long as the struct is in use.
 

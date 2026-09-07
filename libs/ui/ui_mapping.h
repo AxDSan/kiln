@@ -20,7 +20,7 @@
 
 namespace kiln::ui {
 
-/// The RmlUi tag backing an Kiln component type. The component vocabulary is
+/// The RmlUi tag backing a Kiln component type. The component vocabulary is
 /// ours; this is the only place it meets the substrate's.
 inline const char* tag_for(const char* type_name) {
     if (std::strcmp(type_name, "button") == 0) return "button";
@@ -39,7 +39,7 @@ inline const char* tag_for(const char* type_name) {
     return "div";   // label, groupbox, form, listbox, spinner, grid
 }
 
-/// The class an Kiln component wears, or nullptr when it needs none.
+/// The class a Kiln component wears, or nullptr when it needs none.
 ///
 /// Several components share one substrate tag — a checkbox, a radio button, a
 /// listbox and a spinner are all `div` — so the class is the only thing telling
@@ -243,7 +243,7 @@ inline bool is_length_property(const char* p) {
            std::strcmp(p, "border_radius") == 0;
 }
 
-/// `text` is an Kiln concept (element content), not an RCSS property.
+/// `text` is a Kiln concept (element content), not an RCSS property.
 inline bool is_text_property(const char* p) { return std::strcmp(p, "text") == 0; }
 
 /// Whether a property carries a colour: `color`, `background_color`,
@@ -328,7 +328,7 @@ inline void anchored_rect(unsigned mask, int dw, int dh,
     else if (b)       *top += dh;
 }
 
-/// Convert an Kiln property value to what RCSS expects.
+/// Convert a Kiln property value to what RCSS expects.
 inline std::string rcss_value(const char* property, const char* value) {
     std::string v(value ? value : "");
     const bool numeric = !v.empty() && v.find_first_not_of("-0123456789") == std::string::npos;

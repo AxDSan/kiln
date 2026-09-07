@@ -24,7 +24,7 @@ sub main
   call print_double(ptr_read_double(buf, 0))
 
   # ptr_of_text hands a C API the char* behind a text; ptr_read_text copies
-  # a C string back into an Kiln text.
+  # a C string back into a Kiln text.
   let greeting: text = "hello, C"
   var gp: ptr = ptr_of_text(greeting)
   call print_text(ptr_read_text(gp))

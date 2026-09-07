@@ -1,7 +1,7 @@
 /* Pointers and raw memory — the escape hatch to C.
  *
  * A `ptr` is an opaque 64-bit machine address.  These commands are the raw
- * bridge that lets an Kiln program hand a buffer, a struct, a handle or an
+ * bridge that lets a Kiln program hand a buffer, a struct, a handle or an
  * out-parameter to a C API: everything a DLL call or a callback trampoline
  * needs to move bytes across the boundary.
  *

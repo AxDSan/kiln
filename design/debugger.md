@@ -1,6 +1,6 @@
 # The Kiln debugger
 
-**Status:** Done. Phases 0–7 are implemented and shipped: an Kiln program
+**Status:** Done. Phases 0–7 are implemented and shipped: a Kiln program
 can be built, stopped on a line, stepped through, paused while running, and
 read — its call stack, its variables, and what a name holds when you hover it —
 from the command line, from VS Code, and from Studio. Phase 8 (component state

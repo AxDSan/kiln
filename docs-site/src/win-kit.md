@@ -17,7 +17,7 @@ end
 It is a [declaration kit](./interop.md#declaration-kits): a directory of `.kdecl`
 files holding `dll` lines, `is c` records and `const` numbers and nothing else.
 The kit does not ship code — there is nothing to link, nothing to install, and
-no wrapper between a program and the API. `CreateWindowExA` in an Kiln
+no wrapper between a program and the API. `CreateWindowExA` in a Kiln
 program is `CreateWindowExA` in `user32.dll`, called with the arguments the
 documentation lists, in the order it lists them.
 
@@ -145,7 +145,7 @@ the first thing a wrong struct layout gets wrong.
 
 The other four: `registry.kiln` creates a key under `HKEY_CURRENT_USER`, writes
 a `REG_DWORD` and a `REG_SZ`, reads both back and deletes the key again;
-`spawn.kiln` starts a thread whose ThreadProc is an Kiln subroutine and a
+`spawn.kiln` starts a thread whose ThreadProc is a Kiln subroutine and a
 child process through the `STARTUPINFOA` / `PROCESS_INFORMATION` pair;
 `flags.kiln` calls an address `GetProcAddress` handed back and reads the kit's
 constants a bit at a time; `msgbox.kiln` is the four-line one at the top of this
@@ -184,7 +184,7 @@ pointer automatically. Where the declaration says `ptr` instead — because
 
 Every entry point that takes or answers a string is bound under its ANSI name:
 `MessageBoxA`, `CreateWindowExA`, `RegQueryValueExA`. That is not a shortcut —
-it is the only spelling that works. An Kiln `text` is a NUL-terminated byte
+it is the only spelling that works. A Kiln `text` is a NUL-terminated byte
 string, which is exactly the `char *` an `...A` entry point takes. The `...W`
 entries take UTF-16, and there is no `text` that is UTF-16, so binding them
 would hand Windows bytes it would read as the wrong encoding.

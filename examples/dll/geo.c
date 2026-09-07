@@ -1,7 +1,7 @@
 /* A tiny C library for the c-struct record tests: a real C struct passed by
  * pointer across the `dll` boundary and mutated in place.
  *
- * `Point` is the C side of an Kiln `record Point is c (x: int, y: int)` —
+ * `Point` is the C side of a Kiln `record Point is c (x: int, y: int)` —
  * two `int`s, natural layout, `sizeof` 8. `move_point` takes a pointer to one
  * and shifts it, the plainest proof that Kiln handed C the address of a real
  * struct: C reads and writes the same bytes Kiln laid out.

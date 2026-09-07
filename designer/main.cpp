@@ -7338,6 +7338,24 @@ std::string run_welcome(const std::string& family) {
         return home.empty() ? kiln::sys::root_dir() : home;
     };
 
+    // The welcome screen, as a picture. It waits for a click, so it is the one
+    // document a scripted session could never reach — which is why its
+    // screenshot went stale at the rename while every other one could be
+    // regenerated. Same shape as the browser's dump below.
+    if (const char* shot = std::getenv("KILN_DESIGNER_WELCOME_DUMP")) {
+        for (int i = 0; i < 3; i++) {
+            Backend::ProcessEvents(g.context, nullptr, false);
+            g.context->Update();
+            Backend::BeginFrame();
+            g.context->Render();
+            Backend::PresentFrame();
+        }
+        dump_to(shot);
+        std::printf("welcomedump: %s\n", shot);
+        std::fflush(stdout);
+        return "";
+    }
+
     if (const char* pick = std::getenv("KILN_DESIGNER_WELCOME_PICK")) {
         const std::string want(pick);
         // `browse:<mode>` swaps in the path browser and dumps it, so the same

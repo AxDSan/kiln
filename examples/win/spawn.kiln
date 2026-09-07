@@ -4,7 +4,7 @@
 #
 # Two things are being proved here that nothing else in `examples/win` proves.
 #
-# A THREAD runs an Kiln subroutine on a stack Windows made: `address of`
+# A THREAD runs a Kiln subroutine on a stack Windows made: `address of`
 # hands CreateThread a real function pointer with the ThreadProc shape, and
 # what the sub returns comes back out of GetExitCodeThread. Windows is
 # calling into this program on a thread this program never created.

@@ -1,4 +1,4 @@
-//! Reads the debug information an Kiln build emits.
+//! Reads the debug information a Kiln build emits.
 //!
 //! This crate knows how to *read* a built program: which address belongs to
 //! which line of which source, and which function an address is in. It never

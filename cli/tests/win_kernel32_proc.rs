@@ -116,7 +116,7 @@ module winproc
 use winproc
 
 # The body CreateThread runs. It touches nothing but its own arithmetic: what
-# is under test is that Windows called an Kiln sub and kept its result as
+# is under test is that Windows called a Kiln sub and kept its result as
 # the thread's exit code.
 sub worker(parameter: ptr): int system
   return 4242

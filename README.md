@@ -67,8 +67,8 @@ Download a release, unpack it anywhere, and run it — there is no installer and
 nothing to configure:
 
 ```sh
-tar xzf kiln-0.11.1-linux-x86_64.tar.gz
-cd kiln-0.11.1-linux-x86_64
+tar xzf kiln-1.0.0-linux-x86_64.tar.gz
+cd kiln-1.0.0-linux-x86_64
 bin/kiln-studio
 ```
 

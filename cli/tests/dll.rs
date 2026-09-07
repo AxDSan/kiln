@@ -1,5 +1,5 @@
 //! End-to-end tests for the `dll` foreign-function interface: build a tiny C
-//! library, build an Kiln program that calls into it, run the two together,
+//! library, build a Kiln program that calls into it, run the two together,
 //! and prove the value, string and pointer paths across the boundary — plus
 //! that a missing symbol is a named failure, an `as` rename maps a symbol, the
 //! validator rejects a bad call at build time, and a declaration compiles with

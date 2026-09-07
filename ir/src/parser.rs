@@ -1362,7 +1362,7 @@ impl Parser {
         self.bump();
         let count = match self.bump() {
             Tok::Int(n) if n >= 1 => n,
-            // `T[]` is an Kiln list: a pointer to a runtime-owned array, and
+            // `T[]` is a Kiln list: a pointer to a runtime-owned array, and
             // not a block of bytes a struct can hold.
             Tok::RBracket => {
                 return self.err(format!(

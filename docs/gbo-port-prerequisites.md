@@ -8,7 +8,7 @@ this list was whether it could be ported to Kiln.
 that a binary-protocol game server with a database behind it is the most honest load test Kiln
 has been offered: it exercises sockets, framing, fixed-layout records, a database, a tick loop and
 long-running stability all at once, and every gap it exposes is a gap a real toolsmith language has
-to close anyway. **Read this as an Kiln feature list that happens to have a demanding first
+to close anyway. **Read this as a Kiln feature list that happens to have a demanding first
 customer**, not as a porting chore.
 
 Every number below was measured, not estimated. Where a claim comes from reading code, the file and
@@ -167,7 +167,7 @@ protocol frames are fixed-layout binary structures — the player introduction (
 records, the 77-field character sheet — and in C# they are hand-written span arithmetic, offset by
 offset, which is exactly where its decode bugs have come from (thirty-two bytes going out as zero;
 two appearance bytes read as fixed; a field misread as a direction that was a stale send buffer).
-An Kiln record with a declared layout says the same thing **declaratively**. There is a real
+A Kiln record with a declared layout says the same thing **declaratively**. There is a real
 chance these decoders come out shorter and more correct than the originals, and that is a
 demonstrable win to point at, not just parity.
 

@@ -3803,7 +3803,7 @@ impl Lowerer<'_> {
     }
 
     /// Emit the `call` itself, given a callee operand and marshalled arguments,
-    /// and bring the C result back into an Kiln value.
+    /// and bring the C result back into a Kiln value.
     ///
     /// `fp` is a `ptr`-typed operand however it was obtained — the address
     /// `kn_dll_get` resolved for a `dll`, or the run-time pointer a

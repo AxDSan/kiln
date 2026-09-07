@@ -1,4 +1,4 @@
-//! Rendering an Kiln value out of a stopped program's memory.
+//! Rendering a Kiln value out of a stopped program's memory.
 //!
 //! This is the layer that makes the debugger Kiln's rather than a small
 //! gdb, and every rule in it comes from something only the compiler knows:

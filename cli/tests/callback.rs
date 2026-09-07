@@ -1,6 +1,6 @@
-//! End-to-end tests for `address of`: passing an Kiln subroutine to C as a
+//! End-to-end tests for `address of`: passing a Kiln subroutine to C as a
 //! function pointer. Build a tiny C library that calls back through a pointer,
-//! build an Kiln program that hands it the address of a sub, run the two
+//! build a Kiln program that hands it the address of a sub, run the two
 //! together, and prove that C reaches Kiln code — for a returned value
 //! (`apply` -> `summer`), for a side effect repeated in C's own loop
 //! (`each` -> `announce`), and for a C string handed to a `text` parameter

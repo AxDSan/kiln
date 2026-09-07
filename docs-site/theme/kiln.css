@@ -3,8 +3,12 @@
    on links and headings, and code that reads like the editor. */
 
 :root {
-    --kiln-accent: #1e60d5;
-    --kiln-accent-soft: #f2f6ff;
+    /* Kiln heat, at a weight that can carry body text. The brand's amber
+       (#D97706) and orange (#EA580C) are display colours — 3.19:1 and 3.56:1
+       on white, both under the 4.5:1 a link needs — so the accent is the same
+       family two steps darker. */
+    --kiln-accent: #c2410c;
+    --kiln-accent-soft: #fff7ed;
 }
 
 /* The wordmark sits above the chapter list, and links home. */

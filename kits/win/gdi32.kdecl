@@ -6,7 +6,7 @@
 #
 # ANSI entry points throughout: a call that takes a string is bound under its
 # `...A` name, which is both what a program writes and the symbol gdi32 exports,
-# so an Kiln `text` crosses as the C `char *` it already is. The `...W` wide
+# so a Kiln `text` crosses as the C `char *` it already is. The `...W` wide
 # entries take UTF-16 and are not bound here.
 #
 # COLORREF has no macro in Kiln, so compute one: a colour is

@@ -169,7 +169,7 @@ dll CloseHandle(hobj: ptr): bool from "kernel32" as "CloseHandle" system
 dll WaitForSingleObject(hobj: ptr, milliseconds: int): int from "kernel32" as "WaitForSingleObject" system
 # `handles` points at an array of `count` HANDLEs. The result is
 # WAIT_OBJECT_0 + the index of the signalled one, counting from zero as
-# Windows does — add 1 before using it as an Kiln position.
+# Windows does — add 1 before using it as a Kiln position.
 dll WaitForMultipleObjects(count: int, handles: ptr, waitAll: bool, milliseconds: int): int from "kernel32" as "WaitForMultipleObjects" system
 dll DuplicateHandle(sourceProcess: ptr, sourceHandle: ptr, targetProcess: ptr, targetHandle: ptr, desiredAccess: int, inheritHandle: bool, options: int): bool from "kernel32" as "DuplicateHandle" system
 dll GetHandleInformation(hobj: ptr, flags: ptr): bool from "kernel32" as "GetHandleInformation" system
