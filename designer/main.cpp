@@ -689,6 +689,7 @@ void mark_dirty() { g.dirty = true; }
 
 void run_app(const std::string& path);
 void stop_app();
+void stop_all();
 void poll_build();
 void set_activity(const char* what);
 void refresh_highlight();
@@ -925,6 +926,11 @@ std::string build_styles(const std::string& family, const std::string& mono,
     s << ".tb.ghost{color:" << TEXT_MUTED << "}";
     s << ".tb.run{color:" << SUCCESS << ";font-weight:bold}";
     s << ".tb.stop{color:" << DANGER << "}";
+    // Blocked rather than hidden: a Run button that vanishes while an app is
+    // alive moves everything beside it, and a toolbar that reflows under the
+    // pointer is worse than one that greys.
+    s << ".tb.blocked{color:" << TEXT_MUTED << ";opacity:0.5}";
+    s << ".tb.blocked:hover{background-color:transparent}";
     s << ".sep{display:inline-block;width:1px;height:20px;margin:10px 8px 0 8px;"
          "background-color:" << BORDER << "}";
 
@@ -1423,7 +1429,7 @@ std::string build_chrome(const std::string& family, const std::string& mono,
          "<div id='activitytrack'><div id='activitybar'/></div></div>"
          "<span id='runlamp' style='display:none'>●</span>"
          "<div class='sep'/>"
-         "<div class='tb run' oe-action='run'>" + icon_img("run", 16, "tbi") + "Run</div>"
+         "<div class='tb run' id='btn_run' oe-action='run'>" + icon_img("run", 16, "tbi") + "Run</div>"
          "<div class='tb' oe-action='build'>" + icon_img("build", 16, "tbi") + "Build Binary</div>"
          "<div class='tb stop' oe-action='stop'>" + icon_img("stop", 16, "tbi") + "Stop</div>"
          // The debugging controls. Hidden until a session starts, so the
@@ -1431,7 +1437,7 @@ std::string build_chrome(const std::string& family, const std::string& mono,
          // and they replace nothing, because Run and Debug are different
          // things and a user who wants one does not want the other.
          "<div class='sep'/>"
-         "<div class='tb' oe-action='debug'>" + icon_img("debug", 16, "tbi") + "Debug</div>"
+         "<div class='tb' id='btn_debug' oe-action='debug'>" + icon_img("debug", 16, "tbi") + "Debug</div>"
          // The transport is icons alone. Seven labelled buttons is more
          // toolbar than the window has, and these are the glyphs every
          // debugger uses — the Debug menu beside them carries the words and
@@ -3149,6 +3155,23 @@ bool bound_breakpoint(int line) {
     return false;
 }
 
+/// Is the app started by Run still alive?
+///
+/// `g.running_app` is the pid Run recorded, and a pid outlives the process:
+/// between the app exiting and `poll_app` noticing, the field still holds it.
+/// Every guard below asks this rather than the field, so a Run refused
+/// because "an app is already running" is never refused because of one that
+/// finished a frame ago.
+bool app_alive() {
+#ifdef _WIN32
+    if (g.running_app <= 0) return false;
+    int code = 0;
+    return !kiln::sys::try_wait(g.app_child, code);
+#else
+    return g.running_app > 0 && ::kill(g.running_app, 0) == 0;
+#endif
+}
+
 /// Show or hide the debugging controls, and say what the session is doing.
 void update_debug_controls() {
     const bool live = g.dbg.running();
@@ -3161,11 +3184,26 @@ void update_debug_controls() {
             e->SetProperty("display", live ? "inline-block" : "none");
         }
     }
+    // Run and Debug are mutually exclusive with everything already going: one
+    // app at a time, and a debugging session is an app. Marked here rather
+    // than only refused on the click, so the toolbar says so before you try.
+    const bool busy = live || app_alive();
+    for (const char* id : {"btn_run", "btn_debug"}) {
+        if (Rml::Element* e = by_id(id)) e->SetClass("blocked", busy);
+    }
 }
 
 /// Start a debugging session on the open module.
 void start_debug() {
     if (g.dbg.running()) { set_status("already debugging"); return; }
+    // One program at a time. Debugging a second copy while the first is still
+    // running gives two processes writing to one console and two sets of
+    // output attributed to neither.
+    if (app_alive()) {
+        set_status("an app is running \xE2\x80\x94 stop it before debugging");
+        log("> an app is already running; press Stop first", "err");
+        return;
+    }
     // Saved first: a breakpoint on line 12 of text that has been edited and
     // not written is a breakpoint on a line the built program does not have.
     save();
@@ -3184,7 +3222,21 @@ void start_debug() {
 
 /// End the session, and put the editor back the way it was.
 void stop_debug() {
-    if (!g.dbg.running()) { set_status("not debugging"); return; }
+    if (!g.dbg.running()) {
+        // A session whose process has gone but whose *view* has not: the
+        // stopped line is still highlighted and the locals still listed.
+        // Clearing it is the whole job here, and skipping it left the editor
+        // stopped on a line no debugger was on.
+        if (g.stopped_line > 0) {
+            g.stopped_line = 0;
+            update_debug_controls();
+            refresh_highlight();
+            render_locals();
+            set_activity(nullptr);
+        }
+        set_status("not debugging");
+        return;
+    }
     g.dbg.stop();
     g.stopped_line = 0;
     update_debug_controls();
@@ -3251,6 +3303,17 @@ void toggle_breakpoint(int line) {
 /// Start a build. Returns immediately; poll_build() reports progress.
 void build_binary(bool then_run) {
     if (g.build_pid > 0) { set_status("a build is already running"); return; }
+    // Refused here rather than after the compile: Run rebuilds first, and a
+    // rebuild that ends in "an app is already running" spent the time to say
+    // nothing. Build Binary is unaffected — building while a program runs is
+    // fine, it is *starting a second one* that is not.
+    if (then_run && (app_alive() || g.dbg.running())) {
+        const char* why = g.dbg.running() ? "a debugging session is open"
+                                          : "an app is already running";
+        set_status(std::string(why) + " \xE2\x80\x94 press Stop first");
+        log(std::string("> ") + why + "; press Stop first", "err");
+        return;
+    }
     save();
     g.log_lines.clear();
 
@@ -3414,7 +3477,19 @@ void poll_build() {
 /// give us no handle on the child, which is why Stop could only ever say
 /// "nothing running".
 void run_app(const std::string& path) {
-    stop_app();
+    // Refused, not restarted. Run used to stop whatever was running and start
+    // again, which silently killed the program you were looking at — and did
+    // it after a full rebuild, so the first sign was the output disappearing.
+    if (app_alive()) {
+        set_status("an app is already running \xE2\x80\x94 press Stop first");
+        log("> an app is already running; press Stop first", "err");
+        return;
+    }
+    if (g.dbg.running()) {
+        set_status("a debugging session is open \xE2\x80\x94 press Stop first");
+        log("> a debugging session is open; press Stop first", "err");
+        return;
+    }
     // Pipe the app's stdout and stderr back to us: its output belongs in the
     // IDE console, not in whatever terminal the IDE happened to start from.
 #ifdef _WIN32
@@ -3447,11 +3522,13 @@ void run_app(const std::string& path) {
     log("  output below is the program's own stdout/stderr", "muted");
     set_status("running");
     set_activity("Running");
+    update_debug_controls();
 }
 
 /// Stop the app started by Run, if it is still alive.
 void stop_app() {
     if (g.running_app <= 0) { set_status("nothing running"); return; }
+
 #ifdef _WIN32
     int code = 0;
     if (kiln::sys::try_wait(g.app_child, code)) {   // already exited
@@ -3481,6 +3558,23 @@ void stop_app() {
     g.running_app = 0;
     set_status("stopped");
     set_activity(nullptr);
+    update_debug_controls();
+}
+
+/// What the Stop button does: stop whatever is going, whichever it is.
+///
+/// Stop is one button and the user means one thing by it. Wired to `stop_app`
+/// alone it left a debugging session open — the process died and the session
+/// that was driving it did not, so the transport stayed on the toolbar, the
+/// stopped line stayed highlighted, and Run went on refusing because Studio
+/// still believed it was debugging. A debugging session *is* the running app;
+/// ending it ends both.
+void stop_all() {
+    const bool dbg = g.dbg.running() || g.stopped_line > 0;
+    const bool app = app_alive();
+    if (dbg) stop_debug();
+    if (app || g.running_app > 0) stop_app();
+    if (!dbg && !app && g.running_app <= 0) set_status("nothing running");
 }
 
 /// Reap the app if it exited on its own, so Stop reports honestly.
@@ -3538,6 +3632,9 @@ void poll_app() {
         // afterwards reads as though it never started; say how it ended.
         set_status(code == 0 ? "finished (exit 0)" : "exited with code " + std::to_string(code));
         set_activity(nullptr);
+        // Run is blocked while an app is alive, so the frame that notices it
+        // died is the frame that has to unblock it.
+        update_debug_controls();
     }
 }
 
@@ -5480,7 +5577,7 @@ struct Listener : Rml::EventListener {
                     if (a == "save") save();
                     else if (a == "run") build_binary(true);
                     else if (a == "build") build_binary(false);
-                    else if (a == "stop") stop_app();
+                    else if (a == "stop") stop_all();
                     else if (a == "debug") start_debug();
                     else if (a == "togglebp") {
                         int line = 0, col = 0;
@@ -7045,6 +7142,33 @@ void run_script(const char* script) {
                 std::printf("dbgstop: done\n");
                 std::fflush(stdout);
             }
+            else if (verb == "runstate") {
+                std::printf("runstate: app=%s debug=%s stopped_line=%d run_blocked=%s\n",
+                            app_alive() ? "yes" : "no", g.dbg.running() ? "yes" : "no",
+                            g.stopped_line,
+                            (by_id("btn_run") && by_id("btn_run")->IsClassSet("blocked"))
+                                ? "yes" : "no");
+                std::fflush(stdout);
+            }
+            else if (verb == "stop") {
+                stop_all();
+                std::printf("stop: done\n");
+                std::fflush(stdout);
+            }
+            else if (verb == "runbg") {
+                // Run, but stop pumping the moment the app is alive rather
+                // than when it exits — the only way a script can be in the
+                // state "an app is running" and try something from there.
+                build_binary(true);
+                for (int i = 0; i < 2400 && g.build_pid > 0 && g.running_app <= 0; i++) {
+                    poll_build();
+                    poll_app();
+                    g.context->Update();
+                    usleep(20000);
+                }
+                std::printf("runbg: pid=%d\n", (int)g.running_app);
+                std::fflush(stdout);
+            }
             else if (verb == "build" || verb == "run") {
                 build_binary(verb == "run");
                 // Pump the same polls the frame loop does, so a scripted
@@ -8139,7 +8263,7 @@ int main(int argc, char** argv) {
         g.context->Render();
         Backend::PresentFrame();
     }
-    stop_app();
+    stop_all();
     g.lsp.stop();
     remember_window_size();
     if (g.dirty) {
