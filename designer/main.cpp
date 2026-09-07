@@ -5034,6 +5034,52 @@ void close_context_menu() {
     if (Rml::Element* pop = by_id("ctxmenu")) pop->SetProperty("display", "none");
 }
 
+/* --- the menu bar --------------------------------------------------------- */
+
+/// Which menu bar title is open, or -1. The popup's own `display` is not the
+/// answer: a click on the open title has to *close* it, and that needs to know
+/// which title the visible popup belongs to.
+int g_open_menu = -1;
+
+void close_menu() {
+    g_open_menu = -1;
+    if (Rml::Element* pop = by_id("menupop")) pop->SetProperty("display", "none");
+}
+
+/// Show `idx`'s items under its title.
+///
+/// Placed against the title's own left edge rather than a stored column, so a
+/// menu bar that reflows — a longer title, a different font — keeps its popups
+/// under the words they belong to.
+void open_menu(int idx) {
+    if (idx < 0 || (size_t)idx >= menus().size()) return;
+    Rml::Element* pop = by_id("menupop");
+    Rml::Element* title = nullptr;
+    if (Rml::Element* bar = by_id("menubar")) {
+        for (int i = 0; i < bar->GetNumChildren(); i++) {
+            Rml::Element* c = bar->GetChild(i);
+            if (c->HasAttribute("oe-menu") && c->GetAttribute<int>("oe-menu", -1) == idx) {
+                title = c;
+                break;
+            }
+        }
+    }
+    if (!pop || !title) return;
+    std::string html;
+    for (const auto& item : menus()[(size_t)idx].items) {
+        html += "<div class='mi' oe-action='" + std::string(item.action) + "'>" + item.label +
+                (item.keys[0] ? "<span class='keys'>" + std::string(item.keys) + "</span>" : "") +
+                "</div>";
+    }
+    pop->SetInnerRML(html);
+    const auto at = title->GetAbsoluteOffset(Rml::BoxArea::Border);
+    pop->SetProperty("left", Rml::String(std::to_string((int)at.x) + "px"));
+    pop->SetProperty(
+        "top", Rml::String(std::to_string(theme::TITLEBAR_H + theme::MENUBAR_H) + "px"));
+    pop->SetProperty("display", "block");
+    g_open_menu = idx;
+}
+
 /* --- events --------------------------------------------------------------- */
 
 struct Listener : Rml::EventListener {
@@ -5177,6 +5223,13 @@ struct Listener : Rml::EventListener {
                 close_context_menu();
                 return;
             }
+            // And an open menu, for the same reason: the mouse opened it, but
+            // the keyboard has to be able to get back out.
+            if (g_open_menu >= 0 &&
+                ev.GetParameter<int>("key_identifier", 0) == Rml::Input::KI_ESCAPE) {
+                close_menu();
+                return;
+            }
             // A key pressed inside a text control belongs to that control.
             // The editor's textarea stops every keydown before it bubbles
             // here today, but that is RmlUi's choice, not a contract: a
@@ -5246,36 +5299,21 @@ struct Listener : Rml::EventListener {
                 if (in_menu) return;   // the heading or a separator
                 close_context_menu();
             }
-            // A click anywhere dismisses an open menu, unless it opened one.
-            bool opened_menu = false;
+            // A click on a menu bar title opens it — or closes it, when it is
+            // the one already open. A title that only ever opens leaves no way
+            // back out with the mouse, which is the one thing every other menu
+            // bar does. A click anywhere else dismisses whatever is open.
+            bool hit_menu = false;
             for (Rml::Element* e = el; e; e = e->GetParentNode()) {
                 if (!e->HasAttribute("oe-menu")) continue;
                 const int idx = e->GetAttribute<int>("oe-menu", 0);
-                if (Rml::Element* pop = by_id("menupop")) {
-                    std::string html;
-                    for (const auto& item : menus()[(size_t)idx].items) {
-                        html += "<div class='mi' oe-action='" + std::string(item.action) + "'>" +
-                                item.label +
-                                (item.keys[0] ? "<span class='keys'>" + std::string(item.keys) +
-                                                    "</span>"
-                                              : "") +
-                                "</div>";
-                    }
-                    pop->SetInnerRML(html);
-                    const auto at = e->GetAbsoluteOffset(Rml::BoxArea::Border);
-                    pop->SetProperty("left", Rml::String(std::to_string((int)at.x) + "px"));
-                    pop->SetProperty("top", Rml::String(std::to_string(theme::TITLEBAR_H +
-                                                                      theme::MENUBAR_H) + "px"));
-                    pop->SetProperty("display", "block");
-                }
-                opened_menu = true;
+                if (idx == g_open_menu) close_menu();
+                else open_menu(idx);
+                hit_menu = true;
                 break;
             }
-            if (!opened_menu) {
-                if (Rml::Element* pop = by_id("menupop")) pop->SetProperty("display", "none");
-            } else {
-                return;
-            }
+            if (hit_menu) return;
+            close_menu();
 
             // A choice made inside an editor popup, before anything dismisses
             // it — the click that picks a colour is also a click outside every
@@ -5579,6 +5617,20 @@ struct Listener : Rml::EventListener {
         if (type == "mousemove") {
             const int mx = ev.GetParameter<int>("mouse_x", 0);
             const int my = ev.GetParameter<int>("mouse_y", 0);
+
+            // With a menu open, moving across the bar switches to the title
+            // under the pointer without a second click — the behaviour every
+            // menu bar has, and the reason a menu bar is faster than a row of
+            // buttons. Only while one is open: hovering the bar with nothing
+            // open must not start opening menus at the pointer.
+            if (g_open_menu >= 0) {
+                for (Rml::Element* e = el; e; e = e->GetParentNode()) {
+                    if (!e->HasAttribute("oe-menu")) continue;
+                    const int idx = e->GetAttribute<int>("oe-menu", -1);
+                    if (idx >= 0 && idx != g_open_menu) open_menu(idx);
+                    break;
+                }
+            }
 
             // Hover-on-rest: the clock restarts on every move, and the tip
             // for the last spot goes away with it.
@@ -6301,6 +6353,57 @@ void run_script(const char* script) {
                         std::printf("menupick: %s\n", arg.c_str());
                     } else {
                         std::printf("menupick: %s NOT FOUND\n", arg.c_str());
+                    }
+                }
+                std::fflush(stdout);
+            }
+            else if (verb == "menubar" || verb == "menubarhover") {
+                // The menu bar, by title. `menubar` clicks it as the mouse
+                // would — which is what makes the second click on an open
+                // title testable — and `menubarhover` only moves over it, so
+                // hover-to-switch is exercised through the same event path a
+                // real pointer takes rather than by calling `open_menu`.
+                Rml::Element* title = nullptr;
+                if (Rml::Element* bar = by_id("menubar")) {
+                    for (int i = 0; i < bar->GetNumChildren(); i++) {
+                        Rml::Element* c = bar->GetChild(i);
+                        const int idx = c->GetAttribute<int>("oe-menu", -1);
+                        if (idx >= 0 && (size_t)idx < menus().size() &&
+                            menus()[(size_t)idx].title == arg) {
+                            title = c;
+                            break;
+                        }
+                    }
+                }
+                if (!title) {
+                    std::printf("%s: %s NOT FOUND\n", verb.c_str(), arg.c_str());
+                } else if (verb == "menubar") {
+                    press_element(title, 0);
+                    std::printf("menubar: %s\n", arg.c_str());
+                } else {
+                    g.context->Update();
+                    const auto at = title->GetAbsoluteOffset(Rml::BoxArea::Border);
+                    const auto size = title->GetBox().GetSize(Rml::BoxArea::Border);
+                    g.context->ProcessMouseMove((int)(at.x + size.x / 2),
+                                                (int)(at.y + size.y / 2), 0);
+                    g.context->Update();
+                    std::printf("menubarhover: %s\n", arg.c_str());
+                }
+                std::fflush(stdout);
+            }
+            else if (verb == "menubarstate") {
+                if (g_open_menu < 0) {
+                    std::printf("menubarstate: closed\n");
+                } else {
+                    std::printf("menubarstate: open %s\n",
+                                menus()[(size_t)g_open_menu].title);
+                    if (Rml::Element* pop = by_id("menupop")) {
+                        for (int i = 0; i < pop->GetNumChildren(); i++) {
+                            std::printf("  %s\n",
+                                        pop->GetChild(i)
+                                            ->GetAttribute<Rml::String>("oe-action", "")
+                                            .c_str());
+                        }
                     }
                 }
                 std::fflush(stdout);
