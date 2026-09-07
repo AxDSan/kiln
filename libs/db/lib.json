@@ -1,0 +1,13 @@
+{
+  "name": "db",
+  "comment": "Both client libraries are OPTIONAL, and they are one group because a lib.json carries one optional_* set. Without them the library still builds and every command fails at run time with KN_ERR_UNSUPPORTED naming what to install, rather than failing the build of everyone who never opens a database. When the manifest grows a second optional group, split sqlite3 from libmariadb so a machine with one and not the other gets the one.",
+  "optional_requires": [
+    "/usr/include/sqlite3.h",
+    "/usr/include/mysql/mysql.h"
+  ],
+  "optional_feature": "KILN_DB",
+  "optional_link_args": [
+    "-lsqlite3",
+    "-lmariadb"
+  ]
+}

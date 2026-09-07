@@ -14,6 +14,7 @@
 - [Forms and events](./forms-and-events.md)
 - [Components](./components.md)
 - [Networking](./networking.md)
+- [Databases](./databases.md)
 - [Build targets](./build-targets.md)
 - [Kits](./kits.md)
 - [Interop](./interop.md)

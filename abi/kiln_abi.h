@@ -229,8 +229,10 @@ enum {
     KN_HK_SOCKET = 3,
     KN_HK_PROC   = 4,
     KN_HK_CONFIG = 5,
-    KN_HK_JSON   = 6
-    /* 7..15 unassigned */
+    KN_HK_JSON   = 6,
+    KN_HK_DB     = 7,   /* a database connection                            */
+    KN_HK_DB_ROWS= 8    /* a result set being walked, one row at a time     */
+    /* 9..15 unassigned */
 };
 
 typedef void (*Kiln_HandleCloseFn)(void *payload);

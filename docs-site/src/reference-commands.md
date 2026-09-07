@@ -224,6 +224,283 @@ end
 | `config_set_int` | int, text, text, int | bool |
 | `config_set` | int, text, text, text | bool |
 
+## db
+
+`use db`
+
+| Command | Parameters | Returns |
+| --- | --- | --- |
+| [`db_close`](#db_close) | int | bool |
+| [`db_columns`](#db_columns) | int | int |
+| [`db_exec`](#db_exec) | int, text, text[] | int |
+| [`db_exec_n`](#db_exec_n) | int, text, text[], bool[] | int |
+| [`db_int64`](#db_int64) | int, int | int64 |
+| [`db_int`](#db_int) | int, int | int |
+| [`db_is_null`](#db_is_null) | int, int | bool |
+| [`db_next`](#db_next) | int | bool |
+| [`db_open`](#db_open) | text | int |
+| [`db_query`](#db_query) | int, text, text[] | int |
+| [`db_query_n`](#db_query_n) | int, text, text[], bool[] | int |
+| [`db_result_close`](#db_result_close) | int | bool |
+| [`db_text`](#db_text) | int, int | text |
+
+### `db_close`
+
+`db_close(int) -> bool`
+
+Close a database handle.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  if db_close(h)
+    call print_text("closed")
+  end
+end
+```
+
+### `db_columns`
+
+`db_columns(int) -> int`
+
+How many columns the result has; -1 when the handle is not one.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (a int, b int)", [])
+  let rows: int = db_query(h, "select a, b from t", [])
+  call print_int(db_columns(rows))
+end
+```
+
+### `db_exec`
+
+`db_exec(int, text, text[]) -> int`
+
+Run a statement with bound parameters; answers rows changed, -1 on failure.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (name text)", [])
+  call print_int(db_exec(h, "insert into t values (?)", ["Ada"]))
+end
+```
+
+### `db_exec_n`
+
+`db_exec_n(int, text, text[], bool[]) -> int`
+
+As db_exec, with a second list saying which parameters bind as SQL NULL.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (name text, ip text)", [])
+  let ok: int = db_exec_n(h, "insert into t values (?, ?)", ["Ada", ""], [false, true])
+  call print_int(ok)
+end
+```
+
+### `db_int`
+
+`db_int(int, int) -> int`
+
+The current row's column as a whole number; 0 for NULL.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (n int)", [])
+  call db_exec(h, "insert into t values (?)", ["42"])
+  let rows: int = db_query(h, "select n from t", [])
+  if db_next(rows)
+    call print_int(db_int(rows, 1))
+  end
+end
+```
+
+### `db_int64`
+
+`db_int64(int, int) -> int64`
+
+The current row's column as a wide whole number; 0 for NULL.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (n int)", [])
+  call db_exec(h, "insert into t values (?)", ["9000000000"])
+  let rows: int = db_query(h, "select n from t", [])
+  if db_next(rows)
+    call print_int64(db_int64(rows, 1))
+  end
+end
+```
+
+### `db_is_null`
+
+`db_is_null(int, int) -> bool`
+
+Is the current row's column SQL NULL, rather than an empty value.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (ip text)", [])
+  call db_exec_n(h, "insert into t values (?)", [""], [true])
+  let rows: int = db_query(h, "select ip from t", [])
+  if db_next(rows)
+    call print_text("null: {db_is_null(rows, 1)}")
+  end
+end
+```
+
+### `db_next`
+
+`db_next(int) -> bool`
+
+Advance to the next row; false at the end, with no error set.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (n int)", [])
+  call db_exec(h, "insert into t values (?)", ["1"])
+  let rows: int = db_query(h, "select n from t", [])
+  while db_next(rows)
+    call print_int(db_int(rows, 1))
+  end
+end
+```
+
+### `db_open`
+
+`db_open(text) -> int`
+
+Open a database and answer its handle; 0 when it could not be opened.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  if h = 0
+    call print_text("could not open: {last_error_text()}")
+    return
+  end
+  call print_text("open")
+end
+```
+
+### `db_query`
+
+`db_query(int, text, text[]) -> int`
+
+Run a query with bound parameters; answers a result handle, 0 on failure.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (name text)", [])
+  call db_exec(h, "insert into t values (?)", ["Ada"])
+  let rows: int = db_query(h, "select name from t where name = ?", ["Ada"])
+  if db_next(rows)
+    call print_text(db_text(rows, 1))
+  end
+  call db_result_close(rows)
+end
+```
+
+### `db_query_n`
+
+`db_query_n(int, text, text[], bool[]) -> int`
+
+As db_query, with a second list saying which parameters bind as SQL NULL.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (ip text)", [])
+  let rows: int = db_query_n(h, "select ip from t where ip is ?", [""], [true])
+  call print_int(db_columns(rows))
+  call db_result_close(rows)
+end
+```
+
+### `db_result_close`
+
+`db_result_close(int) -> bool`
+
+Close a result handle.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (n int)", [])
+  let rows: int = db_query(h, "select n from t", [])
+  if db_result_close(rows)
+    call print_text("closed")
+  end
+end
+```
+
+### `db_text`
+
+`db_text(int, int) -> text`
+
+The current row's column as text, counting columns from 1.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (name text)", [])
+  call db_exec(h, "insert into t values (?)", ["Ada"])
+  let rows: int = db_query(h, "select name from t", [])
+  if db_next(rows)
+    call print_text(db_text(rows, 1))
+  end
+end
+```
+
 ## demoffi
 
 `use demoffi`

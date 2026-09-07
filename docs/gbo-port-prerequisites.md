@@ -23,10 +23,10 @@ built binary (`target/release/kiln`, commit `3c547c7`) against the real LoginSer
 up, and it is ordered as **work items**: each one says what to change, where, and how to know it is
 done. When it was written, nothing on the 09-06 list had been implemented — `libs/` was
 `config file hash hello json math net process random system text time ui`, and `tcpserver` only
-delivered text. Items 1 and 3 are now done; item 2 is not.
+delivered text. All three are now done.
 
 Two things are better than the page said, one is worse, and one is missing from it entirely.
-**Items 1 and 3 have since been implemented** — see their headings below.
+**All three items have since been implemented** — see their headings below.
 
 | | 09-06 said | 09-07 measured |
 |---|---|---|
@@ -161,7 +161,36 @@ keeps a per-client `bytes` accumulator, reads the 2-byte little-endian length at
 one frame at a time. That is program code, not library code — the `.NET` server's `FrameBuffer`
 is 90 lines and the Kiln one will be shorter.
 
-### Item 2 — `libs/db`, scoped to what the login slice actually runs
+### Item 2 — `libs/db`, scoped to what the login slice actually runs — **done, 2026-09-07**
+
+**Shipped, and the done-when is met.** Against a MariaDB server seeded with the login schema, a
+Kiln program opened `mysql://gbo:secret@127.0.0.1:13306/godswar`, ran
+`select id, username, password_hash, last_login_ip from accounts where username = ? limit 1` with
+the name bound, and printed the hash — with the parameter never appearing in the SQL text. The
+`UPDATE` that writes NULL ran through `db_exec_n` and read back `db_is_null` true, and
+`ada' or '1'='1` matched nothing.
+
+The surface is as designed, plus `db_columns(r)` — a result whose column count a program cannot
+ask for makes `db_text(r, n)` a guess. SQLite and MySQL both work; SQLite is what
+`cli/tests/db.rs` exercises, because `:memory:` needs no server, no file and no credentials, and
+the five cases there are the four login statements, the NULL distinction, the injection payload,
+and every way a handle can be wrong.
+
+Two departures from the plan above, both deliberate:
+
+- **The two client libraries are one optional group, not two.** A `lib.json` carries one
+  `optional_*` set, so `KILN_DB` is defined only when both headers are present. A machine with
+  sqlite3 and no libmariadb gets neither, which is worse than it should be; splitting them needs
+  the manifest to grow a second optional group, and that is a change to `cli/src/libload.rs`
+  rather than to this library. Noted rather than hidden.
+- **MySQL queries go through `mysql_real_escape_string`, not `mysql_stmt_bind_param`.** The
+  prepared-statement result path needs a bind buffer per column sized for the widest value in it,
+  which the text-shaped surface would then convert back to text anyway. `db_exec` *does* use
+  prepared statements and real binds; `db_query` escapes against the live connection and
+  substitutes, which is charset-aware and injection-safe, and is what the test's payloads check.
+  The day a column needs a typed read, the query path changes with it.
+
+**The plan as written on 09-07.**
 
 **The gate, unchanged — but smaller than "a database library".** Everything LoginServer does
 against MySQL is four statements through two shapes of call:
