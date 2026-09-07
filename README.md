@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/kiln-wordmark.png" alt="Kiln" width="440">
+<img src="assets/kiln-hero.png" alt="Kiln" width="300">
 
 **Draw an app. Wire an event. Ship a native binary.**
 

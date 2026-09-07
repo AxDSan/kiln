@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./assets/kiln-wordmark.png" alt="Kiln" width="380">
+  <img src="./assets/kiln-hero.png" alt="Kiln" width="260">
 </div>
 
 # Introduction
