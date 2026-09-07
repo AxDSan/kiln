@@ -3782,7 +3782,10 @@ std::string about_markup() {
     s << ".pill{display:inline-block;height:24px;padding:3px 10px 0 10px;margin-right:6px;"
          "margin-bottom:6px;border-radius:12px;background-color:#F3F4F6;border:1px #E5E7EB;"
          "font-size:11px;font-weight:500;color:#374151}";
-    s << ".pill.accent{background-color:#EEF2FF;border:1px #C7D2FE;font-weight:600;color:#4338CA}";
+    // Kiln heat, not the indigo this predates the brand with. 4.88:1 on its own
+    // tint, so the pill that says what Kiln is can actually be read.
+    s << ".pill.accent{background-color:#fff7ed;border:1px #fed7aa;font-weight:600;color:"
+      << theme::ACCENT << "}";
     s << "#foot{margin-top:10px;font-size:11px;color:#6E7781}";
     s << "#links{margin-top:6px;margin-bottom:16px;font-size:11.5px;font-weight:600;color:#0969DA}";
     s << "#links span.l{cursor:pointer}#links span.l:hover{text-decoration:underline}";
@@ -3810,7 +3813,11 @@ std::string about_markup() {
     }
     s << "<div class='pill accent'>RAD is the identity</div></div>";
     // Literal UTF-8: RmlUi prints an entity it does not know verbatim.
-    s << "<div id='foot'>\u00a9 2026 Kiln Community. MIT Licensed.</div>";
+    // The holder and both licence arms, exactly as LICENSE states them. This
+    // is the one place a user reads the licence rather than the repository, so
+    // naming a different holder — or dropping the BSD arm — understates the
+    // rights they actually have.
+    s << "<div id='foot'>\u00a9 2026 The Kiln Contributors. MIT OR BSD-3-Clause.</div>";
     s << "<div id='links'><span class='l' id='GitHub-link' oe-url='https://github.com/AxDSan/kiln'>GitHub</span>"
          "<span class='pipe'>|</span>"
          "<span class='l' oe-url='https://axdsan.github.io/kiln/'>Docs</span></div>";
