@@ -337,17 +337,40 @@ the list.
 
 ### The order, revised
 
-1. **Item 1** — an afternoon, C only, testable with `nc`. Rerun P1/P2.
+1. **Item 1** — an afternoon, C only, testable with `nc`. Rerun P1/P2. **Done, 2026-09-07.**
 2. **Item 2** — SQLite backend first to prove the surface, then MySQL; the login slice needs the
-   MySQL one against the real `godswar` schema (`docs/schema.sql` in the GBO repo).
-3. **Port LoginServer** — `Program.cs`, `LoginHandler.cs`, `ServerListHandler.cs`, plus the
-   Core pieces it pulls in: `PacketCipher`, `StringShift`, `MsgHead`, `LoginRequest`,
-   `LoginResponse`, `ResponseGameServerMessage`, `HandoffToken`, `AccountRepository.Authenticate`,
-   `MySqlHandoffTicketStore.Issue`. About 1,400 lines of C# whose Kiln form should be well under
-   half that.
-4. **Item 3** — after the port works, as the refactor that makes it read the way it should.
+   MySQL one against the real `godswar` schema (`docs/schema.sql` in the GBO repo). **Done,
+   2026-09-07.**
+3. **Port LoginServer** — **done, 2026-09-07.** It is one module,
+   `src/GodsBattle.LoginServer.Kiln/login_server.kiln` in the GBO repo (~540 lines, from ~1,370 of
+   C# across the project), plus `Settings/Settings.ini`, a `README.md`, `seed.sql`, and
+   `shift_test.kiln`. Everything the .NET server pulls in is in the one file: `PacketCipher` (the
+   keystream as an `int[]` and one `crypt` sub), `StringShift.Unshift` (forward-direction only —
+   the server never Shifts — checked against 27 vectors generated from the .NET code, the real
+   capture `rfmv → thox` among them), the `MsgHead`/`LoginRequest`/`LoginResponse` framing, the
+   `ServerListHandler` blob (its size field kept at `0x0006`, and its bytes proven **identical** to
+   `BuildServerList` for one realm), `ResponseGameServerMessage` as a c-record filled with item 3's
+   bridge, `HandoffToken` as a `random_between` loop, `AccountRepository.Authenticate`, and
+   `MySqlHandoffTicketStore.Issue`. The 750 ms `0x2711` hold is a 50 ms timer walking a pending
+   dictionary, never `sys_sleep_ms`.
+
+   **Proven over the real wire this session** against a SQLite backend, with a Python client
+   speaking the keystream: a good login returned the realm list, the handoff arrived after 764 ms
+   as a 72-byte `0x2711` with a 15-character token and the realm's address, a bad password and an
+   unknown user returned `06 00 03 00 00 F0`, a banned account `06 00 03 00 02 F0`, and a scrambled
+   `rfmv` was descrambled server-side to account `thox` and accepted. The ticket row was written.
+
+   Language notes for the next port: a Kiln array literal and a call argument list may **not** span
+   lines (collapse both to one line); a dictionary cannot hold `bytes` (store the token text and
+   rebuild the frame at send time); an interpolation hole may not contain a string literal
+   (`{f("x")}` is a parse error — compute it into a local first); locals are whole-sub scoped, so
+   the two branches of one `if` cannot each bind `mapped`.
+4. **Item 3** — done as part of the port: `bytes_from_ptr` / `bytes_copy_to_ptr` fill and drain the
+   `response_game_server` c-record, so the handoff body is field writes, not an offset loop.
 5. The acceptance test is unchanged: `tools/verify-login-fix.sh` in the GBO repo, ten clean logins
-   from a fresh client launch against the Kiln login server with the .NET GameServer behind it.
+   from a fresh client launch against the Kiln login server with the .NET GameServer behind it. It
+   needs a human at the client and has **not** been run yet; the MySQL path uses the same four
+   statements as the SQLite one proven here.
 
 
 ## What is being ported, and how big it is
