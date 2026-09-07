@@ -37,7 +37,10 @@ read. The [Language guide](./language.md#when-a-command-fails) has the rules.
 | `ask` | text | text |
 | `assert_failed` | text | — |
 | `bytes_at` | bytes, int | int |
+| [`bytes_concat`](#bytes_concat) | bytes, bytes | bytes |
+| [`bytes_copy_to_ptr`](#bytes_copy_to_ptr) | bytes, ptr | int |
 | `bytes_count` | bytes | int |
+| [`bytes_from_ptr`](#bytes_from_ptr) | ptr, int | bytes |
 | `bytes_from_text` | text | bytes |
 | `bytes_new` | int | bytes |
 | `bytes_set` | bytes, int, int | — |
@@ -128,6 +131,69 @@ read. The [Language guide](./language.md#when-a-command-fails) has the rules.
 | `trim` | text | text |
 | `uppercase` | text | text |
 | `year` | int64 | int |
+
+### `bytes_concat`
+
+`bytes_concat(bytes, bytes) -> bytes`
+
+Two byte-sets end to end, as one.
+
+```kiln
+module example
+
+sub main
+  let head: bytes = bytes_new(2)
+  let body: bytes = bytes_from_text("hi")
+  call print_int(bytes_count(bytes_concat(head, body)))
+end
+```
+
+### `bytes_copy_to_ptr`
+
+`bytes_copy_to_ptr(bytes, ptr) -> int`
+
+Copy a byte-set to an address; answers how many bytes that was.
+
+```kiln
+module frame
+target console
+
+record point is c
+  x: int
+  y: int
+end
+
+sub main
+  var raw: bytes = bytes_new(8)
+  call bytes_set(raw, 1, 7)
+  var p: point
+  call print_int(bytes_copy_to_ptr(raw, address of p))
+  call print_int(p.x)
+end
+```
+
+### `bytes_from_ptr`
+
+`bytes_from_ptr(ptr, int) -> bytes`
+
+Copy a run of bytes out of an address, into a byte-set.
+
+```kiln
+module frame
+target console
+
+record point is c
+  x: int
+  y: int
+end
+
+sub main
+  var p: point
+  p.x = 7
+  let raw: bytes = bytes_from_ptr(address of p, 8)
+  call print_int(bytes_at(raw, 1))
+end
+```
 
 ## config
 

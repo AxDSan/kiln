@@ -23,10 +23,10 @@ built binary (`target/release/kiln`, commit `3c547c7`) against the real LoginSer
 up, and it is ordered as **work items**: each one says what to change, where, and how to know it is
 done. When it was written, nothing on the 09-06 list had been implemented — `libs/` was
 `config file hash hello json math net process random system text time ui`, and `tcpserver` only
-delivered text. Item 1 is now done; items 2 and 3 are not.
+delivered text. Items 1 and 3 are now done; item 2 is not.
 
 Two things are better than the page said, one is worse, and one is missing from it entirely.
-**Item 1 has since been implemented** — see its heading below.
+**Items 1 and 3 have since been implemented** — see their headings below.
 
 | | 09-06 said | 09-07 measured |
 |---|---|---|
@@ -232,7 +232,26 @@ where .NET writes NULL — is drift the website's admin pages would show as a bl
 `SELECT ... WHERE username = ?` with a bound name, and print the `password_hash` column, with
 the parameter never appearing in the SQL text.
 
-### Item 3 — a bridge between `bytes` and a c-record (not blocking, but it is the win)
+### Item 3 — a bridge between `bytes` and a c-record — **done, 2026-09-07**
+
+**Shipped, and it is the win the 09-06 page promised.**
+`bytes_from_ptr(p, count)`, `bytes_copy_to_ptr(b, p)` and `bytes_concat(a, b)` are core commands
+in `runtime/kn_array.c`. `docs/gbo-port-probes/p8_bytes_record_bridge.kiln` is the proof: a
+136-byte `login_request` filled from a byte-set in one call, every field then read by name, taken
+back out as bytes to send, and a header and a body joined into one write. It prints exactly what
+its comments predict.
+
+So `LoginRequest.Read` is now what the page said it would be — `var req: login_request` and
+`bytes_copy_to_ptr(body, address of req)` — rather than a `bytes_at` loop over offsets.
+
+Neither command can check that the address has `count` writable bytes behind it: a `ptr` is an
+address the program vouched for, exactly as `mem_copy`'s is. They check the side they own — a
+negative count, a null address, and the byte-set's own length.
+
+`bytes_read_u16le` and the `u32` pair are still not written. `bytes_concat` covers the join;
+the length prefix is still two `bytes_at` calls and a shift.
+
+**The plan as written on 09-07.**
 
 P7 shows the frames fit. What is missing is any way to get the bytes the socket delivered *into*
 the record, or the record *onto* the wire:

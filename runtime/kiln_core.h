@@ -95,6 +95,7 @@ KN_CMD(kn_ary_slice);
 /* byte-sets */
 KN_CMD(kn_bin_make); KN_CMD(kn_bin_size); KN_CMD(kn_bin_byte); KN_CMD(kn_bin_put);
 KN_CMD(kn_bin_from_text); KN_CMD(kn_bin_to_text); KN_CMD(kn_bin_slice);
+KN_CMD(kn_bin_from_ptr);  KN_CMD(kn_bin_to_ptr);  KN_CMD(kn_bin_concat);
 /* dictionaries */
 KN_CMD(kn_dict_count); KN_CMD(kn_dict_has); KN_CMD(kn_dict_lookup);
 KN_CMD(kn_dict_store); KN_CMD(kn_dict_erase); KN_CMD(kn_dict_keys);

@@ -575,6 +575,11 @@ impl Registry {
             cmd("bytes_from_text", "kn_bin_from_text", &[Text], Some(Bytes));
             cmd("text_from_bytes", "kn_bin_to_text", &[Bytes], Some(Text));
             cmd("bytes_slice", "kn_bin_slice", &[Bytes, Int, Int], Some(Bytes));
+            cmd("bytes_concat", "kn_bin_concat", &[Bytes, Bytes], Some(Bytes));
+            // The bridge to an address: what lets a wire frame be read as a
+            // c-record's fields rather than as a loop over its offsets.
+            cmd("bytes_from_ptr", "kn_bin_from_ptr", &[Ptr, Int], Some(Bytes));
+            cmd("bytes_copy_to_ptr", "kn_bin_to_ptr", &[Bytes, Ptr], Some(Int));
 
             // --- Dictionaries ------------------------------------------------
             // Declared over `AnyDict`/`AnyElem` for the reason the array

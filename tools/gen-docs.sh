@@ -81,11 +81,24 @@ emit_entries() {
         # No example is better than a wrong one, and the heading still gives
         # the reader the signature and the sentence.
         if grep -q "^example: $name " "$listing"; then
-            printf '\n```kiln\nmodule example\n'
-            [ -n "$lib" ] && printf 'use %s\n' "$lib"
-            printf '\nsub main\n'
-            sed -n "s/^example: $name //p" "$listing" | sed 's/^/  /'
-            printf 'end\n```\n'
+            # Most examples are statements, and are wrapped in the module and
+            # `main` a reader would have to write around them anyway. An
+            # example that opens with `module` is a whole program already —
+            # which is the only way to show a command whose argument needs a
+            # declaration, a `record` or a component, since neither can be
+            # written inside a subroutine. Such an example carries its own
+            # `use`, because the wrapper is not there to add one.
+            if [ "$(sed -n "s/^example: $name //p" "$listing" | head -1 | cut -c1-7)" = "module " ]; then
+                printf '\n```kiln\n'
+                sed -n "s/^example: $name //p" "$listing"
+                printf '```\n'
+            else
+                printf '\n```kiln\nmodule example\n'
+                [ -n "$lib" ] && printf 'use %s\n' "$lib"
+                printf '\nsub main\n'
+                sed -n "s/^example: $name //p" "$listing" | sed 's/^/  /'
+                printf 'end\n```\n'
+            fi
         fi
     done < <(sed -n 's/^doc: //p' "$listing" | cut -d' ' -f1 | sort -u)
 }

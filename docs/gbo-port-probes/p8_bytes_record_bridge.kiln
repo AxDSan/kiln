@@ -1,0 +1,48 @@
+# P8, after item 3: a wire frame moved between a byte-set and a c-record with
+# no per-byte loop.
+#
+#   kiln run docs/gbo-port-probes/p8_bytes_record_bridge.kiln
+#
+# This is the whole point of the record fitting: `bytes_copy_to_ptr` fills it
+# from what the socket delivered, `bytes_from_ptr` takes it back out to send,
+# and every field in between is a name rather than an offset.
+module p8
+target console
+
+record login_request is c
+  account: byte[32]
+  password: byte[32]
+  unknown64: int
+  mac: byte[32]
+  unknown100: byte[32]
+  client_version: int
+end
+
+sub main
+  # What a socket would have delivered: the frame as bytes.
+  let size: int = int64_to_int(size of login_request)
+  var wire: bytes = bytes_new(size)
+  call bytes_set(wire, 1, 65)             # account[1] = 'A'
+  call bytes_set(wire, 2, 100)            # account[2] = 'd'
+  call bytes_set(wire, 3, 97)             # account[3] = 'a'
+  call bytes_set(wire, 65, 7)             # unknown64, little endian
+  call print_int(bytes_count(wire))       # 136
+
+  # One call, and every field is a name.
+  var req: login_request
+  let moved: int = bytes_copy_to_ptr(wire, address of req)
+  call print_int(moved)                   # 136
+  call print_int(req.unknown64)           # 7
+  call print_text(text_from_bytes(bytes_from_ptr(address of req, 3)))   # Ada
+
+  # And back out, to put on the wire.
+  req.client_version = 3
+  let out: bytes = bytes_from_ptr(address of req, size)
+  call print_int(bytes_count(out))        # 136
+  call print_int(bytes_at(out, 133))      # 3 — client_version, first byte
+
+  # Two runs joined, which is how a header and a body become one write.
+  let both: bytes = bytes_concat(bytes_slice(out, 1, 4), bytes_slice(out, 65, 4))
+  call print_int(bytes_count(both))       # 8
+  call print_int(bytes_at(both, 5))       # 7 — unknown64 again
+end

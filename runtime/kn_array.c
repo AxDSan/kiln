@@ -371,6 +371,75 @@ void kn_bin_slice(Kiln_Slot *r, int32_t c, Kiln_Slot *argv) {
     r->v.ptr = out;
 }
 
+/* --- the bridge between a byte-set and an address -------------------------
+ *
+ * A `bytes` value has no address a program can name, and a c-record has one
+ * (`address of rec`) but no way to be filled from a byte-set. Without these
+ * two, moving a wire frame into a record is a `bytes_at` loop and moving one
+ * out is a `bytes_set` loop — the offset arithmetic the record was supposed
+ * to replace.
+ *
+ * Neither command can check that `p` points at `count` writable bytes: `ptr`
+ * is an address the program vouched for, exactly as `mem_copy` is. What they
+ * do check is the side they own — a negative count, and the byte-set's own
+ * length — so the failure that is knowable is refused rather than discovered
+ * as a corrupted record.
+ */
+
+/* bytes_from_ptr(p, count) -> bytes: `count` bytes copied out of an address. */
+void kn_bin_from_ptr(Kiln_Slot *r, int32_t c, Kiln_Slot *argv) {
+    (void)c;
+    void *p = kn_arg_ptr(argv, 0);
+    int32_t count = kn_arg_int(argv, 1);
+    if (count < 0) count = 0;
+    if (!p && count > 0) {
+        kn_error_set(KN_ERR_INVALID_ARG, "bytes_from_ptr: the address is null");
+        r->tag = KN_SDT_BIN;
+        r->v.ptr = kn_bin_new(0);
+        return;
+    }
+    Kiln_Bin *out = (Kiln_Bin *)kn_bin_new(count);
+    if (out && count) memcpy(bin_bytes(out), p, (size_t)count);
+    kn_error_clear();
+    r->tag = KN_SDT_BIN;
+    r->v.ptr = out;
+}
+
+/* bytes_copy_to_ptr(b, p) -> int: the byte-set written at an address, and how
+ * many bytes that was. The count is the answer rather than a bool because the
+ * caller almost always wants it — it is the frame's length. */
+void kn_bin_to_ptr(Kiln_Slot *r, int32_t c, Kiln_Slot *argv) {
+    (void)c;
+    Kiln_Bin *b = arg_bin(argv, 0);
+    void *p = kn_arg_ptr(argv, 1);
+    int32_t n = b ? b->len : 0;
+    if (!p && n > 0) {
+        kn_error_set(KN_ERR_INVALID_ARG, "bytes_copy_to_ptr: the address is null");
+        kn_ret_int(r, -1);
+        return;
+    }
+    if (n) memcpy(p, bin_bytes(b), (size_t)n);
+    kn_error_clear();
+    kn_ret_int(r, n);
+}
+
+/* bytes_concat(a, b) -> bytes: the two runs, end to end. A frame header and
+ * its body are two byte-sets and one write. */
+void kn_bin_concat(Kiln_Slot *r, int32_t c, Kiln_Slot *argv) {
+    (void)c;
+    Kiln_Bin *x = arg_bin(argv, 0);
+    Kiln_Bin *y = arg_bin(argv, 1);
+    int32_t xn = x ? x->len : 0, yn = y ? y->len : 0;
+    Kiln_Bin *out = (Kiln_Bin *)kn_bin_new(xn + yn);
+    if (out) {
+        if (xn) memcpy(bin_bytes(out), bin_bytes(x), (size_t)xn);
+        if (yn) memcpy(bin_bytes(out) + xn, bin_bytes(y), (size_t)yn);
+    }
+    kn_error_clear();
+    r->tag = KN_SDT_BIN;
+    r->v.ptr = out;
+}
+
 /* Text is UTF-8, so its bytes ARE its encoding: the round trip is exact, and
  * the byte count of text with an accent in it is larger than its length. */
 void kn_bin_from_text(Kiln_Slot *r, int32_t c, Kiln_Slot *argv) {

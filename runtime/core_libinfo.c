@@ -31,6 +31,9 @@ static const int32_t P_AII[]   = { KN_SDT_ANY_ARRAY, KN_SDT_INT, KN_SDT_INT };
 static const int32_t P_B[]     = { KN_SDT_BIN };
 static const int32_t P_BI[]    = { KN_SDT_BIN, KN_SDT_INT };
 static const int32_t P_BII[]   = { KN_SDT_BIN, KN_SDT_INT, KN_SDT_INT };
+static const int32_t P_BB[]    = { KN_SDT_BIN, KN_SDT_BIN };
+static const int32_t P_BP[]    = { KN_SDT_BIN, KN_SDT_PTR };
+static const int32_t P_PI[]    = { KN_SDT_PTR, KN_SDT_INT };
 /* Dictionaries: ANY_DICT/ANY_ELEM for the reason the arrays use their pair —
  * the dictionary carries its value tag, and the compiler checks it against the
  * value being stored. */
@@ -50,6 +53,13 @@ static const int32_t P_PPI64[]    = { KN_SDT_PTR, KN_SDT_PTR, KN_SDT_INT64 };
 
 #define CMD(name, sym, ret, argc, tags) \
     { name, #sym, ret, argc, tags }
+
+/* The documented form. The trailing two fields are the sentence the language
+ * server shows on hover and the sample F1 opens, and `tools/check-docs.sh`
+ * compiles the sample — so a wrong example fails the build rather than the
+ * reader. See libs/file for the fully documented library. */
+#define DCMD(name, sym, ret, argc, tags, doc, example) \
+    { name, #sym, ret, argc, tags, doc, example }
 
 static const Kiln_CommandDesc CORE_COMMANDS[] = {
     /* I/O (void) */
@@ -134,6 +144,44 @@ static const Kiln_CommandDesc CORE_COMMANDS[] = {
     CMD("bytes_from_text", kn_bin_from_text, KN_SDT_BIN,  1, P_T),
     CMD("text_from_bytes", kn_bin_to_text,   KN_SDT_TEXT, 1, P_B),
     CMD("bytes_slice",     kn_bin_slice,     KN_SDT_BIN,  3, P_BII),
+    DCMD("bytes_concat",   kn_bin_concat,    KN_SDT_BIN,  2, P_BB,
+         "Two byte-sets end to end, as one",
+         "let head: bytes = bytes_new(2)\n"
+         "let body: bytes = bytes_from_text(\"hi\")\n"
+         "call print_int(bytes_count(bytes_concat(head, body)))"),
+    DCMD("bytes_from_ptr", kn_bin_from_ptr,  KN_SDT_BIN,  2, P_PI,
+         "Copy a run of bytes out of an address, into a byte-set",
+         "module frame\n"
+         "target console\n"
+         "\n"
+         "record point is c\n"
+         "  x: int\n"
+         "  y: int\n"
+         "end\n"
+         "\n"
+         "sub main\n"
+         "  var p: point\n"
+         "  p.x = 7\n"
+         "  let raw: bytes = bytes_from_ptr(address of p, 8)\n"
+         "  call print_int(bytes_at(raw, 1))\n"
+         "end"),
+    DCMD("bytes_copy_to_ptr", kn_bin_to_ptr, KN_SDT_INT,  2, P_BP,
+         "Copy a byte-set to an address; answers how many bytes that was",
+         "module frame\n"
+         "target console\n"
+         "\n"
+         "record point is c\n"
+         "  x: int\n"
+         "  y: int\n"
+         "end\n"
+         "\n"
+         "sub main\n"
+         "  var raw: bytes = bytes_new(8)\n"
+         "  call bytes_set(raw, 1, 7)\n"
+         "  var p: point\n"
+         "  call print_int(bytes_copy_to_ptr(raw, address of p))\n"
+         "  call print_int(p.x)\n"
+         "end"),
     /* dictionaries — values found by name.  `dict_get` on a key that is not
      * there answers the sentinel for its value type and sets the error slot;
      * `dict_has` is the predicate that tells that apart from a stored 0. */

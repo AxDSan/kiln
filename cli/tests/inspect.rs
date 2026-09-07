@@ -139,7 +139,19 @@ fn commands_reports_kind_and_editor() {
         assert!(
             matches!(
                 kind,
-                "command" | "component" | "kind" | "property" | "editor" | "event"
+                "command"
+                    | "component"
+                    | "kind"
+                    | "property"
+                    | "editor"
+                    | "event"
+                    // A documented command carries its sentence and its
+                    // sample beside its signature. Core's first documented
+                    // commands are the byte-set bridge, so this listing
+                    // grew these two kinds — added lines, never folded into
+                    // the `command:` line a reader already parses.
+                    | "doc"
+                    | "example"
             ),
             "unexpected line {l:?}"
         );
