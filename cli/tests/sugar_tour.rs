@@ -1,4 +1,4 @@
-//! The combined 0.8.0 proof: `examples/sugar_tour.oir` uses every shorthand at
+//! The combined 0.8.0 proof: `examples/sugar_tour.kiln` uses every shorthand at
 //! once — compound assignment, text `+`/`*`, interpolation, a range loop, a
 //! `for each` over a dictionary, `in`/`not in`, and a one-line `if` — and prints
 //! a fixed transcript. Building the tracked example (not an inline copy) keeps
@@ -19,7 +19,7 @@ fn repo() -> PathBuf {
 const EXPECTED: &[&str] = &[
     "25",
     "==========",
-    "hello, OpenEPL",
+    "hello, Kiln",
     "15",
     "line 1",
     "line 2",
@@ -32,18 +32,18 @@ const EXPECTED: &[&str] = &[
 
 #[test]
 fn sugar_tour_example_prints_its_transcript() {
-    let dir = std::env::temp_dir().join("openepl_sugar_tour_run");
+    let dir = std::env::temp_dir().join("kiln_sugar_tour_run");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     let bin = dir.join("sugar_tour");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build"])
-        .arg(repo().join("examples/sugar_tour.oir"))
+        .arg(repo().join("examples/sugar_tour.kiln"))
         .arg("-o")
         .arg(&bin)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(
         out.status.success(),
         "the tour failed to build:\n{}",
@@ -104,19 +104,19 @@ fn sugar_tour_cross_builds_and_runs_under_wine() {
         eprintln!("mingw is not installed; skipping the Windows tour test");
         return;
     }
-    let dir = std::env::temp_dir().join("openepl_sugar_tour_windows");
+    let dir = std::env::temp_dir().join("kiln_sugar_tour_windows");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     let out = dir.join("sugar_tour");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build"])
-        .arg(repo().join("examples/sugar_tour.oir"))
+        .arg(repo().join("examples/sugar_tour.kiln"))
         .args(["--os", "windows", "-o"])
         .arg(&out)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl build --os windows");
-    assert!(status.success(), "openepl build --os windows failed");
+        .expect("run kiln build --os windows");
+    assert!(status.success(), "kiln build --os windows failed");
     let image = dir.join("sugar_tour.exe");
     assert!(image.is_file(), "expected {} to be written", image.display());
 

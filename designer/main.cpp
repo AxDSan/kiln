@@ -1,6 +1,6 @@
-/* OpenEPL Studio — the visual designer.
+/* Kiln Studio — the visual designer.
  *
- * Chrome follows the OpenEPL Studio design specification: title bar, menu bar,
+ * Chrome follows the Kiln Studio design specification: title bar, menu bar,
  * action toolbar, toolbox / designer / inspector docks, a split code+output
  * panel, and a status bar. Tokens live in theme.h so no colour is hard-coded
  * here.
@@ -9,7 +9,7 @@
  * substrate, and the canvas builds components through the SHARED mapping
  * (libs/ui/ui_mapping.h) so what you draw is what you get (D9).
  *
- * It never parses .oir — `openepl inspect` is the only reader — and saving
+ * It never parses .kiln — `kiln inspect` is the only reader — and saving
  * splices the regenerated form over the original lines so hand-written code
  * survives.
  */
@@ -54,13 +54,14 @@
 #include "portable.h"
 #include "settings.h"
 #include "settings_page.h"
+#include "help_page.h"
 #include "theme.h"
 #include "lspclient.h"
 #include "dbgclient.h"
 #include "welcome.h"
 #include "ui_mapping.h"
 
-using namespace openepl::designer;
+using namespace kiln::designer;
 
 namespace {
 
@@ -96,7 +97,10 @@ inline const std::vector<Menu>& menus() {
                    {"Continue", "dbgcontinue", "F5"},
                    {"Stop Debugging", "dbgstop", "Shift+F5"}}},
         {"Tools", {{"Settings…", "settings", "Ctrl+,"}}},
-        {"Help", {{"About OpenEPL", "about", ""}}},
+        {"Help", {{"Documentation", "help", "F1"},
+                  {"Command Reference", "helpcommands", ""},
+                  {"Search the Handbook", "helpsearch", "Shift+F1"},
+                  {"About Kiln", "about", ""}}},
     };
     return m;
 }
@@ -118,14 +122,14 @@ struct Designer {
     /// The compiler. Resolved at startup from our own location so an installed
     /// bundle works wherever it is unpacked; the in-repo dev path is the
     /// fallback.
-    std::string openepl_bin = "./target/debug/openepl";
+    std::string kiln_bin = "./target/debug/kiln";
     std::string selected;
     std::string inspector_tab = "props";
     /// The inspector needs rebuilding, but a field in it has focus. It is
     /// rebuilt once focus leaves; see refresh_all().
     bool inspector_stale = false;
     /// Every component the toolchain reports, with the section it files under.
-    /// Built once at startup from `openepl kits` and `openepl commands`, so a
+    /// Built once at startup from `kiln kits` and `kiln commands`, so a
     /// kit installed after Studio was compiled still appears in the toolbox.
     Catalog catalog;
     /// The property an open editor popup is editing, and which component's.
@@ -172,21 +176,21 @@ struct Designer {
     /// IDE console instead of the terminal the IDE was launched from.
     int app_output = -1;
 
-    /// The language server. Studio is a client of the same `openepl lsp` that
+    /// The language server. Studio is a client of the same `kiln lsp` that
     /// other editors use, so it never grows a private second analysis path.
-    openepl::lsp::Client lsp;
+    kiln::lsp::Client lsp;
     /// The debugger, spoken to exactly as the language server is: a subprocess
-    /// on a pipe. Studio never traces the program itself — `openepl dap` owns
+    /// on a pipe. Studio never traces the program itself — `kiln dap` owns
     /// it — because a blocking wait belongs anywhere but the frame loop.
-    openepl::dbg::Client dbg;
+    kiln::dbg::Client dbg;
     /// Lines the user has put a breakpoint on, in the open module. Kept here
-    /// rather than in the `.oir`: a breakpoint is a fact about debugging this
+    /// rather than in the `.kiln`: a breakpoint is a fact about debugging this
     /// program now, not about the program, and writing them into the source
     /// would put them in the user's next commit.
     std::set<int> breakpoints;
     /// The line the program is stopped on, or 0 when it is not stopped.
     int stopped_line = 0;
-    std::vector<openepl::lsp::Diagnostic> diagnostics;
+    std::vector<kiln::lsp::Diagnostic> diagnostics;
 
     /// The build, when one is in flight. The build MUST be asynchronous: run
     /// synchronously it blocks the frame loop, so no progress animation can
@@ -198,7 +202,7 @@ struct Designer {
     /// The same two children on Windows, as CreateProcess hands them out;
     /// `build_pid` and `running_app` still say "> 0 = alive" for everyone
     /// who only asks that.
-    openepl::sys::Child build_child, app_child;
+    kiln::sys::Child build_child, app_child;
 #endif
     bool build_then_run = false;
     std::string build_target;
@@ -267,6 +271,18 @@ struct Designer {
     /// which is what makes Escape and "click outside" unambiguous.
     Rml::ElementDocument* about = nullptr;
 
+    /// The handbook while it is up, and where it is. Modal for the same reason
+    /// About is: it owns focus, so Escape and click-outside are unambiguous.
+    /// The page is reloaded rather than mutated on every navigation — a
+    /// document this size is built in well under a frame, and one build path
+    /// beats a build path plus a patch path.
+    Rml::ElementDocument* help = nullptr;
+    std::string help_page = "introduction";
+    std::string help_query;
+    /// The code blocks on the page now shown, in the order they appear. A copy
+    /// button carries its index into this, never the program itself.
+    std::vector<std::string> help_code;
+
     /// The previous press on the canvas, for double-click detection. RmlUi's
     /// own `dblclick` compares element identity, and every press here rebuilds
     /// the canvas (select → refresh_all), so the second press always lands on
@@ -293,7 +309,7 @@ struct Designer {
     /// without a round trip. The word begins at `complete_start` on
     /// `complete_line`; the caret leaving that word is what dismisses it.
     int complete_request = 0;
-    std::vector<openepl::json::Value> complete_all;
+    std::vector<kiln::json::Value> complete_all;
     std::vector<size_t> complete_shown;
     int complete_line = 0, complete_start = 0;
     int complete_index = 0;
@@ -308,13 +324,13 @@ struct Designer {
     /// editor.
     std::string swallow_text;
     /// Where a hit in the references list jumps to, by list index.
-    std::vector<openepl::lsp::Location> refs;
+    std::vector<kiln::lsp::Location> refs;
 
     /// The module-level names the server's index knows, for the Code tab's
     /// label. Asked for again after every change to the text, one request
     /// in flight at a time; until the first answer lands the tab names the
     /// file, which is never wrong.
-    std::vector<openepl::lsp::Symbol> symbols;
+    std::vector<kiln::lsp::Symbol> symbols;
     int symbol_request = 0;
     bool symbols_stale = true;
     /// What the two document tabs currently say, so a frame that changes
@@ -430,7 +446,7 @@ SDL_HitTestResult window_hit_test(SDL_Window* win, const SDL_Point* p, void*) {
     if (press) {
         // A dump cannot show a drag; this is how a press in the strip is
         // known to have reached here at all.
-        if (std::getenv("OPENEPL_DESIGNER_DEBUG")) {
+        if (std::getenv("KILN_DESIGNER_DEBUG")) {
             std::fprintf(stderr, "titlebar: press at %d,%d\n", p->x, p->y);
         }
         const Uint32 now = SDL_GetTicks();
@@ -453,6 +469,7 @@ void render_locals();
 void jump_to(int line, int col);
 void set_view(const std::string& view);
 bool caret_position(int& line, int& col);
+std::string identifier_at(int line, int col);
 void toggle_breakpoint(int line);
 void start_debug();
 void stop_debug();
@@ -488,7 +505,7 @@ void relayout() {
     // the IDE follow the OS window.
     g.doc->SetProperty("width", Rml::String(std::to_string(W) + "px"));
     g.doc->SetProperty("height", Rml::String(std::to_string(H) + "px"));
-    if (std::getenv("OPENEPL_DESIGNER_DEBUG")) {
+    if (std::getenv("KILN_DESIGNER_DEBUG")) {
         g.context->Update();
         const auto b = g.doc->GetBox().GetSize();
         std::fprintf(stderr, "designer: relayout W=%d H=%d body=%.0fx%.0f\n", W, H, b.x, b.y);
@@ -749,7 +766,7 @@ std::string lowered(const std::string& v) {
 
 /// The toolbox, assembled from the catalogue rather than a list in this file.
 ///
-/// Sections come from each kit's declared section, in the order `openepl kits`
+/// Sections come from each kit's declared section, in the order `kiln kits`
 /// resolved them. That is what makes a kit dropped into `kits/` show up here
 /// with no change to the IDE — the promise the kit system exists to keep.
 std::string build_toolbox() {
@@ -800,10 +817,10 @@ std::string build_toolbox() {
 }
 
 
-/// Build the whole IDE chrome. Structure follows the OpenEPL Studio design
+/// Build the whole IDE chrome. Structure follows the Kiln Studio design
 /// specification: title bar, menu bar, action toolbar, toolbox / designer /
 /// inspector docks, a split code+output panel, and a status bar.
-/// Locate a bundled asset (logo, icon) wherever OpenEPL was unpacked.
+/// Locate a bundled asset (logo, icon) wherever Kiln was unpacked.
 ///
 /// Tried in the order a real installation nests them: beside the binary's
 /// directory in a release bundle (bin/ -> ../assets), inside the source tree
@@ -812,7 +829,7 @@ std::string build_toolbox() {
 /// logo, not the IDE.
 std::string asset_path(const char* name) {
     std::vector<std::string> roots;
-    const std::string dir = openepl::sys::exe_dir();
+    const std::string dir = kiln::sys::exe_dir();
     if (!dir.empty()) {
         roots.push_back(dir + "/../assets/");   // bundle: bin/ -> ../assets
         roots.push_back(dir + "/assets/");
@@ -821,10 +838,10 @@ std::string asset_path(const char* name) {
     roots.push_back("assets/");
     for (const auto& r : roots) {
         const std::string candidate = r + name;
-        if (openepl::sys::readable(candidate)) {
+        if (kiln::sys::readable(candidate)) {
             // RmlUi resolves a decorator path as a URL and eats the leading
             // slash of an absolute one, so hand it back doubled.
-            const std::string real = openepl::sys::real_path(candidate);
+            const std::string real = kiln::sys::real_path(candidate);
             if (!real.empty()) return "/" + real;
             return candidate;
         }
@@ -878,7 +895,7 @@ std::string build_styles(const std::string& family, const std::string& mono,
          "width:18px;height:18px;top:7px}";
     s << "#titlebar .title{position:absolute;left:38px;top:8px;width:700px;height:18px;"
          "overflow:hidden;white-space:nowrap;font-size:13px;font-weight:bold;color:" << TEXT << "}";
-    s << openepl::welcome::window_controls_styles();
+    s << kiln::welcome::window_controls_styles();
 
     // ---- menu bar -------------------------------------------------------
     s << "#menubar{left:0;top:" << TITLEBAR_H << "px;width:" << WIN_W << "px;height:" << MENUBAR_H
@@ -1098,7 +1115,10 @@ std::string build_styles(const std::string& family, const std::string& mono,
       << ";border-radius:5px;padding:6px 10px;z-index:70;max-width:520px;font-family:'" << mono
       << "';font-size:12px;color:" << TEXT << ";white-space:pre;"
          "box-shadow:#00000024 0 4px 14px 0px}";
-    s << "#tip .tipkind{font-family:'" << family << "';color:" << TEXT_MUTED << ";font-size:11px}";
+    s << "#tip .tipkind{font-family:'" << family << "';color:" << TEXT_MUTED
+      << ";font-size:11px;margin:5px 0 5px 0;line-height:1.4}";
+    s << "#tip .tipcode{background-color:" << CHROME_ALT
+      << ";border-radius:4px;padding:5px 7px 5px 7px;margin-bottom:2px;line-height:1.4}";
     // The CONTAINER scrolls, not the textarea. RmlUi keeps a text control's
     // own overflow hidden, so the wheel did nothing there — and mirroring one
     // layer's scroll onto the other is a sync bug waiting to happen. Sizing
@@ -1131,7 +1151,7 @@ std::string build_styles(const std::string& family, const std::string& mono,
     g.grid_decorator = dot_tile.empty() ? "" : "image(\"" + dot_tile + "\" repeat)";
     s << "#canvasarea{left:0;top:" << TABBAR_H << "px;width:" << centre_w << "px;height:" << canvas_h
       << "px;background-color:" << CANVAS_GRID << ";decorator:"
-      << (openepl::settings::boolean("designer.show_grid") && !g.grid_decorator.empty()
+      << (kiln::settings::boolean("designer.show_grid") && !g.grid_decorator.empty()
               ? g.grid_decorator
               : std::string("none"))
       << "}";
@@ -1165,7 +1185,7 @@ std::string build_styles(const std::string& family, const std::string& mono,
     // app, from the shared mapping — otherwise the preview lies.
     // SCOPED to the canvas: these rules include `div{position:absolute}`, which
     // would otherwise collapse every panel in the IDE onto one point.
-    s << openepl::ui::control_styles("#canvas");
+    s << kiln::ui::control_styles("#canvas");
     s << "#canvas{position:relative;overflow:hidden;border-bottom-left-radius:8px;"
          "border-bottom-right-radius:8px}";
     // A faint centred wordmark on the design surface — a maker's mark, not
@@ -1374,12 +1394,12 @@ std::string build_chrome(const std::string& family, const std::string& mono,
     s << "</style></head><body>";
 
     // ---- markup ---------------------------------------------------------
-    const std::string icon = asset_path("openepl-icon-64.png");
+    const std::string icon = asset_path("kiln-icon-64.png");
     s << "<div id='titlebar'>"
       << (icon.empty() ? std::string("<div class='appicon'>E</div>")
                        : "<img class='appicon' src='" + icon + "'/>")
-      << "<div class='title'>OpenEPL Studio — " << esc(basename_of(g.model.path)) << " — ["
-      << esc(g.model.form_name) << "]</div>" << openepl::welcome::window_controls_markup()
+      << "<div class='title'>Kiln Studio — " << esc(basename_of(g.model.path)) << " — ["
+      << esc(g.model.form_name) << "]</div>" << kiln::welcome::window_controls_markup()
       << "</div>";
 
     s << "<div id='menubar'>";
@@ -1459,8 +1479,8 @@ std::string build_chrome(const std::string& family, const std::string& mono,
          "<div id='dbggutter'/>"
          "<div id='codehl'/><textarea id='fullcode' wrap='nowrap'/></div>"
          "<div id='canvasarea'>"
-         << (asset_path("openepl-wordmark.png").empty() ? std::string() :
-             "<img id='canvaswm' src='" + asset_path("openepl-wordmark.png") + "'/>")
+         << (asset_path("kiln-wordmark.png").empty() ? std::string() :
+             "<img id='canvaswm' src='" + asset_path("kiln-wordmark.png") + "'/>")
          << ""
          "<div id='formwin'>"
          // Minimize and maximize are drawn; close is the multiplication
@@ -1527,9 +1547,9 @@ std::string build_chrome(const std::string& family, const std::string& mono,
 /// from a designer that draws a grid.
 /// The designer grid, and the distance Shift+arrow nudges by. A setting, and
 /// clamped away from 0 by `settings::number` — this divides.
-int grid_size() { return openepl::settings::number("designer.grid_size"); }
+int grid_size() { return kiln::settings::number("designer.grid_size"); }
 int snap(int v) {
-    if (!openepl::settings::boolean("designer.snap_to_grid")) return v;
+    if (!kiln::settings::boolean("designer.snap_to_grid")) return v;
     const int g = grid_size();
     return ((v + g / 2) / g) * g;
 }
@@ -1570,8 +1590,8 @@ void follow_form_resize(int dw, int dh, const std::map<std::string, std::array<i
     for (auto& c : g.model.children) {
         const std::string* a = c.property("anchors");
         unsigned mask = 0;
-        if (!a || !openepl::ui::parse_anchors(a->c_str(), &mask)) continue;
-        if (!(mask & (openepl::ui::ANCHOR_RIGHT | openepl::ui::ANCHOR_BOTTOM))) continue;
+        if (!a || !kiln::ui::parse_anchors(a->c_str(), &mask)) continue;
+        if (!(mask & (kiln::ui::ANCHOR_RIGHT | kiln::ui::ANCHOR_BOTTOM))) continue;
         int l, t, w, h;
         if (base && base->count(c.id)) {
             const auto& r = base->at(c.id);
@@ -1580,7 +1600,7 @@ void follow_form_resize(int dw, int dh, const std::map<std::string, std::array<i
             l = prop_int(c, "left", 0); t = prop_int(c, "top", 0);
             w = prop_int(c, "width", 120); h = prop_int(c, "height", 32);
         }
-        openepl::ui::anchored_rect(mask, dw, dh, &l, &t, &w, &h);
+        kiln::ui::anchored_rect(mask, dw, dh, &l, &t, &w, &h);
         if (c.property("left"))   write_int(c, "left", l);
         if (c.property("top"))    write_int(c, "top", t);
         if (c.property("width"))  write_int(c, "width", w);
@@ -1618,7 +1638,7 @@ bool is_hex_colour(const std::string& v);
 
 /// Is this a colour light text belongs on? Perceived luminance of a hex
 /// colour, since the title bar takes the form's own background: black text
-/// on form.oir's navy would be a title nobody could read.
+/// on form.kiln's navy would be a title nobody could read.
 bool dark_colour(const std::string& hex) {
     if (!is_hex_colour(hex)) return false;
     auto nib = [](char c) { return c <= '9' ? c - '0' : (c | 0x20) - 'a' + 10; };
@@ -1636,24 +1656,24 @@ bool dark_colour(const std::string& hex) {
 std::string asset_path(const char* name);
 
 /// The image the preview's title bar shows: the form's `icon`, a path beside
-/// the .oir, or the app's own icon when the property is unset or names
+/// the .kiln, or the app's own icon when the property is unset or names
 /// nothing readable. Handed to RmlUi the way asset_path does, with the
 /// leading slash doubled so its URL parser leaves the path absolute.
 std::string form_icon_src() {
     if (const std::string* icon = g.model.form.property("icon")) {
         if (!icon->empty()) {
             std::string path = *icon;
-            if (!openepl::sys::is_absolute(path)) {
+            if (!kiln::sys::is_absolute(path)) {
                 const size_t slash = g.model.path.find_last_of('/');
                 path = (slash == std::string::npos ? std::string() : g.model.path.substr(0, slash + 1)) + path;
             }
-            if (openepl::sys::readable(path)) {
-                const std::string real = openepl::sys::real_path(path);
+            if (kiln::sys::readable(path)) {
+                const std::string real = kiln::sys::real_path(path);
                 if (!real.empty()) return "/" + real;
             }
         }
     }
-    return asset_path("openepl-icon-64.png");
+    return asset_path("kiln-icon-64.png");
 }
 
 /* The offscreen driver applies SDL_SetWindowSize and tells nobody: no
@@ -1733,13 +1753,13 @@ void rebuild_canvas() {
             const std::string* m = c.property("multiline");
             if (m && (*m == "true" || *m == "1")) return "textarea";
         }
-        return openepl::ui::tag_for(c.type_name.c_str());
+        return kiln::ui::tag_for(c.type_name.c_str());
     };
     for (const auto& comp : g.model.children) {
         Rml::ElementPtr child = g.doc->CreateElement(canvas_tag(comp).c_str());
         const char* attr_value = nullptr;
         if (const char* attr =
-                openepl::ui::creation_attribute(comp.type_name.c_str(), &attr_value)) {
+                kiln::ui::creation_attribute(comp.type_name.c_str(), &attr_value)) {
             child->SetAttribute(attr, Rml::String(attr_value));
         }
         Rml::Element* e = canvas->AppendChild(std::move(child));
@@ -1747,16 +1767,16 @@ void rebuild_canvas() {
         // The class comes from the shared mapping, not from a list here: a
         // control styled in the running app and not on the canvas is exactly
         // the WYSIWYG drift ui_mapping.h exists to prevent.
-        if (const char* cls = openepl::ui::class_for(comp.type_name.c_str()))
+        if (const char* cls = kiln::ui::class_for(comp.type_name.c_str()))
             e->SetAttribute("class", Rml::String(cls));
-        if (const char* markup = openepl::ui::inner_markup(comp.type_name.c_str())) {
+        if (const char* markup = kiln::ui::inner_markup(comp.type_name.c_str())) {
             e->SetInnerRML(markup);
         }
         if (comp.type_name == "progressbar") e->SetAttribute("max", Rml::String("100"));
         e->SetAttribute("oe-id", comp.id);
         for (const auto& p : comp.properties) {
             const char* attr =
-                openepl::ui::attribute_for(comp.type_name.c_str(), p.first.c_str());
+                kiln::ui::attribute_for(comp.type_name.c_str(), p.first.c_str());
             if (attr) {
                 if (p.first == "checked") {
                     Rml::Element* box = e;
@@ -1769,10 +1789,10 @@ void rebuild_canvas() {
                 } else {
                     e->SetAttribute(attr, Rml::String(p.second));
                 }
-            } else if (openepl::ui::is_text_property(p.first.c_str()) &&
-                       openepl::ui::text_is_content(comp.type_name.c_str())) {
+            } else if (kiln::ui::is_text_property(p.first.c_str()) &&
+                       kiln::ui::text_is_content(comp.type_name.c_str())) {
                 Rml::Element* text_target = e;
-                if (openepl::ui::is_composite(comp.type_name.c_str())) {
+                if (kiln::ui::is_composite(comp.type_name.c_str())) {
                     for (int i = 0; i < e->GetNumChildren(); i++) {
                         if (e->GetChild(i)->GetTagName() == "span") {
                             text_target = e->GetChild(i);
@@ -1786,10 +1806,10 @@ void rebuild_canvas() {
                 // canvas shows the same so a form reads as it will run.
                 const bool on = p.second == "true" || p.second == "1";
                 e->SetProperty("opacity", on ? "1.0" : "0.4");
-            } else if (!openepl::ui::is_control_value(comp.type_name.c_str(),
+            } else if (!kiln::ui::is_control_value(comp.type_name.c_str(),
                                                       p.first.c_str())) {
-                e->SetProperty(openepl::ui::rcss_name(p.first.c_str()),
-                               openepl::ui::rcss_value(p.first.c_str(), p.second.c_str()));
+                e->SetProperty(kiln::ui::rcss_name(p.first.c_str()),
+                               kiln::ui::rcss_value(p.first.c_str(), p.second.c_str()));
             }
         }
         if (comp.type_name == "grid") {
@@ -1816,7 +1836,7 @@ void rebuild_canvas() {
                 }
                 if (!found && head.empty() && body.empty()) head = "bound to " + *bind;
             }
-            e->SetInnerRML(openepl::ui::grid_markup(head, body, prop_int(comp, "selected", 0)));
+            e->SetInnerRML(kiln::ui::grid_markup(head, body, prop_int(comp, "selected", 0)));
         }
     }
 
@@ -1898,7 +1918,7 @@ void rebuild_canvas() {
         // declared size, and a model-derived outline sits inside the real frame.
         int x = 0, y = 0, w = 0, h = 0;
         if (!measure_component(canvas, g.selected, x, y, w, h)) return;
-        if (std::getenv("OPENEPL_DESIGNER_DEBUG")) {
+        if (std::getenv("KILN_DESIGNER_DEBUG")) {
             const Component* c = g.model.find(g.selected);
             std::fprintf(stderr,
                          "designer: selection rect=%d,%d %dx%d   model=%d,%d %dx%d\n", x, y, w, h,
@@ -2038,7 +2058,7 @@ inline const std::vector<const char*>& palette() {
 
 /// Files under the project's own directory, one level deep, as relative paths.
 ///
-/// Relative because that is what the .oir must contain: an absolute path from
+/// Relative because that is what the .kiln must contain: an absolute path from
 /// this machine is a project that only builds here.
 std::vector<std::string> project_files() {
     std::vector<std::string> out;
@@ -2061,7 +2081,7 @@ std::vector<std::string> project_files() {
                 if (prefix.empty()) dirs.push_back({dir + "/" + name, name + "/"});
                 continue;
             }
-            if (name.size() > 4 && name.compare(name.size() - 4, 4, ".oir") == 0) continue;
+            if (kiln::sys::has_ext(name, ".kiln")) continue;
             out.push_back(prefix + name);
         }
         closedir(handle);
@@ -2685,7 +2705,7 @@ void sync_highlight_scroll() {
 
 /// Push the editor's text to disk and reload the designer model from it.
 ///
-/// The Rust parser stays the only reader of `.oir`, so the model is
+/// The Rust parser stays the only reader of `.kiln`, so the model is
 /// rebuilt by re-inspecting the saved file rather than by parsing text here —
 /// two grammars would drift.
 bool apply_code() {
@@ -2700,7 +2720,7 @@ bool apply_code() {
 
     Model fresh;
     std::string err;
-    if (!load_model(g.openepl_bin, g.model.path, fresh, err)) {
+    if (!load_model(g.kiln_bin, g.model.path, fresh, err)) {
         // The text is saved either way — losing the user's typing because it
         // does not compile yet would be far worse than an out-of-date canvas.
         log("saved, but the designer could not read it back:", "err");
@@ -2869,11 +2889,11 @@ bool property_needs_quotes(const std::string& type_name, const std::string& prop
             if (p.name == property) return p.type == "text";
         }
     }
-    const OpenEPL_ComponentDesc* desc = describe(type_name.c_str());
+    const Kiln_ComponentDesc* desc = describe(type_name.c_str());
     if (!desc) return true;
     for (int i = 0; i < desc->property_count; i++) {
         if (property == desc->properties[i].name) {
-            return desc->properties[i].tag == OE_SDT_TEXT;
+            return desc->properties[i].tag == KN_SDT_TEXT;
         }
     }
     return true;
@@ -3089,7 +3109,7 @@ void set_activity(const char* what) {
         e->SetProperty("display", g.running_app > 0 ? "inline" : "none");
 }
 
-/// The directory holding the open project. A loose `.oir` opened on its own
+/// The directory holding the open project. A loose `.kiln` opened on its own
 /// has no project around it, so its own directory is the project.
 std::string project_dir() {
     const size_t slash = g.model.path.find_last_of('/');
@@ -3099,7 +3119,7 @@ std::string project_dir() {
 /// Where Run's throwaway binary lives. Kept in a dotted subdirectory so a
 /// project listing does not fill with build output, and so one line in
 /// `.gitignore` covers everything Studio ever writes into a project.
-std::string run_dir() { return project_dir() + "/.openepl/run"; }
+std::string run_dir() { return project_dir() + "/.kiln/run"; }
 
 /// Remove what Run left behind. Called when a real build succeeds: from then
 /// on the binary in the output directory is the answer to "where is my
@@ -3107,13 +3127,13 @@ std::string run_dir() { return project_dir() + "/.openepl/run"; }
 void clear_run_artifacts() {
     const std::string stem =
         g.model.module_name.empty() ? std::string("app") : g.model.module_name;
-    const std::string path = run_dir() + "/" + openepl::sys::program_name(stem);
-    if (openepl::sys::remove_file(path)) log("  removed the run build " + path, "muted");
+    const std::string path = run_dir() + "/" + kiln::sys::program_name(stem);
+    if (kiln::sys::remove_file(path)) log("  removed the run build " + path, "muted");
     // And the directories, when nothing else is in them. `rmdir` on a
     // non-empty directory fails, which is exactly the guard wanted: a user who
     // put something of their own in there keeps it.
-    openepl::sys::remove_dir(run_dir());
-    openepl::sys::remove_dir(project_dir() + "/.openepl");
+    kiln::sys::remove_dir(run_dir());
+    kiln::sys::remove_dir(project_dir() + "/.kiln");
 }
 
 /// Whether the engine placed a breakpoint on a line, so the gutter can draw
@@ -3152,7 +3172,7 @@ void start_debug() {
     g.log_lines.clear();
     log("> debugging " + g.model.path, "muted");
     std::vector<int> lines(g.breakpoints.begin(), g.breakpoints.end());
-    if (!g.dbg.start(g.openepl_bin, g.model.path)) {
+    if (!g.dbg.start(g.kiln_bin, g.model.path)) {
         log("could not start the debugger", "err");
         return;
     }
@@ -3245,23 +3265,23 @@ void build_binary(bool then_run) {
         g.model.module_name.empty() ? std::string("app") : g.model.module_name;
     if (then_run) {
         const std::string dir = run_dir();
-        openepl::sys::make_dirs(dir);
-        g.build_target = dir + "/" + openepl::sys::program_name(stem);
+        kiln::sys::make_dirs(dir);
+        g.build_target = dir + "/" + kiln::sys::program_name(stem);
     } else {
-        std::string out_dir = openepl::settings::text("build.output_dir");
+        std::string out_dir = kiln::settings::text("build.output_dir");
         if (out_dir.empty()) out_dir = project_dir() + "/build";
-        openepl::sys::make_dirs(out_dir);
-        g.build_target = out_dir + "/" + openepl::sys::program_name(stem);
+        kiln::sys::make_dirs(out_dir);
+        g.build_target = out_dir + "/" + kiln::sys::program_name(stem);
     }
     const std::string release =
-        openepl::settings::boolean("build.release") ? " --release" : "";
-    const std::string cmd = g.openepl_bin + " build " + g.model.path + release + " -o " +
+        kiln::settings::boolean("build.release") ? " --release" : "";
+    const std::string cmd = g.kiln_bin + " build " + g.model.path + release + " -o " +
                             g.build_target + " 2>&1";
 
     // Verbose by design: the console should let you see what the toolchain
     // actually did, not just whether it succeeded.
-    log("> " + g.openepl_bin + " build " + g.model.path + " -o " + g.build_target);
-    log("  stage 1/4  parse + validate .oir", "muted");
+    log("> " + g.kiln_bin + " build " + g.model.path + " -o " + g.build_target);
+    log("  stage 1/4  parse + validate .kiln", "muted");
     log("  stage 2/4  lower to LLVM IR", "muted");
     log("  stage 3/4  clang: assemble + link the runtime", "muted");
     log("  stage 4/4  dead-strip unused commands (--gc-sections)", "muted");
@@ -3270,9 +3290,9 @@ void build_binary(bool then_run) {
     // No shell: the compiler is started directly, its stderr merged into the
     // same pipe the `2>&1` above merges it into on POSIX.
     (void)cmd;
-    using namespace openepl::sys;
+    using namespace kiln::sys;
     if (!spawn(g.build_child,
-               quote_arg(g.openepl_bin) + " build " + quote_arg(g.model.path) + " -o " +
+               quote_arg(g.kiln_bin) + " build " + quote_arg(g.model.path) + " -o " +
                    quote_arg(g.build_target),
                true, false)) {
         log("could not start the build", "err");
@@ -3313,7 +3333,7 @@ void poll_build() {
         char buf[1024];
         int n;
         static std::string partial;
-        while ((n = openepl::sys::read_nonblocking(g.build_child.out, buf, sizeof buf)) > 0) {
+        while ((n = kiln::sys::read_nonblocking(g.build_child.out, buf, sizeof buf)) > 0) {
             partial.append(buf, (size_t)n);
             size_t nl;
             while ((nl = partial.find('\n')) != std::string::npos) {
@@ -3323,15 +3343,15 @@ void poll_build() {
         }
         if (n == 0) {
             if (!partial.empty()) { log("  " + partial, "muted"); partial.clear(); }
-            openepl::sys::close_output(g.build_child);
+            kiln::sys::close_output(g.build_child);
         }
     }
 
     int rc = -1;
-    if (!openepl::sys::try_wait(g.build_child, rc)) return;
+    if (!kiln::sys::try_wait(g.build_child, rc)) return;
     const double secs = now_seconds() - g.build_started;
     g.build_pid = 0;
-    openepl::sys::release(g.build_child);
+    kiln::sys::release(g.build_child);
 #else
     if (g.build_output >= 0) {
         char buf[1024];
@@ -3398,7 +3418,7 @@ void run_app(const std::string& path) {
     // Pipe the app's stdout and stderr back to us: its output belongs in the
     // IDE console, not in whatever terminal the IDE happened to start from.
 #ifdef _WIN32
-    if (!openepl::sys::spawn(g.app_child, openepl::sys::quote_arg(path), true, false)) {
+    if (!kiln::sys::spawn(g.app_child, kiln::sys::quote_arg(path), true, false)) {
         log("could not start the app");
         return;
     }
@@ -3434,17 +3454,17 @@ void stop_app() {
     if (g.running_app <= 0) { set_status("nothing running"); return; }
 #ifdef _WIN32
     int code = 0;
-    if (openepl::sys::try_wait(g.app_child, code)) {   // already exited
-        openepl::sys::release(g.app_child);
+    if (kiln::sys::try_wait(g.app_child, code)) {   // already exited
+        kiln::sys::release(g.app_child);
         g.running_app = 0;
         set_status("nothing running");
         return;
     }
-    openepl::sys::terminate(g.app_child);
+    kiln::sys::terminate(g.app_child);
     WaitForSingleObject(g.app_child.process, INFINITE);
     drain_app_output();
     log("> stopped (pid " + std::to_string(g.running_app) + ")", "muted");
-    openepl::sys::release(g.app_child);
+    kiln::sys::release(g.app_child);
 #else
     if (::kill(g.running_app, 0) != 0) {   // already exited
         g.running_app = 0;
@@ -3470,7 +3490,7 @@ void drain_app_output() {
     char buf[1024];
     int n;
     static std::string partial;
-    while ((n = openepl::sys::read_nonblocking(g.app_child.out, buf, sizeof buf)) > 0) {
+    while ((n = kiln::sys::read_nonblocking(g.app_child.out, buf, sizeof buf)) > 0) {
 #else
     if (g.app_output < 0) return;
     char buf[1024];
@@ -3490,7 +3510,7 @@ void drain_app_output() {
     if (n == 0) {   // the app closed its end
         if (!partial.empty()) { log(partial); partial.clear(); }
 #ifdef _WIN32
-        openepl::sys::close_output(g.app_child);
+        kiln::sys::close_output(g.app_child);
 #else
         ::close(g.app_output);
         g.app_output = -1;
@@ -3503,9 +3523,9 @@ void poll_app() {
     if (g.running_app <= 0) return;
 #ifdef _WIN32
     int code = 0;
-    if (openepl::sys::try_wait(g.app_child, code)) {
+    if (kiln::sys::try_wait(g.app_child, code)) {
         drain_app_output();      // whatever it printed on the way out
-        openepl::sys::release(g.app_child);
+        kiln::sys::release(g.app_child);
 #else
     int status = 0;
     if (::waitpid(g.running_app, &status, WNOHANG) == g.running_app) {
@@ -3718,21 +3738,20 @@ void hide_tip() {
 /// opened a browser on the machine running it would be a test nobody runs
 /// twice.
 void open_url(const std::string& url) {
-    if (std::getenv("OPENEPL_DESIGNER_SCRIPT")) {
+    if (std::getenv("KILN_DESIGNER_SCRIPT")) {
         std::printf("about: open %s\n", url.c_str());
         std::fflush(stdout);
         return;
     }
-    const std::string cmd = "xdg-open '" + url + "' >/dev/null 2>&1 &";
-    if (std::system(cmd.c_str()) != 0) set_status("could not open " + url);
+    if (!kiln::sys::open_url(url)) set_status("could not open " + url);
 }
 
 std::string about_markup() {
     const int W = g.win_w, H = g.win_h;
-    const std::string icon = asset_path("openepl-icon-64.png");
-    const std::string mark = asset_path("openepl-wordmark.png");
-    std::string version = openepl::welcome::version_string(g.openepl_bin);
-    if (version.empty()) version = "openepl";
+    const std::string icon = asset_path("kiln-icon-64.png");
+    const std::string mark = asset_path("kiln-wordmark.png");
+    std::string version = kiln::welcome::version_string(g.kiln_bin);
+    if (version.empty()) version = "kiln";
     std::ostringstream s;
     s << "<rml><head><style>";
     s << "div{display:block}span{display:inline}";
@@ -3776,7 +3795,7 @@ std::string about_markup() {
     s << "#okrow{height:30px}";
     s << "</style></head><body id='about-bg'><div id='about'>";
     s << "<div id='ttl'>" << (icon.empty() ? "" : "<img src='" + icon + "'/>")
-      << "About OpenEPL Studio</div><div id='x' oe-about='close'>\u2715</div>";
+      << "About Kiln Studio</div><div id='x' oe-about='close'>\u2715</div>";
     s << "<div id='hero'>" << (icon.empty() ? "" : "<img class='big' src='" + icon + "'/>")
       << (mark.empty() ? "" : "<img class='mark' src='" + mark + "'/>") << "</div>";
     s << "<div id='ver'>" << esc(version) << "</div>";
@@ -3791,10 +3810,10 @@ std::string about_markup() {
     }
     s << "<div class='pill accent'>RAD is the identity</div></div>";
     // Literal UTF-8: RmlUi prints an entity it does not know verbatim.
-    s << "<div id='foot'>\u00a9 2026 OpenEPL Community. MIT Licensed.</div>";
-    s << "<div id='links'><span class='l' id='GitHub-link' oe-url='https://github.com/AxDSan/openepl'>GitHub</span>"
+    s << "<div id='foot'>\u00a9 2026 Kiln Community. MIT Licensed.</div>";
+    s << "<div id='links'><span class='l' id='GitHub-link' oe-url='https://github.com/AxDSan/kiln'>GitHub</span>"
          "<span class='pipe'>|</span>"
-         "<span class='l' oe-url='https://axdsan.github.io/openepl/'>Docs</span></div>";
+         "<span class='l' oe-url='https://axdsan.github.io/kiln/'>Docs</span></div>";
     s << "<div id='rule'/><div id='okrow'/><div id='ok' oe-about='close'>OK</div>";
     s << "</div></body></rml>";
     return s.str();
@@ -3838,6 +3857,141 @@ void show_about() {
     g.about->AddEventListener("keydown", &g_about_listener);
 }
 
+/* --- Help > Documentation -------------------------------------------------- */
+
+/// The handbook, in Studio.
+///
+/// PureBasic's help is the model: offline, one keystroke away, and F1 on a
+/// keyword lands on that keyword rather than on a search box. The pages are
+/// the Markdown the bundle ships in `docs/src/`, which `markdown.h` renders —
+/// there is no second copy of the prose here, and the command reference is
+/// generated from the toolchain, so what Studio shows is what the compiler has.
+
+void close_help() {
+    if (!g.help) return;
+    // Unloading is deferred to the context's next Update, so closing from
+    // inside the dialog's own listener is safe.
+    g.help->Close();
+    g.help = nullptr;
+    if (g.doc) g.doc->Focus();
+}
+
+void open_help(const std::string& page, const std::string& anchor, const std::string& query);
+
+/// A click navigates, follows a link, searches, or dismisses. Typing in the
+/// search box re-renders — the results are the body, so there is one document
+/// and one close path rather than two of each.
+struct HelpListener : Rml::EventListener {
+    void ProcessEvent(Rml::Event& ev) override {
+        if (ev.GetType() == "keydown") {
+            if (ev.GetParameter<int>("key_identifier", 0) == Rml::Input::KI_ESCAPE) close_help();
+            return;
+        }
+        if (ev.GetType() == "change") {
+            Rml::Element* src = ev.GetTargetElement();
+            if (src && src->GetId() == "find")
+                open_help(g.help_page, "", src->GetAttribute<Rml::String>("value", ""));
+            return;
+        }
+        for (Rml::Element* e = ev.GetTargetElement(); e; e = e->GetParentNode()) {
+            if (e->HasAttribute("oe-url")) {
+                open_url(e->GetAttribute<Rml::String>("oe-url", ""));
+                return;
+            }
+            if (e->HasAttribute("oe-help-copy")) {
+                const int n = e->GetAttribute<int>("oe-help-copy", -1);
+                if (n >= 0 && n < (int)g.help_code.size()) {
+                    Rml::GetSystemInterface()->SetClipboardText(g.help_code[(size_t)n]);
+                    set_status("example copied");
+                    if (std::getenv("KILN_DESIGNER_SCRIPT")) {
+                        std::printf("helpcopy: %d bytes\n", (int)g.help_code[(size_t)n].size());
+                        std::fflush(stdout);
+                    }
+                }
+                return;
+            }
+            if (e->HasAttribute("oe-help-page")) {
+                open_help(e->GetAttribute<Rml::String>("oe-help-page", ""),
+                          e->GetAttribute<Rml::String>("oe-help-anchor", ""), "");
+                return;
+            }
+            if (e->HasAttribute("oe-help")) {
+                const Rml::String what = e->GetAttribute<Rml::String>("oe-help", "");
+                if (what == "browser") {
+                    const std::string index = kiln::designer::help_page::book_index();
+                    if (!index.empty()) open_url("file://" + index);
+                    return;
+                }
+                close_help();
+                return;
+            }
+            if (e->GetId() == "dlg") return;        // inside the dialog: nothing
+            if (e->GetId() == "find") return;
+        }
+        close_help();
+    }
+} g_help_listener;
+
+/// Show `page`, scrolled to `anchor`, or the results for `query`.
+void open_help(const std::string& page, const std::string& anchor, const std::string& query) {
+    const std::string dir = kiln::designer::help_page::docs_dir();
+    if (dir.empty()) {
+        set_status("the handbook is not installed beside this build");
+        return;
+    }
+    if (!page.empty()) g.help_page = page;
+    g.help_query = query;
+
+    // Rebuilt rather than patched. Closing first keeps exactly one help
+    // document alive, so the modal stack cannot deepen on every link click.
+    if (g.help) { g.help->Close(); g.help = nullptr; }
+    g.help = g.context->LoadDocumentFromMemory(kiln::designer::help_page::markup(
+        g.family, g.mono, g.win_w, g.win_h, dir, g.help_page, g.help_query, &g.help_code));
+    if (!g.help) return;
+    g.help->Show(Rml::ModalFlag::Modal, Rml::FocusFlag::Document);
+    g.help->AddEventListener("click", &g_help_listener);
+    g.help->AddEventListener("keydown", &g_help_listener);
+    g.help->AddEventListener("change", &g_help_listener);
+
+    if (!anchor.empty()) {
+        // Lay the document out first. `Show` only queues that for the
+        // context's next Update, and an element with no box yet scrolls
+        // nowhere — which looks exactly like an anchor that does not exist.
+        g.help->UpdateDocument();
+        if (Rml::Element* e = g.help->GetElementById(anchor)) e->ScrollIntoView();
+    }
+    if (std::getenv("KILN_DESIGNER_SCRIPT")) {
+        std::printf("help: %s%s%s\n", g.help_query.empty() ? g.help_page.c_str() : "search",
+                    anchor.empty() ? "" : "#", anchor.c_str());
+        std::fflush(stdout);
+    }
+}
+
+/// F1. The name under the caret decides the page: a command or a component
+/// opens the reference at its own row, and anything else opens the handbook
+/// where it was left. A caret sitting just past a word still counts — that is
+/// where it lands after typing one.
+void context_help() {
+    const std::string dir = kiln::designer::help_page::docs_dir();
+    if (dir.empty()) { set_status("the handbook is not installed beside this build"); return; }
+
+    int line = 0, col = 0;
+    std::string word;
+    if (caret_position(line, col)) {
+        word = identifier_at(line, col);
+        if (word.empty() && col > 0) word = identifier_at(line, col - 1);
+    }
+    std::string page, anchor;
+    if (!word.empty() && kiln::designer::help_page::lookup(dir, word, &page, &anchor)) {
+        open_help(page, anchor, "");
+        return;
+    }
+    // A name we do not document is still a question. Searching it beats
+    // opening the index and making the user retype what they were looking at.
+    if (!word.empty()) { open_help("", "", word); return; }
+    open_help(g.help_page, "", "");
+}
+
 /* --- Settings -------------------------------------------------------------- */
 
 /// Rebuild the chrome's stylesheet against the palette in force, and hand it to
@@ -3854,9 +4008,9 @@ void rebuild_styles() {
     if (!g.doc) return;
     // The cache path, spelled out rather than through cache_file(): that is
     // defined further down, beside the startup code that first writes the tile.
-    const std::string cache = openepl::sys::cache_dir();
-    openepl::sys::make_dirs(cache);
-    const std::string tile_path = cache + "/openepl_dotgrid.tga";
+    const std::string cache = kiln::sys::cache_dir();
+    kiln::sys::make_dirs(cache);
+    const std::string tile_path = cache + "/kiln_dotgrid.tga";
     g.dot_tile = write_dot_tile(tile_path, 10, theme::BORDER).empty() ? "" : "/" + tile_path;
     g.doc->SetStyleSheetContainer(
         Rml::Factory::InstanceStyleSheetString(build_styles(g.family, g.mono, g.dot_tile)));
@@ -3883,7 +4037,7 @@ void open_settings(const std::string& category);
 /// would look like a bug rather than like a setting waiting for a relaunch.
 void apply_setting(const std::string& key) {
     if (key == "appearance.theme") {
-        theme::set_palette(openepl::settings::text("appearance.theme") == "dark");
+        theme::set_palette(kiln::settings::text("appearance.theme") == "dark");
         rebuild_styles();
         // The dialog is its own document with its own baked stylesheet, so the
         // IDE behind it going dark leaves it light. It has to be built again.
@@ -3891,12 +4045,12 @@ void apply_setting(const std::string& key) {
     } else if (key == "designer.show_grid") {
         if (Rml::Element* e = by_id("canvasarea")) {
             e->SetProperty("decorator",
-                           openepl::settings::boolean("designer.show_grid") && !g.grid_decorator.empty()
+                           kiln::settings::boolean("designer.show_grid") && !g.grid_decorator.empty()
                                ? g.grid_decorator
                                : std::string("none"));
         }
     }
-    openepl::settings::save();
+    kiln::settings::save();
 }
 
 /// Commit a text field. Called on blur and on Enter — never on `change`, which
@@ -3911,15 +4065,15 @@ void commit_field(Rml::Element* e) {
     auto* in = dynamic_cast<Rml::ElementFormControl*>(e);
     if (!in) return;
     const std::string typed = in->GetValue();
-    if (typed == openepl::settings::text(key)) return;
-    if (openepl::settings::set(key, typed)) {
+    if (typed == kiln::settings::text(key)) return;
+    if (kiln::settings::set(key, typed)) {
         apply_setting(key);
         set_status(key + " = " + typed);
         open_settings(g.settings_cat);   // the modified marker and Reset appear
     } else {
-        in->SetValue(openepl::settings::text(key));
-        const openepl::settings::Row* r = openepl::settings::find(key);
-        set_status(r && r->kind == openepl::settings::Kind::Int
+        in->SetValue(kiln::settings::text(key));
+        const kiln::settings::Row* r = kiln::settings::find(key);
+        set_status(r && r->kind == kiln::settings::Kind::Int
                        ? key + " must be between " + std::to_string(r->min) + " and " +
                              std::to_string(r->max)
                        : std::string("that is not a value ") + key + " accepts");
@@ -3949,7 +4103,7 @@ struct SettingsListener : Rml::EventListener {
             }
             if (e->HasAttribute("oe-set-reset")) {
                 const std::string key = e->GetAttribute<Rml::String>("oe-set-reset", "");
-                openepl::settings::reset(key);
+                kiln::settings::reset(key);
                 apply_setting(key);
                 set_status(key + " reset");
                 open_settings(g.settings_cat);
@@ -3958,7 +4112,7 @@ struct SettingsListener : Rml::EventListener {
             if (e->HasAttribute("oe-set-key")) {
                 const std::string key = e->GetAttribute<Rml::String>("oe-set-key", "");
                 const std::string val = e->GetAttribute<Rml::String>("oe-set-val", "");
-                if (openepl::settings::set(key, val)) {
+                if (kiln::settings::set(key, val)) {
                     apply_setting(key);
                     set_status(key + " = " + val);
                     open_settings(g.settings_cat);
@@ -3966,7 +4120,7 @@ struct SettingsListener : Rml::EventListener {
                 return;
             }
             if (e->GetId() == "openfile") {
-                std::printf("settings: file %s\n", openepl::settings::path().c_str());
+                std::printf("settings: file %s\n", kiln::settings::path().c_str());
                 std::fflush(stdout);
                 return;
             }
@@ -3988,7 +4142,7 @@ void open_settings(const std::string& category) {
     const bool reopening = g.settings_doc != nullptr;
     if (reopening) { g.settings_doc->Close(); g.settings_doc = nullptr; g.context->Update(); }
     g.settings_doc = g.context->LoadDocumentFromMemory(
-        openepl::designer::settings_page::markup(g.family, g.win_w, g.win_h, g.settings_cat));
+        kiln::designer::settings_page::markup(g.family, g.win_w, g.win_h, g.settings_cat));
     if (!g.settings_doc) return;
     g.settings_doc->Show(Rml::ModalFlag::Modal, Rml::FocusFlag::Document);
     g.settings_doc->AddEventListener("click", &g_settings_listener);
@@ -4002,8 +4156,13 @@ void open_settings(const std::string& category) {
 void show_tip(const std::string& markdown, int x, int y) {
     Rml::Element* tip = by_id("tip");
     if (!tip) return;
-    std::string code, rest;
-    bool in_code = false;
+    // The blocks in the order the server sent them. A command's hover is now
+    // three of them — signature, sentence, example — and collapsing every
+    // fence into one string would print the example above the sentence that
+    // explains it.
+    struct Block { bool code; bool kiln; std::string text; };
+    std::vector<Block> blocks;
+    bool in_code = false, is_kiln = false;
     size_t start = 0;
     while (start <= markdown.size()) {
         const size_t nl = markdown.find('\n', start);
@@ -4011,16 +4170,39 @@ void show_tip(const std::string& markdown, int x, int y) {
             markdown.substr(start, nl == std::string::npos ? std::string::npos : nl - start);
         if (l.rfind("```", 0) == 0) {
             in_code = !in_code;
-        } else if (in_code) {
-            code += (code.empty() ? "" : "\n") + l;
-        } else if (!l.empty()) {
-            rest += (rest.empty() ? "" : "\n") + l;
+            if (in_code) {
+                is_kiln = l.substr(3) == "kiln";
+                blocks.push_back({true, is_kiln, ""});
+            }
+        } else if (!l.empty() || in_code) {
+            if (!in_code && (blocks.empty() || blocks.back().code))
+                blocks.push_back({false, false, ""});
+            if (in_code && blocks.empty()) blocks.push_back({true, is_kiln, ""});
+            std::string& into = blocks.back().text;
+            into += (into.empty() ? "" : "\n") + l;
         }
         if (nl == std::string::npos) break;
         start = nl + 1;
     }
-    std::string html = esc(code.empty() ? rest : code);
-    if (!code.empty() && !rest.empty()) html += "<div class='tipkind'>" + esc(rest) + "</div>";
+
+    std::string html;
+    for (const Block& b : blocks) {
+        if (b.text.empty()) continue;
+        if (!b.code) { html += "<div class='tipkind'>" + esc(b.text) + "</div>"; continue; }
+        // An example is real Kiln, so it is coloured the way the editor
+        // colours it. The stylesheet already carries those classes.
+        html += "<div class='tipcode'>";
+        size_t at = 0;
+        while (at <= b.text.size()) {
+            const size_t nl = b.text.find('\n', at);
+            const std::string line =
+                b.text.substr(at, nl == std::string::npos ? std::string::npos : nl - at);
+            html += "<div>" + (b.kiln ? highlight_line(line) : escape_code(line)) + "</div>";
+            if (nl == std::string::npos) break;
+            at = nl + 1;
+        }
+        html += "</div>";
+    }
     tip->SetInnerRML(html);
     int tx = x + 14, ty = y + 18;
     if (tx > g.win_w - 540) tx = std::max(8, g.win_w - 540);
@@ -4144,7 +4326,7 @@ void find_references() {
 /// not come yet is simply not there, and the UI never waits for it.
 void filter_completion();
 void poll_answers() {
-    openepl::json::Value v;
+    kiln::json::Value v;
     if (!g.lsp.running()) {
         // A server that has gone leaves no answers to wait for — and no
         // symbols to ask for: a flag left waiting for it keeps the frame
@@ -4158,12 +4340,12 @@ void poll_answers() {
         // rested, and only shown if it is still there.
         const bool current = g.hover_request == g.hover_shown_for;
         g.hover_request = 0;
-        const std::string text = openepl::lsp::hover_text(v);
+        const std::string text = kiln::lsp::hover_text(v);
         if (!text.empty() && current) show_tip(text, g.hover_x, g.hover_y);
     }
     if (g.def_request && g.lsp.take_response(g.def_request, v)) {
         g.def_request = 0;
-        const auto locs = openepl::lsp::read_locations(v);
+        const auto locs = kiln::lsp::read_locations(v);
         if (locs.empty()) {
             // A command is declared in C, not in this file: there is nowhere
             // to go, and hover already shows what a jump would have shown.
@@ -4175,13 +4357,13 @@ void poll_answers() {
     }
     if (g.refs_request && g.lsp.take_response(g.refs_request, v)) {
         g.refs_request = 0;
-        g.refs = openepl::lsp::read_locations(v);
+        g.refs = kiln::lsp::read_locations(v);
         render_references();
         set_status(std::to_string(g.refs.size()) + " reference(s)");
     }
     if (g.symbol_request && g.lsp.take_response(g.symbol_request, v)) {
         g.symbol_request = 0;
-        g.symbols = openepl::lsp::read_symbols(v);
+        g.symbols = kiln::lsp::read_symbols(v);
         update_tabs();
     }
     if (g.symbols_stale && !g.symbol_request) {
@@ -4192,8 +4374,8 @@ void poll_answers() {
         g.complete_request = 0;
         // A list or a CompletionList; the server sends the former, the
         // protocol allows either.
-        const openepl::json::Value& items =
-            v.kind == openepl::json::Value::Kind::Array ? v : v["items"];
+        const kiln::json::Value& items =
+            v.kind == kiln::json::Value::Kind::Array ? v : v["items"];
         g.complete_all.clear();
         for (size_t i = 0; i < items.size(); i++) g.complete_all.push_back(items.at(i));
         filter_completion();
@@ -4264,7 +4446,7 @@ void render_completion() {
     }
     std::string html;
     for (size_t i = first; i < n && i < first + WINDOW; i++) {
-        const openepl::json::Value& it = g.complete_all[g.complete_shown[i]];
+        const kiln::json::Value& it = g.complete_all[g.complete_shown[i]];
         html += "<div class='citem" + std::string(i == idx ? " sel" : "") + "' oe-citem='" +
                 std::to_string(i) + "'><span class='clabel'>" + esc(it["label"].str()) +
                 "</span><span class='cdetail'>" + esc(it["detail"].str()) + "</span></div>";
@@ -4385,17 +4567,17 @@ void accept_completion() {
     auto* ta = dynamic_cast<Rml::ElementFormControlTextArea*>(by_id("fullcode"));
     int line = 0, col = 0;
     if (!ta || !caret_position(line, col)) return;
-    const openepl::json::Value it = g.complete_all[g.complete_shown[(size_t)g.complete_index]];
+    const kiln::json::Value it = g.complete_all[g.complete_shown[(size_t)g.complete_index]];
     const std::string label = it["label"].str();
     const std::string insert = it["insertText"].str(label);
 
-    struct Edit { openepl::lsp::Range range; std::string text; };
+    struct Edit { kiln::lsp::Range range; std::string text; };
     std::vector<Edit> edits;
     edits.push_back({{line, g.complete_start, line, col}, insert});
-    const openepl::json::Value& extra = it["additionalTextEdits"];
+    const kiln::json::Value& extra = it["additionalTextEdits"];
     for (size_t i = 0; i < extra.size(); i++) {
         Edit e;
-        if (openepl::lsp::read_range(extra.at(i)["range"], e.range)) {
+        if (kiln::lsp::read_range(extra.at(i)["range"], e.range)) {
             e.text = extra.at(i)["newText"].str();
             edits.push_back(e);
         }
@@ -4436,7 +4618,7 @@ void accept_completion() {
 /// files it opens would re-indent them a line at a time.
 /// What Tab inserts and what Enter copies after a block opener. A setting;
 /// `settings::number` keeps it at 1 or more, because `col % width` divides.
-int indent_width() { return openepl::settings::number("editor.indent_size"); }
+int indent_width() { return kiln::settings::number("editor.indent_size"); }
 
 /// Put `text` in the editor with the caret at character offset `caret`.
 ///
@@ -4687,13 +4869,13 @@ std::string handler_stub(const CatalogComponent& cc, const CatalogEvent& ev,
         const size_t on = l.find("on " + ev.name + ":");
         if (on != std::string::npos && l.find(name, on) != std::string::npos) {
             g.lsp.did_change(file_text);
-            openepl::json::Value v;
+            kiln::json::Value v;
             const int id = g.lsp.completion(line, (int)l.size());
             if (id && g.lsp.wait(id, v, 2000)) {
-                const openepl::json::Value& items =
-                    v.kind == openepl::json::Value::Kind::Array ? v : v["items"];
+                const kiln::json::Value& items =
+                    v.kind == kiln::json::Value::Kind::Array ? v : v["items"];
                 for (size_t i = 0; i < items.size(); i++) {
-                    const openepl::json::Value& it = items.at(i);
+                    const kiln::json::Value& it = items.at(i);
                     if (it["label"].str() != name) continue;
                     const std::string text = it["additionalTextEdits"].at(0)["newText"].str();
                     if (!text.empty()) return text;
@@ -4830,7 +5012,7 @@ void open_context_menu(const std::string& id, int x, int y) {
     if (y + (int)size.y > dim.y) y -= (int)size.y;
     x = std::max(0, x);
     y = std::max(0, y);
-    if (std::getenv("OPENEPL_DESIGNER_DEBUG")) {
+    if (std::getenv("KILN_DESIGNER_DEBUG")) {
         std::fprintf(stderr, "ctxmenu: %s at %d,%d size %dx%d window %dx%d\n", id.c_str(), x, y,
                      (int)size.x, (int)size.y, dim.x, dim.y);
     }
@@ -4853,7 +5035,7 @@ struct Listener : Rml::EventListener {
         const Rml::String type = ev.GetType();
 
         if (type == "mousescroll") {
-            if (std::getenv("OPENEPL_DESIGNER_DEBUG")) {
+            if (std::getenv("KILN_DESIGNER_DEBUG")) {
                 std::fprintf(stderr, "wheel: target=<%s> id=%s dy=%.1f\n",
                              el->GetTagName().c_str(), el->GetId().c_str(),
                              ev.GetParameter<float>("wheel_delta_y", 0.f));
@@ -4865,7 +5047,7 @@ struct Listener : Rml::EventListener {
                     e->GetId() == "codehl") {
                     g.code_scroll +=
                         (int)ev.GetParameter<float>("wheel_delta_y", 0.f) * theme::CODE_LINE_H *
-                        openepl::settings::number("editor.scroll_lines");
+                        kiln::settings::number("editor.scroll_lines");
                     sync_highlight_scroll();
                     ev.StopPropagation();
                     return;
@@ -4880,7 +5062,7 @@ struct Listener : Rml::EventListener {
                         ta->SetScrollTop(ta->GetScrollTop() +
                                          ev.GetParameter<float>("wheel_delta_y", 0.f) *
                                              theme::LOG_LINE_H *
-                                             openepl::settings::number("editor.scroll_lines"));
+                                             kiln::settings::number("editor.scroll_lines"));
                         g.log_follow = false;
                         sync_log_scroll();
                     }
@@ -5212,6 +5394,16 @@ struct Listener : Rml::EventListener {
                     else if (a == "view-designer") set_view("designer");
                     else if (a == "view-code") set_view("code");
                     else if (a == "about") show_about();
+                    else if (a == "help") context_help();
+                    else if (a == "helpcommands") open_help("reference-commands", "", "");
+                    else if (a == "helpsearch") {
+                        // The menu says "search", so the caret belongs in the
+                        // search box — otherwise the entry just reopens the
+                        // last page and the user has to go find the field.
+                        open_help(g.help_page, "", "");
+                        if (g.help)
+                            if (Rml::Element* f = g.help->GetElementById("find")) f->Focus();
+                    }
                     else if (a == "settings") open_settings(g.settings_cat);
                     else if (a == "exit") {
                         Backend::RequestExit();
@@ -5529,6 +5721,24 @@ struct KeyGate : Rml::EventListener {
             ev.StopImmediatePropagation();
             return;
         }
+        // F1 on a name opens its reference entry; Shift+F1 searches the
+        // handbook for it. Capture phase for the same reason as F12 — the
+        // textarea swallows every keydown, and F1 is pressed in the editor.
+        if (key == Rml::Input::KI_F1) {
+            if (shift) {
+                int line = 0, col = 0;
+                std::string word;
+                if (caret_position(line, col)) {
+                    word = identifier_at(line, col);
+                    if (word.empty() && col > 0) word = identifier_at(line, col - 1);
+                }
+                open_help(g.help_page, "", word);
+            } else {
+                context_help();
+            }
+            ev.StopImmediatePropagation();
+            return;
+        }
         // The debugging keys, in the capture phase for the same reason: the
         // textarea swallows every keydown it sees, and these are pressed in
         // the editor more than anywhere else.
@@ -5611,7 +5821,7 @@ KeyGate g_key_gate;
 /// what was actually drawn.
 void dump_to(const char* path) {
     if (!path) return;
-    if (std::getenv("OPENEPL_DESIGNER_DEBUG")) {
+    if (std::getenv("KILN_DESIGNER_DEBUG")) {
         int dw = 0, dh = 0, ww = 0, wh = 0;
         if (SDL_Window* win = SDL_GL_GetCurrentWindow()) {
             SDL_GL_GetDrawableSize(win, &dw, &dh);
@@ -5660,7 +5870,7 @@ void dump_to(const char* path) {
     std::printf("designer: wrote %s\n", path);
 }
 
-void dump_frame() { dump_to(std::getenv("OPENEPL_DESIGNER_DUMP")); }
+void dump_frame() { dump_to(std::getenv("KILN_DESIGNER_DUMP")); }
 
 /// The element a script verb names: by element id, in the About box, or —
 /// for a component on the canvas or in the tray — by the `oe-id` attribute
@@ -5916,26 +6126,26 @@ void run_script(const char* script) {
                 // IDE uses — so the test checks what the IDE will do, not what
                 // the file happens to say.
                 std::printf("setting: %s = %s\n", arg.c_str(),
-                            openepl::settings::text(arg).c_str());
+                            kiln::settings::text(arg).c_str());
             } else if (verb == "setsetting") {
                 const size_t eq = arg.find('=');
                 if (eq == std::string::npos) {
                     std::printf("setting: %s needs key=value\n", arg.c_str());
                 } else {
                     const std::string key = arg.substr(0, eq), val = arg.substr(eq + 1);
-                    const bool ok = openepl::settings::set(key, val);
+                    const bool ok = kiln::settings::set(key, val);
                     if (ok) apply_setting(key);
                     std::printf("setting: %s = %s %s\n", key.c_str(),
-                                openepl::settings::text(key).c_str(), ok ? "ok" : "refused");
+                                kiln::settings::text(key).c_str(), ok ? "ok" : "refused");
                 }
             } else if (verb == "settingsdump") {
                 // Every row and its value, so a test can assert the page shows
                 // what the store holds.
-                for (const auto& r : openepl::settings::schema()) {
+                for (const auto& r : kiln::settings::schema()) {
                     if (r.hidden) continue;
                     std::printf("row: %s|%s|%s|%s\n", r.category, r.key,
-                                openepl::settings::text(r.key).c_str(),
-                                openepl::settings::modified(r.key) ? "modified" : "default");
+                                kiln::settings::text(r.key).c_str(),
+                                kiln::settings::modified(r.key) ? "modified" : "default");
                 }
             } else if (verb == "about") {
                 show_about();
@@ -6238,10 +6448,10 @@ void run_script(const char* script) {
                     g.context->Update();
                     g.hover_moved_at -= 1.0;      // the rest has already happened
                     hover_tick();
-                    openepl::json::Value v;
+                    kiln::json::Value v;
                     std::string text;
                     if (g.hover_request && g.lsp.wait(g.hover_request, v, 3000)) {
-                        text = openepl::lsp::hover_text(v);
+                        text = kiln::lsp::hover_text(v);
                         g.hover_request = 0;
                         if (!text.empty()) show_tip(text, mx, my);
                     }
@@ -6606,6 +6816,45 @@ void run_script(const char* script) {
                 std::printf("hoverval: %s = %s\n", word.c_str(), value.c_str());
                 std::fflush(stdout);
             }
+            else if (verb == "help") {
+                // help:<page> or help:<page>#<anchor>. Bare `help` opens the
+                // page the viewer was last on, which is what F1 does.
+                std::string page = arg, anchor;
+                const size_t h = page.find('#');
+                if (h != std::string::npos) { anchor = page.substr(h + 1); page = page.substr(0, h); }
+                open_help(page.empty() ? g.help_page : page, anchor, "");
+            }
+            else if (verb == "helpsearch") {
+                open_help(g.help_page, "", arg);
+            }
+            else if (verb == "f1") {
+                // F1 with the caret wherever `goto:` last put it — the whole
+                // point of context help, and the one thing a click cannot test.
+                context_help();
+            }
+            else if (verb == "helptext") {
+                // What the viewer is actually showing, as text. A rendered
+                // page that silently came out empty looks identical to a
+                // missing one until something prints it.
+                std::string out = "(closed)";
+                if (g.help) {
+                    if (Rml::Element* b = g.help->GetElementById("body")) {
+                        // Tags out, text in. The document is ours, so there is
+                        // no attribute value that can contain a stray '>'.
+                        const std::string rml = b->GetInnerRML();
+                        out.clear();
+                        bool in_tag = false;
+                        for (char c : rml) {
+                            if (c == '<') { in_tag = true; continue; }
+                            if (c == '>') { in_tag = false; out += ' '; continue; }
+                            if (!in_tag) out += c;
+                        }
+                        if (out.size() > 400) out = out.substr(0, 400);
+                    }
+                }
+                std::printf("helptext: %s\n", out.c_str());
+                std::fflush(stdout);
+            }
             else if (verb == "dbgstop") {
                 stop_debug();
                 std::printf("dbgstop: done\n");
@@ -6854,14 +7103,14 @@ void run_script(const char* script) {
 /// for — and the name is made unique, because silently writing into an existing
 /// project would be the worst possible first impression.
 std::string create_project(const std::string& template_id,
-                           const std::vector<openepl::welcome::TemplateInfo>& templates) {
+                           const std::vector<kiln::welcome::TemplateInfo>& templates) {
     std::string dir = template_id;
     for (int n = 2; ::access(dir.c_str(), F_OK) == 0 && n < 100; n++) {
         dir = template_id + "-" + std::to_string(n);
     }
 
     std::string text;
-    if (openepl::sys::capture_output(g.openepl_bin + " new " + template_id + " " + dir, true, text) == -1 &&
+    if (kiln::sys::capture_output(g.kiln_bin + " new " + template_id + " " + dir, true, text) == -1 &&
         text.empty())
         return "";
     std::string open_path, line;
@@ -6896,7 +7145,7 @@ void paint_splash(Splash& sp, const std::string& family) {
     }
     sp.built_for = dim;
     sp.doc = g.context->LoadDocumentFromMemory(
-        openepl::welcome::splash_markup(family, dim.x, dim.y, asset_path("openepl-wordmark.png")));
+        kiln::welcome::splash_markup(family, dim.x, dim.y, asset_path("kiln-wordmark.png")));
     if (!sp.doc) return;
     sp.doc->Show();
     // Two frames: one to lay out, one to present. Without this the splash is
@@ -6919,7 +7168,7 @@ Splash show_splash(const std::string& family) {
     // and rebuild, or the splash sits at 1440x900 in a maximised window.
     for (int i = 0; i < 3; i++) Backend::ProcessEvents(g.context, nullptr, false);
     paint_splash(sp, family);
-    dump_to(std::getenv("OPENEPL_DESIGNER_SPLASH_DUMP"));
+    dump_to(std::getenv("KILN_DESIGNER_SPLASH_DUMP"));
     return sp;
 }
 
@@ -6934,7 +7183,7 @@ Splash show_splash(const std::string& family) {
 /// run dozens of sessions.
 bool close_splash(Splash& sp, const std::string& family, Uint32 min_ms) {
     if (!sp.doc) return true;
-    const bool scripted = std::getenv("OPENEPL_DESIGNER_SCRIPT") != nullptr;
+    const bool scripted = std::getenv("KILN_DESIGNER_SCRIPT") != nullptr;
     while (!scripted && SDL_GetTicks() - sp.shown_at < min_ms) {
         if (!Backend::ProcessEvents(g.context, nullptr, false)) return false;
         paint_splash(sp, family);
@@ -6944,7 +7193,7 @@ bool close_splash(Splash& sp, const std::string& family, Uint32 min_ms) {
         Backend::PresentFrame();
         SDL_Delay(16);
     }
-    if (std::getenv("OPENEPL_DESIGNER_DEBUG")) {
+    if (std::getenv("KILN_DESIGNER_DEBUG")) {
         std::fprintf(stderr, "splash: shown for %u ms (minimum %u)\n",
                      SDL_GetTicks() - sp.shown_at, min_ms);
     }
@@ -6958,13 +7207,13 @@ bool close_splash(Splash& sp, const std::string& family, Uint32 min_ms) {
 /// closed the window.
 std::string run_welcome(const std::string& family) {
     auto dim = g.context->GetDimensions();
-    const auto templates = openepl::welcome::load_templates(g.openepl_bin);
+    const auto templates = kiln::welcome::load_templates(g.kiln_bin);
     const auto recent =
-        openepl::welcome::load_recent((size_t)openepl::settings::number("startup.recent_limit"));
+        kiln::welcome::load_recent((size_t)kiln::settings::number("startup.recent_limit"));
 
     Rml::ElementDocument* doc = g.context->LoadDocumentFromMemory(
-        openepl::welcome::welcome_markup(family, dim.x, dim.y, templates, recent,
-                                         asset_path("openepl-wordmark.png"), g.openepl_bin));
+        kiln::welcome::welcome_markup(family, dim.x, dim.y, templates, recent,
+                                         asset_path("kiln-wordmark.png"), g.kiln_bin));
     if (!doc) return "";
     doc->Show();
 
@@ -6977,7 +7226,7 @@ std::string run_welcome(const std::string& family) {
     // Pump the backend first: it is what applies the real window size to the
     // GL viewport. Rendering before it has run leaves part of the frame never
     // written, which reads back as black.
-    if (const char* sz = std::getenv("OPENEPL_DESIGNER_WELCOME_SIZE")) {
+    if (const char* sz = std::getenv("KILN_DESIGNER_WELCOME_SIZE")) {
         int nw = 0, nh = 0;
         if (std::sscanf(sz, "%dx%d", &nw, &nh) == 2 && nw > 0 && nh > 0) {
             if (SDL_Window* win = SDL_GL_GetCurrentWindow()) SDL_SetWindowSize(win, nw, nh);
@@ -7000,9 +7249,9 @@ std::string run_welcome(const std::string& family) {
         dim = now;
         doc->Close();
         g.context->Update();
-        doc = g.context->LoadDocumentFromMemory(openepl::welcome::welcome_markup(
-            family, dim.x, dim.y, templates, recent, asset_path("openepl-wordmark.png"),
-            g.openepl_bin));
+        doc = g.context->LoadDocumentFromMemory(kiln::welcome::welcome_markup(
+            family, dim.x, dim.y, templates, recent, asset_path("kiln-wordmark.png"),
+            g.kiln_bin));
         if (!doc) return "";
         doc->Show();
         g.context->Update();
@@ -7010,8 +7259,8 @@ std::string run_welcome(const std::string& family) {
         g.context->Render();
         Backend::PresentFrame();
     }
-    dump_to(std::getenv("OPENEPL_DESIGNER_WELCOME_DUMP"));
-    if (std::getenv("OPENEPL_DESIGNER_DEBUG")) {
+    dump_to(std::getenv("KILN_DESIGNER_WELCOME_DUMP"));
+    if (std::getenv("KILN_DESIGNER_DEBUG")) {
         const auto bb = doc->GetBox().GetSize();
         std::fprintf(stderr, "welcome: body %.0fx%.0f at %.0f,%.0f\n", bb.x, bb.y,
                      doc->GetAbsoluteLeft(), doc->GetAbsoluteTop());
@@ -7031,7 +7280,7 @@ std::string run_welcome(const std::string& family) {
     std::string chosen;
     struct Pick : Rml::EventListener {
         std::string* out;
-        const std::vector<openepl::welcome::TemplateInfo>* templates;
+        const std::vector<kiln::welcome::TemplateInfo>* templates;
         void ProcessEvent(Rml::Event& ev) override {
             for (Rml::Element* e = ev.GetTargetElement(); e; e = e->GetParentNode()) {
                 if (e->HasAttribute("oe-win")) {
@@ -7084,18 +7333,18 @@ std::string run_welcome(const std::string& family) {
     };
     auto start_dir = []() {
         char buf[4096];
-        if (::getcwd(buf, sizeof buf)) return openepl::sys::slashes(buf);
-        const std::string home = openepl::sys::home_dir();
-        return home.empty() ? openepl::sys::root_dir() : home;
+        if (::getcwd(buf, sizeof buf)) return kiln::sys::slashes(buf);
+        const std::string home = kiln::sys::home_dir();
+        return home.empty() ? kiln::sys::root_dir() : home;
     };
 
-    if (const char* pick = std::getenv("OPENEPL_DESIGNER_WELCOME_PICK")) {
+    if (const char* pick = std::getenv("KILN_DESIGNER_WELCOME_PICK")) {
         const std::string want(pick);
         // `browse:<mode>` swaps in the path browser and dumps it, so the same
         // document swap a click performs can be looked at without a click.
         if (want.rfind("browse:", 0) == 0) {
-            if (swap_document(openepl::welcome::browse_markup(
-                    family, dim.x, dim.y, start_dir(), want.substr(7), g.openepl_bin))) {
+            if (swap_document(kiln::welcome::browse_markup(
+                    family, dim.x, dim.y, start_dir(), want.substr(7), g.kiln_bin))) {
                 for (int i = 0; i < 3; i++) {
                     Backend::ProcessEvents(g.context, nullptr, false);
                     g.context->Update();
@@ -7103,12 +7352,12 @@ std::string run_welcome(const std::string& family) {
                     g.context->Render();
                     Backend::PresentFrame();
                 }
-                dump_to(std::getenv("OPENEPL_DESIGNER_BROWSE_DUMP"));
+                dump_to(std::getenv("KILN_DESIGNER_BROWSE_DUMP"));
                 // Click a row, the way a hand does: find it by the attribute
                 // that carries its meaning, press in the middle of it, and
                 // report what the listener made of it. The browser's rows are
                 // the one part of the welcome screen no test had ever pressed.
-                if (const char* row = std::getenv("OPENEPL_DESIGNER_BROWSE_CLICK")) {
+                if (const char* row = std::getenv("KILN_DESIGNER_BROWSE_CLICK")) {
                     const std::string wanted(row);
                     Rml::Element* hit = nullptr;
                     std::function<void(Rml::Element*)> walk = [&](Rml::Element* e) {
@@ -7174,11 +7423,11 @@ std::string run_welcome(const std::string& family) {
         if (const auto now = g.context->GetDimensions(); now != dim) {
             dim = now;
             const bool ok = browse_mode.empty()
-                ? swap_document(openepl::welcome::welcome_markup(
+                ? swap_document(kiln::welcome::welcome_markup(
                       family, dim.x, dim.y, templates, recent,
-                      asset_path("openepl-wordmark.png"), g.openepl_bin))
-                : swap_document(openepl::welcome::browse_markup(
-                      family, dim.x, dim.y, browse_dir, browse_mode, g.openepl_bin));
+                      asset_path("kiln-wordmark.png"), g.kiln_bin))
+                : swap_document(kiln::welcome::browse_markup(
+                      family, dim.x, dim.y, browse_dir, browse_mode, g.kiln_bin));
             if (!ok) break;
         }
         g.context->Update();
@@ -7197,20 +7446,20 @@ std::string run_welcome(const std::string& family) {
         // no dialog to show either — Studio's own browser is the answer on a
         // machine with neither portal nor zenity, and it stays the fallback
         // rather than becoming dead code.
-        if (chosen.rfind("browse:", 0) == 0 && !std::getenv("OPENEPL_DESIGNER_SCRIPT") &&
-            !std::getenv("OPENEPL_DESIGNER_WELCOME_PICK") &&
-            !std::getenv("OPENEPL_NO_NATIVE_DIALOG") && openepl::sys::has_native_file_dialog()) {
+        if (chosen.rfind("browse:", 0) == 0 && !std::getenv("KILN_DESIGNER_SCRIPT") &&
+            !std::getenv("KILN_DESIGNER_WELCOME_PICK") &&
+            !std::getenv("KILN_NO_NATIVE_DIALOG") && kiln::sys::has_native_file_dialog()) {
             const std::string mode = chosen.substr(7);
             const bool project = mode == "project";
-            const std::string picked = openepl::sys::pick_open_file(
+            const std::string picked = kiln::sys::pick_open_file(
                 project ? "Open Project" : "Open File", start_dir(),
-                project ? "OpenEPL project" : "OpenEPL source",
-                project ? "*.oeproj *.oir" : "*.oir");
+                project ? "Kiln project" : "Kiln source",
+                project ? "*.kproj *.kiln" : "*.kiln");
             if (!picked.empty()) {
-                // A project is named by its `project.oeproj`; the CLI says which
-                // `.oir` that means, exactly as the in-app browser asks it.
+                // A project is named by its `project.kproj`; the CLI says which
+                // `.kiln` that means, exactly as the in-app browser asks it.
                 const std::string open =
-                    project ? openepl::welcome::resolve_open(g.openepl_bin, picked) : picked;
+                    project ? kiln::welcome::resolve_open(g.kiln_bin, picked) : picked;
                 if (!open.empty()) {
                     chosen = open;
                     break;
@@ -7228,16 +7477,16 @@ std::string run_welcome(const std::string& family) {
             dir = chosen.substr(10);
         } else if (chosen == "cancel") {
             browse_mode.clear();
-            if (!swap_document(openepl::welcome::welcome_markup(
+            if (!swap_document(kiln::welcome::welcome_markup(
                     family, dim.x, dim.y, templates, recent,
-                    asset_path("openepl-wordmark.png"), g.openepl_bin))) break;
+                    asset_path("kiln-wordmark.png"), g.kiln_bin))) break;
             continue;
         } else {
             break;
         }
         browse_dir = dir;
-        if (!swap_document(openepl::welcome::browse_markup(family, dim.x, dim.y, dir,
-                                                           browse_mode, g.openepl_bin))) break;
+        if (!swap_document(kiln::welcome::browse_markup(family, dim.x, dim.y, dir,
+                                                           browse_mode, g.kiln_bin))) break;
     }
     if (doc) doc->Close();
     g.context->Update();
@@ -7250,23 +7499,23 @@ std::string run_welcome(const std::string& family) {
 
 /// A writable per-user cache path for `name`.
 std::string cache_file(const char* name) {
-    const std::string dir = openepl::sys::cache_dir();
-    openepl::sys::make_dirs(dir);
+    const std::string dir = kiln::sys::cache_dir();
+    kiln::sys::make_dirs(dir);
     return dir + "/" + name;
 }
 
-/// The `openepl` binary that ships beside us.
+/// The `kiln` binary that ships beside us.
 ///
 /// A bundle is unpacked wherever the user likes, so the compiler cannot be
 /// found by a fixed relative path. Ours is next to this executable; the repo's
 /// debug build is the fallback for development.
-std::string sibling_openepl() {
-    const std::string dir = openepl::sys::exe_dir();
+std::string sibling_kiln() {
+    const std::string dir = kiln::sys::exe_dir();
     if (!dir.empty()) {
-        const std::string cand = dir + "/" + openepl::sys::openepl_exe_name();
-        if (openepl::sys::executable(cand)) return cand;
+        const std::string cand = dir + "/" + kiln::sys::kiln_exe_name();
+        if (kiln::sys::executable(cand)) return cand;
     }
-    return "./target/debug/" + std::string(openepl::sys::openepl_exe_name());
+    return "./target/debug/" + std::string(kiln::sys::kiln_exe_name());
 }
 
 #ifdef _WIN32
@@ -7276,13 +7525,13 @@ std::string sibling_openepl() {
 /// see tools/package-windows.sh), so a Windows machine with no font Studio
 /// knows still gets the one Linux uses; the system's Segoe UI and Consolas
 /// come next, and Tahoma — the one face wine always has — last.
-const openepl::ui::FontCandidate* windows_font_candidates(int* count) {
+const kiln::ui::FontCandidate* windows_font_candidates(int* count) {
     static std::vector<std::string> paths;
-    static std::vector<openepl::ui::FontCandidate> fonts;
+    static std::vector<kiln::ui::FontCandidate> fonts;
     if (fonts.empty()) {
-        const std::string exe = openepl::sys::exe_dir();
+        const std::string exe = kiln::sys::exe_dir();
         const char* win = std::getenv("WINDIR");
-        const std::string sys = openepl::sys::slashes(win && *win ? win : "C:/Windows") + "/Fonts/";
+        const std::string sys = kiln::sys::slashes(win && *win ? win : "C:/Windows") + "/Fonts/";
         std::vector<std::string> roots;
         if (!exe.empty()) {
             roots.push_back(exe + "/../assets/fonts/");     // bundle: bin/ -> ../assets
@@ -7332,11 +7581,11 @@ const openepl::ui::FontCandidate* windows_font_candidates(int* count) {
 /// a headless run resizes the window to whatever a test wanted, and that must
 /// not become the size a person's IDE opens at tomorrow.
 void remember_window_size() {
-    if (std::getenv("OPENEPL_DESIGNER_SCRIPT")) return;
-    if (!openepl::settings::boolean("appearance.remember_window")) return;
-    openepl::settings::set("window.width", std::to_string(g.win_w));
-    openepl::settings::set("window.height", std::to_string(g.win_h));
-    openepl::settings::save();
+    if (std::getenv("KILN_DESIGNER_SCRIPT")) return;
+    if (!kiln::settings::boolean("appearance.remember_window")) return;
+    kiln::settings::set("window.width", std::to_string(g.win_w));
+    kiln::settings::set("window.height", std::to_string(g.win_h));
+    kiln::settings::save();
 }
 
 /// Apply the on-exit policy to unsaved work.
@@ -7347,7 +7596,7 @@ void remember_window_size() {
 /// it did either way: an afternoon's work vanishing silently would be a far
 /// worse failure than the one this setting fixes.
 void save_or_discard_on_exit() {
-    if (openepl::settings::text("startup.on_exit") == "discard") {
+    if (kiln::settings::text("startup.on_exit") == "discard") {
         std::printf("designer: unsaved changes discarded (Settings ▸ Files and startup)\n");
         return;
     }
@@ -7360,38 +7609,38 @@ int main(int argc, char** argv) {
     // in force before the first stylesheet is built: every colour in the chrome,
     // the splash and the welcome screen is copied out of `theme::` as a string,
     // so a swap after that point paints nothing already drawn.
-    openepl::settings::load();
-    theme::set_palette(openepl::settings::text("appearance.theme") == "dark");
-    theme::set_code_font_size(openepl::settings::number("editor.font_size"));
+    kiln::settings::load();
+    theme::set_palette(kiln::settings::text("appearance.theme") == "dark");
+    theme::set_code_font_size(kiln::settings::number("editor.font_size"));
 
-    g.openepl_bin = sibling_openepl();
+    g.kiln_bin = sibling_kiln();
     // A toolchain named in the settings beats the sibling, and the command
     // line beats both — the argument is the more deliberate act of the two.
-    if (const std::string chosen = openepl::settings::text("toolchain.openepl"); !chosen.empty()) {
-        g.openepl_bin = chosen;
+    if (const std::string chosen = kiln::settings::text("toolchain.kiln"); !chosen.empty()) {
+        g.kiln_bin = chosen;
     }
     // Either argument may be omitted: with no project we show the welcome
     // screen, and the compiler path is optional. They are told apart by
-    // extension rather than by position, so `openepl-designer <compiler>` works
+    // extension rather than by position, so `kiln-designer <compiler>` works
     // without inventing a flag.
     std::string path;
     for (int i = 1; i < argc; i++) {
         const std::string arg = argv[i];
         if (arg == "-h" || arg == "--help") {
             std::fprintf(stderr,
-                         "usage: openepl-designer [project.oir|project.oeproj|dir] [path/to/openepl]\n\n"
+                         "usage: kiln-designer [project.kiln|project.kproj|dir] [path/to/kiln]\n\n"
                          "With no project, Studio opens its welcome screen.\n\n"
                          "Environment:\n"
-                         "  OPENEPL_DESIGNER_SCRIPT   run a scripted session headlessly\n"
-                         "  OPENEPL_DESIGNER_DEBUG    report chrome/toolbox diagnostics\n");
+                         "  KILN_DESIGNER_SCRIPT   run a scripted session headlessly\n"
+                         "  KILN_DESIGNER_DEBUG    report chrome/toolbox diagnostics\n");
             return 2;
         }
-        const bool is_project = (arg.size() > 4 && arg.compare(arg.size() - 4, 4, ".oir") == 0) ||
-                                openepl::welcome::is_project_path(arg);
+        const bool is_project = kiln::sys::has_ext(arg, ".kiln") ||
+                                kiln::welcome::is_project_path(arg);
         if (is_project) {
             path = arg;
         } else {
-            g.openepl_bin = arg;
+            g.kiln_bin = arg;
         }
     }
 
@@ -7399,34 +7648,34 @@ int main(int argc, char** argv) {
      * renders a frame to a file steals focus from whoever is working on
      * the machine otherwise. SDL's offscreen driver renders through EGL
      * with no window at all, and a caller who set SDL_VIDEODRIVER
-     * knows better than this default, as does OPENEPL_UI_WINDOW=1 — the
+     * knows better than this default, as does KILN_UI_WINDOW=1 — the
      * one test that reads the manager's own flags back needs a real window. */
     // Not on Windows: SDL's offscreen driver draws through EGL, which the
     // Windows build of SDL has none of (libs/ui/ui_rmlui.cpp says the same).
 #ifndef _WIN32
-    if (!std::getenv("SDL_VIDEODRIVER") && !std::getenv("OPENEPL_UI_WINDOW") &&
-        (std::getenv("OPENEPL_DESIGNER_SCRIPT") || std::getenv("OPENEPL_DESIGNER_DUMP") ||
-         std::getenv("OPENEPL_DESIGNER_WELCOME_DUMP")))
+    if (!std::getenv("SDL_VIDEODRIVER") && !std::getenv("KILN_UI_WINDOW") &&
+        (std::getenv("KILN_DESIGNER_SCRIPT") || std::getenv("KILN_DESIGNER_DUMP") ||
+         std::getenv("KILN_DESIGNER_WELCOME_DUMP")))
         setenv("SDL_VIDEODRIVER", "offscreen", 1);
 #endif
     // The size we were left at, when asked for. `Designer g` is constructed
     // during static initialisation — before any settings file has been read —
     // so g.win_w is seeded here rather than at its declaration.
-    if (openepl::settings::boolean("appearance.remember_window")) {
-        const int w = openepl::settings::number("window.width");
-        const int h = openepl::settings::number("window.height");
+    if (kiln::settings::boolean("appearance.remember_window")) {
+        const int w = kiln::settings::number("window.width");
+        const int h = kiln::settings::number("window.height");
         if (w > 0 && h > 0) { g.win_w = w; g.win_h = h; }
     }
-    if (!Backend::Initialize("OpenEPL Studio", g.win_w, g.win_h, true)) return 1;
+    if (!Backend::Initialize("Kiln Studio", g.win_w, g.win_h, true)) return 1;
 
     // The window icon: what a task switcher and a dock show. SDL owns the
     // surface only until it copies it, so freeing straight after is correct.
     if (SDL_Window* win = SDL_GL_GetCurrentWindow()) {
-        const std::string icon = asset_path("openepl-icon.png");
+        const std::string icon = asset_path("kiln-icon.png");
         if (!icon.empty()) {
             // asset_path returns the URL form (doubled leading slash) for
             // RmlUi; SDL wants the plain filesystem path.
-            const std::string file = openepl::sys::path_of_url(icon);
+            const std::string file = kiln::sys::path_of_url(icon);
             if (SDL_Surface* s = IMG_Load(file.c_str())) {
                 SDL_SetWindowIcon(win, s);
                 SDL_FreeSurface(s);
@@ -7442,7 +7691,7 @@ int main(int argc, char** argv) {
                          SDL_GetError());
             SDL_SetWindowBordered(win, SDL_TRUE);
         }
-        if (std::getenv("OPENEPL_DESIGNER_DEBUG")) {
+        if (std::getenv("KILN_DESIGNER_DEBUG")) {
             std::fprintf(stderr, "designer: video driver %s\n", SDL_GetCurrentVideoDriver());
         }
     }
@@ -7457,7 +7706,7 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     const auto* fonts = windows_font_candidates(&font_count);
 #else
-    const auto* fonts = openepl::ui::font_candidates(&font_count);
+    const auto* fonts = kiln::ui::font_candidates(&font_count);
 #endif
     std::string family = "sans-serif";
     for (int i = 0; i < font_count; i++) {
@@ -7494,7 +7743,7 @@ int main(int argc, char** argv) {
     // an absolute one, so the tile has to be handed over in a form its URL
     // parser leaves alone. Doubling the slash survives that normalisation.
     g.family = family;
-    const std::string tile_path = cache_file("openepl_dotgrid.tga");
+    const std::string tile_path = cache_file("kiln_dotgrid.tga");
     const std::string dot_tile =
         write_dot_tile(tile_path, 10, theme::BORDER).empty() ? "" : "/" + tile_path;
     g.dot_tile = dot_tile;
@@ -7504,20 +7753,20 @@ int main(int argc, char** argv) {
     g.context->EnableMouseCursor(true);
 
     // Splash first, and painted before the slow part starts. Loading the
-    // component registry shells out to `openepl commands` once per kit; done
+    // component registry shells out to `kiln commands` once per kit; done
     // before the window exists it is a second of nothing at all.
     Splash splash = show_splash(family);
 
     // Ask the toolchain what exists before drawing a toolbox that claims to
     // know — and if the toolchain cannot be run at all the catalogue comes
     // back empty, which shows an empty toolbox rather than a wrong one.
-    g.catalog = build_catalog(g.openepl_bin);
+    g.catalog = build_catalog(g.kiln_bin);
 
     // With no file to open, ask what to build. The welcome screen has no
     // project yet, so the IDE chrome cannot meaningfully exist behind it.
     // The second splash is a transition between two screens, not a launch;
     // it gets no minimum.
-    Uint32 splash_min = (Uint32)openepl::settings::number("appearance.splash_ms");
+    Uint32 splash_min = (Uint32)kiln::settings::number("appearance.splash_ms");
     auto quit = [] {
         Rml::Shutdown();
         Backend::Shutdown();
@@ -7527,11 +7776,11 @@ int main(int argc, char** argv) {
     // once, then never asked again. Guarded by an existence check, because a
     // project that has been moved or deleted must land on the welcome screen
     // rather than on an error.
-    if (path.empty() && openepl::settings::boolean("startup.reopen_last") &&
-        !std::getenv("OPENEPL_DESIGNER_SCRIPT")) {
+    if (path.empty() && kiln::settings::boolean("startup.reopen_last") &&
+        !std::getenv("KILN_DESIGNER_SCRIPT")) {
         const auto recent =
-            openepl::welcome::load_recent((size_t)openepl::settings::number("startup.recent_limit"));
-        if (!recent.empty()) path = openepl::welcome::resolve_open(g.openepl_bin, recent.front());
+            kiln::welcome::load_recent((size_t)kiln::settings::number("startup.recent_limit"));
+        if (!recent.empty()) path = kiln::welcome::resolve_open(g.kiln_bin, recent.front());
     }
     if (path.empty()) {
         if (!close_splash(splash, family, splash_min)) return quit();
@@ -7542,23 +7791,23 @@ int main(int argc, char** argv) {
     }
 
     std::string err;
-    if (!load_model(g.openepl_bin, path, g.model, err)) {
+    if (!load_model(g.kiln_bin, path, g.model, err)) {
         std::fprintf(stderr, "designer: cannot load %s\n%s\n", path.c_str(), err.c_str());
         return 1;
     }
     // A scripted session is a test, not a person: it must not appear on the
     // welcome screen the person sees next.
-    if (!std::getenv("OPENEPL_DESIGNER_SCRIPT") && !std::getenv("OPENEPL_DESIGNER_DUMP"))
-        openepl::welcome::remember_recent(
-            path, (size_t)openepl::settings::number("startup.recent_limit"));
+    if (!std::getenv("KILN_DESIGNER_SCRIPT") && !std::getenv("KILN_DESIGNER_DUMP"))
+        kiln::welcome::remember_recent(
+            path, (size_t)kiln::settings::number("startup.recent_limit"));
 
     // The language server, started on the project's directory so it finds the
     // runtime and the component library the same way the compiler does.
     {
-        std::string abs = openepl::sys::real_path(path);
+        std::string abs = kiln::sys::real_path(path);
         if (abs.empty()) abs = path;
         const size_t slash = abs.find_last_of('/');
-        g.lsp.start(g.openepl_bin, slash == std::string::npos ? "." : abs.substr(0, slash));
+        g.lsp.start(g.kiln_bin, slash == std::string::npos ? "." : abs.substr(0, slash));
         std::string text;
         if (FILE* f = std::fopen(abs.c_str(), "rb")) {
             char buf[4096];
@@ -7572,7 +7821,7 @@ int main(int argc, char** argv) {
 
     g.mono = mono;
     const std::string chrome = build_chrome(family, mono, dot_tile);
-    if (std::getenv("OPENEPL_DESIGNER_DEBUG")) {
+    if (std::getenv("KILN_DESIGNER_DEBUG")) {
         std::fprintf(stderr, "designer: chrome %zu bytes\n", chrome.size());
     }
     g.doc = g.context->LoadDocumentFromMemory(chrome);
@@ -7587,11 +7836,11 @@ int main(int argc, char** argv) {
 
     relayout();
     refresh_all();
-    log("OpenEPL Studio ready.", "muted");
+    log("Kiln Studio ready.", "muted");
     log("> " + g.model.path, "muted");
     set_status("Ready");
 
-    if (std::getenv("OPENEPL_DESIGNER_DEBUG")) {
+    if (std::getenv("KILN_DESIGNER_DEBUG")) {
         for (const char* id : {"bottom", "codepane", "code", "codeview"}) {
             if (Rml::Element* e = by_id(id)) {
                 const auto b = e->GetBox().GetSize();
@@ -7610,7 +7859,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (const char* script = std::getenv("OPENEPL_DESIGNER_SCRIPT")) {
+    if (const char* script = std::getenv("KILN_DESIGNER_SCRIPT")) {
         // Adopt the window the compositor actually gave us before laying out.
         // The interactive loop does this every frame; without it a scripted
         // session lays out for the size we asked for and renders into the size
@@ -7627,13 +7876,13 @@ int main(int argc, char** argv) {
         run_script(script);
         if (g.dirty) save_or_discard_on_exit();
         std::printf("designer: script complete\n");
-        if (std::getenv("OPENEPL_DESIGNER_DUMP")) dump_frame();
+        if (std::getenv("KILN_DESIGNER_DUMP")) dump_frame();
         Rml::Shutdown();
         Backend::Shutdown();
         return 0;
     }
 
-    if (std::getenv("OPENEPL_DESIGNER_DUMP")) {
+    if (std::getenv("KILN_DESIGNER_DUMP")) {
         dump_frame();
         Rml::Shutdown();
         Backend::Shutdown();

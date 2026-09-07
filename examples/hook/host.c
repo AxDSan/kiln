@@ -1,5 +1,5 @@
 /* The host for the hook example: an ordinary program that calls a function,
- * then loads the OpenEPL library and calls the same function again.
+ * then loads the Kiln library and calls the same function again.
  *
  * It links `hookrt` and calls `hookrt_call` directly — it is the "application"
  * whose function gets hooked. Loading `libhook.so` / `hook.dll` fires that
@@ -9,7 +9,7 @@
  *
  * Build (Linux):
  *   clang -shared -fPIC examples/hook/hookrt.c -o libhookrt.so
- *   openepl build examples/hook/hook.oir --target sharedlib -o libhook.so
+ *   kiln build examples/hook/hook.kiln --target sharedlib -o libhook.so
  *   clang examples/hook/host.c -L. -lhookrt -Wl,-rpath,. -ldl -o host
  *   ./host            # prints "before 20" then "after 21"
  */

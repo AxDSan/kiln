@@ -3,7 +3,7 @@
 //! an ELF constructor on Linux — so the library runs the instant it is mapped,
 //! with no host code asking it to.
 //!
-//! The worked example (examples/hook/) is the headline: an OpenEPL library that,
+//! The worked example (examples/hook/) is the headline: an Kiln library that,
 //! on load, installs a function-pointer detour into a C library the host is
 //! already calling, so the host's next call returns a hooked value — proof that
 //! `dll`, `address of` and `dll_attach` compose into a real in-process hook. A
@@ -35,21 +35,21 @@ fn on_path(tool: &str) -> bool {
 /// that loads it, so every artifact of one case must share one directory — and
 /// two cases must not share it.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_dllmain_{tag}_test"));
+    let dir = std::env::temp_dir().join(format!("kiln_dllmain_{tag}_test"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
 }
 
-/// Build an OpenEPL source to `out` for the host platform; assert it succeeds.
+/// Build an Kiln source to `out` for the host platform; assert it succeeds.
 fn build_native(src: &Path, out: &Path, extra: &[&str]) {
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", out.to_str().unwrap()])
         .args(extra)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl");
-    assert!(status.success(), "openepl build failed for {}", src.display());
+        .expect("run kiln");
+    assert!(status.success(), "kiln build failed for {}", src.display());
 }
 
 /// Compile a C source with `cc` into `out`; assert it succeeds. Extra flags come
@@ -84,8 +84,8 @@ fn run_lines(bin: &Path, cwd: &Path) -> Vec<String> {
 }
 
 /// The worked example, natively: a C library (`hookrt`) the host calls, an
-/// OpenEPL library (`hook`) that installs a detour from its `dll_attach`, and a
-/// host that calls the C function before and after loading the OpenEPL library.
+/// Kiln library (`hook`) that installs a detour from its `dll_attach`, and a
+/// host that calls the C function before and after loading the Kiln library.
 /// The before is the original (10*2), the after is the detour (original + 1) —
 /// the loader ran the hook, in-process, with nothing patched by hand.
 #[test]
@@ -93,7 +93,7 @@ fn dll_attach_installs_a_hook_the_host_sees() {
     let dir = scratch("hook");
     let ex = repo().join("examples/hook");
     cc("clang", &ex.join("hookrt.c"), &dir.join("libhookrt.so"), &["-shared", "-fPIC"]);
-    build_native(&ex.join("hook.oir"), &dir.join("libhook.so"), &["--target", "sharedlib"]);
+    build_native(&ex.join("hook.kiln"), &dir.join("libhook.so"), &["--target", "sharedlib"]);
     cc(
         "clang",
         &ex.join("host.c"),
@@ -114,23 +114,23 @@ fn dll_attach_installs_a_hook_the_host_sees() {
 fn an_exported_flag_shows_init_then_attach_ran() {
     let dir = scratch("flag");
     std::fs::write(
-        dir.join("flag.oir"),
+        dir.join("flag.kiln"),
         "module flag\n\
          target sharedlib\n\
          var attached: int = 7\n\
          sub dll_attach\n  attached = attached + 1\nend\n\
          sub check(): int\n  return attached\nend\n",
     )
-    .expect("write flag.oir");
+    .expect("write flag.kiln");
     // The same shape without the special name: nothing wires it to the loader.
     std::fs::write(
-        dir.join("plain.oir"),
+        dir.join("plain.kiln"),
         "module plain\n\
          target sharedlib\n\
          var attached: int = 7\n\
          sub check(): int\n  return attached\nend\n",
     )
-    .expect("write plain.oir");
+    .expect("write plain.kiln");
     std::fs::write(
         dir.join("loader.c"),
         "#include <stdio.h>\n#include <dlfcn.h>\n\
@@ -144,8 +144,8 @@ fn an_exported_flag_shows_init_then_attach_ran() {
     )
     .expect("write loader.c");
 
-    build_native(&dir.join("flag.oir"), &dir.join("libflag.so"), &["--target", "sharedlib"]);
-    build_native(&dir.join("plain.oir"), &dir.join("libplain.so"), &["--target", "sharedlib"]);
+    build_native(&dir.join("flag.kiln"), &dir.join("libflag.so"), &["--target", "sharedlib"]);
+    build_native(&dir.join("plain.kiln"), &dir.join("libplain.so"), &["--target", "sharedlib"]);
     cc("clang", &dir.join("loader.c"), &dir.join("loader"), &["-ldl"]);
 
     let hooked = Command::new(dir.join("loader"))
@@ -181,18 +181,18 @@ fn a_loader_hook_with_a_signature_is_rejected() {
         "sub dll_attach(x: int)\n  call print_int(x)\nend\n",
         "sub dll_detach(): int\n  return 1\nend\n",
     ] {
-        let src = dir.join("bad.oir");
+        let src = dir.join("bad.kiln");
         std::fs::write(
             &src,
             format!("module bad\ntarget sharedlib\n{bad}sub go\n  call print_text(\"hi\")\nend\n"),
         )
-        .expect("write bad.oir");
-        let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+        .expect("write bad.kiln");
+        let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
             .args(["build", src.to_str().unwrap(), "-o", dir.join("libbad.so").to_str().unwrap()])
             .args(["--target", "sharedlib"])
-            .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+            .env("KILN_RUNTIME_DIR", repo().join("runtime"))
             .output()
-            .expect("run openepl");
+            .expect("run kiln");
         assert!(!out.status.success(), "a hook with a signature must not build");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
@@ -211,14 +211,14 @@ fn a_loader_hook_with_a_signature_is_rejected() {
 fn both_hooks_fire_at_load_and_unload() {
     let dir = scratch("bothhooks");
     std::fs::write(
-        dir.join("dt.oir"),
+        dir.join("dt.kiln"),
         "module dt\n\
          target sharedlib\n\
          sub dll_attach\n  call print_text(\"attached\")\nend\n\
          sub dll_detach\n  call print_text(\"detached\")\nend\n\
          sub check(): int\n  return 1\nend\n",
     )
-    .expect("write dt.oir");
+    .expect("write dt.kiln");
     std::fs::write(
         dir.join("ld.c"),
         "#include <stdio.h>\n#include <dlfcn.h>\n\
@@ -231,7 +231,7 @@ fn both_hooks_fire_at_load_and_unload() {
          \x20 return 0;\n}\n",
     )
     .expect("write ld.c");
-    build_native(&dir.join("dt.oir"), &dir.join("libdt.so"), &["--target", "sharedlib"]);
+    build_native(&dir.join("dt.kiln"), &dir.join("libdt.so"), &["--target", "sharedlib"]);
     cc("clang", &dir.join("ld.c"), &dir.join("ld"), &["-ldl"]);
 
     let out = Command::new(dir.join("ld"))
@@ -280,7 +280,7 @@ fn dll_attach_is_a_real_dllmain_under_wine() {
         &dir.join("hookrt.dll"),
         &["-shared", &format!("-Wl,--out-implib,{}", dir.join("libhookrt.dll.a").display())],
     );
-    build_native(&ex.join("hook.oir"), &dir.join("hook.dll"), &["--os", "windows", "--target", "sharedlib"]);
+    build_native(&ex.join("hook.kiln"), &dir.join("hook.dll"), &["--os", "windows", "--target", "sharedlib"]);
     cc(
         MINGW_GCC,
         &ex.join("host.c"),

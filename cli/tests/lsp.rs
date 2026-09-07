@@ -1,4 +1,4 @@
-//! Wire-level tests for `openepl lsp`.
+//! Wire-level tests for `kiln lsp`.
 //!
 //! These drive the real binary over real stdio with real JSON-RPC framing,
 //! because that is where language servers actually break: a `Content-Length`
@@ -36,16 +36,16 @@ impl Client {
     /// developer's would pass or fail on what they happen to have installed —
     /// the same hazard `kits.rs` documents.
     fn start_in(workspace: &std::path::Path, home: &std::path::Path) -> Client {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_openepl"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_kiln"))
             .arg("lsp")
             .current_dir(workspace)
             .env("HOME", home)
-            .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+            .env("KILN_RUNTIME_DIR", repo().join("runtime"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .expect("spawn openepl lsp");
+            .expect("spawn kiln lsp");
         let stdin = child.stdin.take().unwrap();
         let stdout = BufReader::new(child.stdout.take().unwrap());
         let mut c = Client {
@@ -113,7 +113,7 @@ impl Client {
         self.send(serde_json::json!({
             "jsonrpc": "2.0", "method": "textDocument/didOpen",
             "params": { "textDocument": {
-                "uri": uri, "languageId": "openepl", "version": 1, "text": text
+                "uri": uri, "languageId": "kiln", "version": 1, "text": text
             }}
         }));
     }
@@ -149,7 +149,7 @@ impl Client {
 #[test]
 fn clean_file_publishes_empty_diagnostics() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_clean.oir";
+    let uri = "file:///tmp/kiln_lsp_clean.kiln";
     c.open(
         uri,
         "module m\nsub main\n  call print_text(\"hi\")\nend\n",
@@ -164,7 +164,7 @@ fn clean_file_publishes_empty_diagnostics() {
 #[test]
 fn semantic_errors_land_on_the_right_line() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_errors.oir";
+    let uri = "file:///tmp/kiln_lsp_errors.kiln";
     //                1          2         3                 4          5
     c.open(
         uri,
@@ -179,7 +179,7 @@ fn semantic_errors_land_on_the_right_line() {
         .expect("immutability error");
     assert_eq!(immutable["range"]["start"]["line"], 3, "source line 4");
     assert_eq!(immutable["severity"], 1, "errors are severity 1");
-    assert_eq!(immutable["source"], "openepl");
+    assert_eq!(immutable["source"], "kiln");
     assert!(
         !immutable["message"].as_str().unwrap().starts_with("line "),
         "the message must not repeat the position — the range carries it: {immutable}"
@@ -198,7 +198,7 @@ fn semantic_errors_land_on_the_right_line() {
 #[test]
 fn parse_errors_are_positioned() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_parse.oir";
+    let uri = "file:///tmp/kiln_lsp_parse.kiln";
     c.open(uri, "module m\nsub main\n  let = = =\nend\n");
     let d = c.diagnostics(uri);
     assert_eq!(d.len(), 1, "one parse error: {d:?}");
@@ -210,7 +210,7 @@ fn parse_errors_are_positioned() {
 #[test]
 fn edits_republish_diagnostics() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_edit.oir";
+    let uri = "file:///tmp/kiln_lsp_edit.kiln";
     c.open(uri, "module m\nsub main\n  call nosuch()\nend\n");
     assert_eq!(c.diagnostics(uri).len(), 1, "starts broken");
 
@@ -236,7 +236,7 @@ fn unsupported_requests_get_an_error_not_silence() {
     c.send(serde_json::json!({
         // Formatting is genuinely unimplemented; hover et al. are supported now.
         "jsonrpc": "2.0", "id": 7, "method": "textDocument/formatting",
-        "params": { "textDocument": {"uri": "file:///tmp/x.oir"},
+        "params": { "textDocument": {"uri": "file:///tmp/x.kiln"},
                     "options": {"tabSize": 2, "insertSpaces": true} }
     }));
     let reply = c.recv();
@@ -281,7 +281,7 @@ fn advertises_its_capabilities() {
 
     let mut c = Client::start();
     let r = c.request(50, "textDocument/documentSymbol", serde_json::json!({
-        "textDocument": { "uri": "file:///tmp/openepl_lsp_nodoc.oir" }
+        "textDocument": { "uri": "file:///tmp/kiln_lsp_nodoc.kiln" }
     }));
     // Unknown document: a null result, not an error and not a hang.
     assert!(r.is_null(), "unknown document should answer null: {r}");
@@ -298,7 +298,7 @@ const FORM_SRC: &str =
 #[test]
 fn completion_after_dot_offers_component_properties() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_complete.oir";
+    let uri = "file:///tmp/kiln_lsp_complete.kiln";
     c.open(uri, FORM_SRC);
     let _ = c.diagnostics(uri);
 
@@ -325,7 +325,7 @@ fn completion_after_dot_offers_component_properties() {
 #[test]
 fn completion_offers_commands_and_locals() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_complete2.oir";
+    let uri = "file:///tmp/kiln_lsp_complete2.kiln";
     c.open(uri, "module m\nsub main\n  let total: int = 1\n  \nend\n");
     let _ = c.diagnostics(uri);
 
@@ -354,7 +354,7 @@ fn completion_offers_commands_and_locals() {
 #[test]
 fn completion_offers_the_indirect_call_and_bitwise_words() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_complete07.oir";
+    let uri = "file:///tmp/kiln_lsp_complete07.kiln";
     c.open(uri, "module m\nsub main\n  let total: int = 1\n  \nend\n");
     let _ = c.diagnostics(uri);
 
@@ -383,7 +383,7 @@ fn completion_offers_the_indirect_call_and_bitwise_words() {
 #[test]
 fn completion_offers_the_shorthand_words() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_complete09.oir";
+    let uri = "file:///tmp/kiln_lsp_complete09.kiln";
     c.open(uri, "module m\nsub main\n  let total: int = 1\n  \nend\n");
     let _ = c.diagnostics(uri);
 
@@ -407,7 +407,7 @@ fn completion_offers_the_shorthand_words() {
 #[test]
 fn hover_shows_a_command_signature() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_hover.oir";
+    let uri = "file:///tmp/kiln_lsp_hover.kiln";
     c.open(uri, "module m\nsub main\n  call print_text(\"hi\")\nend\n");
     let _ = c.diagnostics(uri);
 
@@ -425,7 +425,7 @@ fn hover_shows_a_command_signature() {
 #[test]
 fn hover_shows_a_doc_comment_and_hides_a_plain_one() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_doc.oir";
+    let uri = "file:///tmp/kiln_lsp_doc.kiln";
     c.open(
         uri,
         "module m\n\
@@ -473,7 +473,7 @@ fn hover_shows_a_doc_comment_and_hides_a_plain_one() {
 #[test]
 fn an_enum_is_a_type_name_not_a_component() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_enum.oir";
+    let uri = "file:///tmp/kiln_lsp_enum.kiln";
     c.open(
         uri,
         "module m\n\
@@ -508,7 +508,7 @@ fn an_enum_is_a_type_name_not_a_component() {
 #[test]
 fn goto_definition_finds_the_declaration() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_def.oir";
+    let uri = "file:///tmp/kiln_lsp_def.kiln";
     //          1        2               3         4       5
     c.open(uri, "module m\nvar count: int = 0\nsub main\n  count = 1\nend\n");
     let _ = c.diagnostics(uri);
@@ -524,7 +524,7 @@ fn goto_definition_finds_the_declaration() {
 #[test]
 fn references_respect_local_shadowing() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_refs.oir";
+    let uri = "file:///tmp/kiln_lsp_refs.kiln";
     //          1        2               3      4                5         6    7      8         9
     let src = "module m\nvar x: int = 1\nsub a\n  let x: int = 9\n  x = 3\nend\nsub b\n  x = 4\nend\n";
     c.open(uri, src);
@@ -555,7 +555,7 @@ fn references_respect_local_shadowing() {
 #[test]
 fn positions_are_utf16_not_bytes() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_utf16.oir";
+    let uri = "file:///tmp/kiln_lsp_utf16.kiln";
     // "héllo wörld" is 11 UTF-16 units but 13 bytes.
     let src = "module m\nvar greeting: text = \"héllo wörld\"\nsub main\n  greeting = \"x\"\nend\n";
     c.open(uri, src);
@@ -575,7 +575,7 @@ fn positions_are_utf16_not_bytes() {
 #[test]
 fn document_symbols_list_module_level_names() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_syms.oir";
+    let uri = "file:///tmp/kiln_lsp_syms.kiln";
     c.open(uri, FORM_SRC);
     let _ = c.diagnostics(uri);
 
@@ -605,16 +605,16 @@ fn write_project_kit(root: &std::path::Path, name: &str) {
     std::fs::write(
         dir.join(format!("{name}_libinfo.c")),
         format!(
-            r#"#include "openepl_abi.h"
-void {name}_answer(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv);
-static const OpenEPL_CommandDesc C[] = {{
-    {{ "{name}_answer", "{name}_answer", OE_SDT_INT, 0, 0 }},
+            r#"#include "kiln_abi.h"
+void {name}_answer(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
+static const Kiln_CommandDesc C[] = {{
+    {{ "{name}_answer", "{name}_answer", KN_SDT_INT, 0, 0 }},
 }};
-static const OpenEPL_LibInfo I = {{
-    OPENEPL_ABI_VERSION, "{name}", "openepl-lsptest-{name}", 1, 0, 0,
+static const Kiln_LibInfo I = {{
+    KILN_ABI_VERSION, "{name}", "kiln-lsptest-{name}", 1, 0, 0,
     (int32_t)(sizeof(C) / sizeof(C[0])), C,
 }};
-const OpenEPL_LibInfo *openepl_get_lib_info(void) {{ return &I; }}
+const Kiln_LibInfo *kiln_get_lib_info(void) {{ return &I; }}
 "#
         ),
     )
@@ -622,9 +622,9 @@ const OpenEPL_LibInfo *openepl_get_lib_info(void) {{ return &I; }}
     std::fs::write(
         dir.join(format!("{name}_cmds.c")),
         format!(
-            r#"#include "openepl_abi.h"
-void {name}_answer(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {{
-    (void)argc; (void)argv; oe_ret_int(ret, 42);
+            r#"#include "kiln_abi.h"
+void {name}_answer(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {{
+    (void)argc; (void)argv; kn_ret_int(ret, 42);
 }}
 "#
         ),
@@ -633,7 +633,7 @@ void {name}_answer(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {{
 }
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_lspdx_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_lspdx_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch");
     dir
@@ -648,7 +648,7 @@ fn a_project_kits_commands_complete_and_do_not_error() {
     write_project_kit(&root, "widget");
 
     let mut c = Client::start_in(&root, &home);
-    let uri = "file:///tmp/openepl_lsp_kit.oir";
+    let uri = "file:///tmp/kiln_lsp_kit.kiln";
     let src = "module m\nuse widget\nsub main\n  let n: int = widget_answer()\n  \nend\n";
     c.open(uri, src);
     let diags = c.diagnostics(uri);
@@ -680,7 +680,7 @@ fn use_line_completion_offers_resolvable_kits() {
     write_project_kit(&root, "widget");
 
     let mut c = Client::start_in(&root, &home);
-    let uri = "file:///tmp/openepl_lsp_use.oir";
+    let uri = "file:///tmp/kiln_lsp_use.kiln";
     c.open(uri, "module m\nuse \nsub main\nend\n");
     let _ = c.diagnostics(uri);
 
@@ -705,7 +705,7 @@ fn use_line_completion_offers_resolvable_kits() {
 #[test]
 fn signature_help_tracks_the_argument_being_typed() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_sig.oir";
+    let uri = "file:///tmp/kiln_lsp_sig.kiln";
     let src = "module m\nsub join_two(left: text, right: text): text\n  return concat(left, right)\n\
                end\nsub main\n  call print_text(join_two(\"a\", \"b\"))\nend\n";
     c.open(uri, src);
@@ -728,7 +728,7 @@ fn signature_help_tracks_the_argument_being_typed() {
     assert_eq!(r["activeParameter"], 1, "second argument: {r}");
 
     // A string containing a comma must not move the highlight.
-    let uri2 = "file:///tmp/openepl_lsp_sig2.oir";
+    let uri2 = "file:///tmp/kiln_lsp_sig2.kiln";
     c.open(uri2, "module m\nsub main\n  call print_text(concat(\"a, b\", \"c\"))\nend\n");
     let _ = c.diagnostics(uri2);
     let r = c.request(84, "textDocument/signatureHelp", Client::at(uri2, 2, 34));
@@ -741,7 +741,7 @@ fn signature_help_tracks_the_argument_being_typed() {
 #[test]
 fn hover_on_a_subroutine_shows_its_parameters() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_subhover.oir";
+    let uri = "file:///tmp/kiln_lsp_subhover.kiln";
     c.open(
         uri,
         "module m\nsub twice(n: int): int\n  return n * 2\nend\nsub main\n  let x: int = twice(2)\nend\n",
@@ -762,7 +762,7 @@ fn hover_on_a_subroutine_shows_its_parameters() {
 #[test]
 fn records_and_dictionaries_reach_the_editor() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_aggregates.oir";
+    let uri = "file:///tmp/kiln_lsp_aggregates.kiln";
     //          1        2                3        4      5         6
     c.open(
         uri,
@@ -804,7 +804,7 @@ fn records_and_dictionaries_reach_the_editor() {
 #[test]
 fn diagnostics_underline_the_name_not_the_line() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_cols.oir";
+    let uri = "file:///tmp/kiln_lsp_cols.kiln";
     //                                   0-based columns: `nope` is 17..21
     c.open(uri, "module m\nsub main\n  call print_int(nope(1))\nend\n");
     let d = c.diagnostics(uri);
@@ -820,7 +820,7 @@ fn diagnostics_underline_the_name_not_the_line() {
 #[test]
 fn diagnostic_columns_are_utf16() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_cols_utf16.oir";
+    let uri = "file:///tmp/kiln_lsp_cols_utf16.kiln";
     // "héllo" is 5 UTF-16 units, 6 bytes. `nope` starts at unit 27.
     c.open(uri, "module m\nsub main\n  call print_text(\"héllo\" + nope())\nend\n");
     let d = c.diagnostics(uri);
@@ -836,7 +836,7 @@ fn diagnostic_columns_are_utf16() {
 #[test]
 fn a_command_from_an_unused_library_names_the_use_line() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_elsewhere.oir";
+    let uri = "file:///tmp/kiln_lsp_elsewhere.kiln";
     c.open(uri, "module m\nsub main\n  let t: text = file_read_text(\"a\")\nend\n");
     let d = c.diagnostics(uri);
     assert_eq!(d.len(), 1, "{d:?}");
@@ -850,7 +850,7 @@ fn a_command_from_an_unused_library_names_the_use_line() {
 #[test]
 fn a_typo_suggests_the_nearest_command() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_typo.oir";
+    let uri = "file:///tmp/kiln_lsp_typo.kiln";
     c.open(uri, "module m\nsub main\n  call prnt_text(\"hi\")\nend\n");
     let d = c.diagnostics(uri);
     assert_eq!(
@@ -877,7 +877,7 @@ fn labels(r: &serde_json::Value) -> Vec<String> {
 #[test]
 fn completion_after_on_offers_the_components_events() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_on.oir";
+    let uri = "file:///tmp/kiln_lsp_on.kiln";
     //          1        2        3                 4      5    6        7
     c.open(uri, "module m\ntimer t\n  interval = 500\n  on \nend\nsub main\nend\n");
     let _ = c.diagnostics(uri);
@@ -895,7 +895,7 @@ fn completion_after_on_offers_the_components_events() {
 #[test]
 fn handler_completion_writes_the_subroutine_with_the_events_parameters() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_handler.oir";
+    let uri = "file:///tmp/kiln_lsp_handler.kiln";
     //          1        2        3            4      5         6
     let src = "module m\ntimer t\n  on tick: \nend\nsub main\nend\n";
     c.open(uri, src);
@@ -919,7 +919,7 @@ fn handler_completion_writes_the_subroutine_with_the_events_parameters() {
     assert_eq!(edit["range"]["start"]["line"], 6, "after the last line: {new}");
 
     // Once the subroutine exists it is offered as itself, not created twice.
-    let uri2 = "file:///tmp/openepl_lsp_handler2.oir";
+    let uri2 = "file:///tmp/kiln_lsp_handler2.kiln";
     c.open(uri2, "module m\ntimer t\n  on tick: \nend\nsub main\nend\nsub t_tick(n: int)\nend\n");
     let _ = c.diagnostics(uri2);
     let r = c.request(122, "textDocument/completion", Client::at(uri2, 2, 11));
@@ -942,7 +942,7 @@ fn handler_completion_writes_the_subroutine_with_the_events_parameters() {
 #[test]
 fn completion_after_on_inside_a_forms_button_offers_its_events() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_form_on.oir";
+    let uri = "file:///tmp/kiln_lsp_form_on.kiln";
     //          1        2      3          4           5      6    7    8      9
     c.open(uri, "module m\nuse ui\nform Main\n  button ok\n    on \n  end\nend\nsub go\nend\n");
     let _ = c.diagnostics(uri);
@@ -959,7 +959,7 @@ fn completion_after_on_inside_a_forms_button_offers_its_events() {
 #[test]
 fn handler_completion_inside_a_forms_button_writes_the_subroutine() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_form_handler.oir";
+    let uri = "file:///tmp/kiln_lsp_form_handler.kiln";
     //          1        2      3          4           5             6    7    8      9
     c.open(uri, "module m\nuse ui\nform Main\n  button ok\n    on click: \n  end\nend\nsub go\nend\n");
     let _ = c.diagnostics(uri);
@@ -985,7 +985,7 @@ fn handler_completion_inside_a_forms_button_writes_the_subroutine() {
 #[test]
 fn completion_after_on_inside_the_form_offers_the_forms_events() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_form_own_on.oir";
+    let uri = "file:///tmp/kiln_lsp_form_own_on.kiln";
     //          1        2      3          4           5      6      7    8      9
     c.open(uri, "module m\nuse ui\nform Main\n  button ok\n  end\n  on \nend\nsub go\nend\n");
     let _ = c.diagnostics(uri);
@@ -995,7 +995,7 @@ fn completion_after_on_inside_the_form_offers_the_forms_events() {
     assert_eq!(r.as_array().unwrap()[0]["detail"], "form event", "{r}");
 
     // And the handler it creates is named after the form.
-    let uri2 = "file:///tmp/openepl_lsp_form_own_handler.oir";
+    let uri2 = "file:///tmp/kiln_lsp_form_own_handler.kiln";
     c.open(uri2, "module m\nuse ui\nform Main\n  on load: \nend\nsub go\nend\n");
     let _ = c.diagnostics(uri2);
     let r = c.request(143, "textDocument/completion", Client::at(uri2, 3, 11));
@@ -1018,7 +1018,7 @@ fn completion_after_on_inside_the_form_offers_the_forms_events() {
 #[test]
 fn hover_on_a_property_shows_its_type_and_editor() {
     let mut c = Client::start();
-    let uri = "file:///tmp/openepl_lsp_prophover.oir";
+    let uri = "file:///tmp/kiln_lsp_prophover.kiln";
     //          1        2      3          4           5                            6     7    8      9                10
     let src = "module m\nuse ui\nform Main\n  button ok\n    background_color = \"#fff\"\n  end\nend\nsub go\n  ok.text = \"hi\"\nend\n";
     c.open(uri, src);

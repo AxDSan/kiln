@@ -1,4 +1,4 @@
-//! Kit resolution, `openepl kit add`, and kit-shipped templates.
+//! Kit resolution, `kiln kit add`, and kit-shipped templates.
 //!
 //! Every test runs with its own `HOME` and its own working directory, because
 //! both are inputs to resolution: a test that inherited the developer's `HOME`
@@ -17,7 +17,7 @@ fn repo() -> PathBuf {
 /// A scratch directory unique to `tag`. Tests run in parallel and two of them
 /// sharing a path race — the same hazard `build.rs` documents for binaries.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_kits_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_kits_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch");
     dir
@@ -29,16 +29,16 @@ fn write_kit(dir: &Path, name: &str, version: &str) {
     std::fs::write(
         dir.join(format!("{name}_libinfo.c")),
         format!(
-            r#"#include "openepl_abi.h"
-void {name}_answer(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv);
-static const OpenEPL_CommandDesc C[] = {{
-    {{ "{name}_answer", "{name}_answer", OE_SDT_INT, 0, 0 }},
+            r#"#include "kiln_abi.h"
+void {name}_answer(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
+static const Kiln_CommandDesc C[] = {{
+    {{ "{name}_answer", "{name}_answer", KN_SDT_INT, 0, 0 }},
 }};
-static const OpenEPL_LibInfo I = {{
-    OPENEPL_ABI_VERSION, "{name}", "openepl-test-{name}", 1, 0, 0,
+static const Kiln_LibInfo I = {{
+    KILN_ABI_VERSION, "{name}", "kiln-test-{name}", 1, 0, 0,
     (int32_t)(sizeof(C) / sizeof(C[0])), C,
 }};
-const OpenEPL_LibInfo *openepl_get_lib_info(void) {{ return &I; }}
+const Kiln_LibInfo *kiln_get_lib_info(void) {{ return &I; }}
 "#
         ),
     )
@@ -46,9 +46,9 @@ const OpenEPL_LibInfo *openepl_get_lib_info(void) {{ return &I; }}
     std::fs::write(
         dir.join(format!("{name}_cmds.c")),
         format!(
-            r#"#include "openepl_abi.h"
-void {name}_answer(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {{
-    (void)argc; (void)argv; oe_ret_int(ret, 42);
+            r#"#include "kiln_abi.h"
+void {name}_answer(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {{
+    (void)argc; (void)argv; kn_ret_int(ret, 42);
 }}
 "#
         ),
@@ -61,18 +61,18 @@ void {name}_answer(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {{
     .expect("write manifest");
 }
 
-/// Run `openepl` with `cwd` and `home` both pinned.
-fn openepl(cwd: &Path, home: &Path, args: &[&str]) -> String {
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+/// Run `kiln` with `cwd` and `home` both pinned.
+fn kiln(cwd: &Path, home: &Path, args: &[&str]) -> String {
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(args)
         .current_dir(cwd)
         .env("HOME", home)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(
         out.status.success(),
-        "openepl {args:?} failed: {}",
+        "kiln {args:?} failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -98,7 +98,7 @@ fn path_line(listing: &str, name: &str) -> Option<String> {
 #[test]
 fn bundled_libraries_resolve_without_a_manifest() {
     let home = scratch("bundled_home");
-    let listing = openepl(&repo(), &home, &["kits"]);
+    let listing = kiln(&repo(), &home, &["kits"]);
     assert_eq!(
         kit_line(&listing, "file").as_deref(),
         Some("kit: file 0.0.0 bundled")
@@ -114,7 +114,7 @@ fn bundled_libraries_resolve_without_a_manifest() {
 #[test]
 fn the_shipped_kit_resolves_as_a_project_kit() {
     let home = scratch("units_home");
-    let listing = openepl(&repo(), &home, &["kits"]);
+    let listing = kiln(&repo(), &home, &["kits"]);
     assert_eq!(
         kit_line(&listing, "units").as_deref(),
         Some("kit: units 1.0.0 project")
@@ -133,14 +133,14 @@ fn the_shipped_kit_resolves_as_a_project_kit() {
 fn resolution_order_is_project_then_user_then_bundled() {
     let root = scratch("order");
     let home = root.join("home");
-    let user_kit = home.join(".openepl/kits/file");
+    let user_kit = home.join(".kiln/kits/file");
     write_kit(&user_kit, "file", "9.9.9");
 
     // From a directory with no `kits/` above it, the user tier shadows the
     // bundled `libs/file`.
     let elsewhere = root.join("elsewhere");
     std::fs::create_dir_all(&elsewhere).unwrap();
-    let listing = openepl(&elsewhere, &home, &["kits"]);
+    let listing = kiln(&elsewhere, &home, &["kits"]);
     assert_eq!(
         kit_line(&listing, "file").as_deref(),
         Some("kit: file 9.9.9 user")
@@ -149,7 +149,7 @@ fn resolution_order_is_project_then_user_then_bundled() {
     // Put one in the project and it shadows the user's in turn.
     let project = root.join("project");
     write_kit(&project.join("kits/file"), "file", "0.1.0");
-    let listing = openepl(&project, &home, &["kits"]);
+    let listing = kiln(&project, &home, &["kits"]);
     assert_eq!(
         kit_line(&listing, "file").as_deref(),
         Some("kit: file 0.1.0 project")
@@ -161,7 +161,7 @@ fn resolution_order_is_project_then_user_then_bundled() {
 
     // With neither present the bundled library is what is left.
     let bare = scratch("order_bare");
-    let listing = openepl(&elsewhere, &bare, &["kits"]);
+    let listing = kiln(&elsewhere, &bare, &["kits"]);
     assert_eq!(
         kit_line(&listing, "file").as_deref(),
         Some("kit: file 0.0.0 bundled")
@@ -174,11 +174,11 @@ fn resolution_order_is_project_then_user_then_bundled() {
 fn a_user_kit_shadows_the_bundled_library_for_use_too() {
     let root = scratch("shadow_use");
     let home = root.join("home");
-    write_kit(&home.join(".openepl/kits/hello"), "hello", "2.0.0");
+    write_kit(&home.join(".kiln/kits/hello"), "hello", "2.0.0");
     let elsewhere = root.join("elsewhere");
     std::fs::create_dir_all(&elsewhere).unwrap();
 
-    let out = openepl(&elsewhere, &home, &["commands", "--use", "hello"]);
+    let out = kiln(&elsewhere, &home, &["commands", "--use", "hello"]);
     assert!(
         out.contains("command: hello_answer() -> int"),
         "the shadowing kit's command is missing:\n{out}"
@@ -189,7 +189,7 @@ fn a_user_kit_shadows_the_bundled_library_for_use_too() {
     );
 }
 
-/// `openepl kit add` from a directory, then `openepl commands --use`.
+/// `kiln kit add` from a directory, then `kiln commands --use`.
 #[test]
 fn kit_add_from_a_directory_then_use_it() {
     let root = scratch("add_dir");
@@ -198,24 +198,24 @@ fn kit_add_from_a_directory_then_use_it() {
     let src = root.join("src/addkit");
     write_kit(&src, "addkit", "3.1.4");
 
-    let out = openepl(&root, &home, &["kit", "add", src.to_str().unwrap()]);
+    let out = kiln(&root, &home, &["kit", "add", src.to_str().unwrap()]);
     assert!(out.contains("installed: addkit 3.1.4"), "{out}");
     assert!(out.contains("action: addkit added"), "{out}");
     assert!(
-        home.join(".openepl/kits/addkit/addkit_libinfo.c").is_file(),
-        "the kit was not unpacked into ~/.openepl/kits"
+        home.join(".kiln/kits/addkit/addkit_libinfo.c").is_file(),
+        "the kit was not unpacked into ~/.kiln/kits"
     );
 
-    let listing = openepl(&root, &home, &["kits"]);
+    let listing = kiln(&root, &home, &["kits"]);
     assert_eq!(
         kit_line(&listing, "addkit").as_deref(),
         Some("kit: addkit 3.1.4 user")
     );
-    let cmds = openepl(&root, &home, &["commands", "--use", "addkit"]);
+    let cmds = kiln(&root, &home, &["commands", "--use", "addkit"]);
     assert!(cmds.contains("command: addkit_answer() -> int"), "{cmds}");
 
     // Installing again over the top says so rather than silently succeeding.
-    let out = openepl(&root, &home, &["kit", "add", src.to_str().unwrap()]);
+    let out = kiln(&root, &home, &["kit", "add", src.to_str().unwrap()]);
     assert!(out.contains("action: addkit replaced"), "{out}");
 }
 
@@ -240,19 +240,19 @@ fn kit_add_from_a_tarball_then_build_a_program_with_it() {
         .expect("run tar");
     assert!(status.success(), "tar failed");
 
-    let out = openepl(&root, &home, &["kit", "add", tarball.to_str().unwrap()]);
+    let out = kiln(&root, &home, &["kit", "add", tarball.to_str().unwrap()]);
     assert!(out.contains("installed: tarkit 0.2.0"), "{out}");
 
     // All the way through: a program that `use`s an installed kit compiles,
     // links and runs.
-    let src = root.join("main.oir");
+    let src = root.join("main.kiln");
     std::fs::write(
         &src,
         "module tarapp\nuse tarkit\n\nsub main\n  call print_int(tarkit_answer())\nend\n",
     )
     .unwrap();
     let bin = root.join("tarapp");
-    openepl(
+    kiln(
         &root,
         &home,
         &["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()],
@@ -262,7 +262,7 @@ fn kit_add_from_a_tarball_then_build_a_program_with_it() {
     assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "42");
 }
 
-/// A kit ships templates, and `openepl new` can instantiate one — a tile you
+/// A kit ships templates, and `kiln new` can instantiate one — a tile you
 /// can see but not click is worse than no tile.
 ///
 /// The kit is staged here rather than shipped: a template only exists to be a
@@ -287,12 +287,12 @@ fn kit_templates_are_listed_and_can_be_created() {
     )
     .unwrap();
     std::fs::write(
-        tmpl.join("main.oir"),
+        tmpl.join("main.kiln"),
         "module __MODULE__\nuse gadget\n\nsub main\n  call print_int(gadget_answer())\nend\n",
     )
     .unwrap();
 
-    let listing = openepl(&root, &home, &["templates"]);
+    let listing = kiln(&root, &home, &["templates"]);
     assert!(listing.contains("template: gadget-app console"), "{listing}");
     assert!(listing.contains("name: gadget-app Gadget App"), "{listing}");
 
@@ -305,9 +305,9 @@ fn kit_templates_are_listed_and_can_be_created() {
     }
 
     let dest = root.join("widget");
-    let out = openepl(&root, &home, &["new", "gadget-app", dest.to_str().unwrap()]);
+    let out = kiln(&root, &home, &["new", "gadget-app", dest.to_str().unwrap()]);
     assert!(out.contains("created: gadget-app"), "{out}");
-    let main = std::fs::read_to_string(dest.join("main.oir")).expect("template file copied");
+    let main = std::fs::read_to_string(dest.join("main.kiln")).expect("template file copied");
     assert!(main.contains("module widget"), "__MODULE__ not replaced");
     assert!(main.contains("use gadget"));
 }
@@ -318,7 +318,7 @@ fn kit_templates_are_listed_and_can_be_created() {
 fn the_shipped_kit_builds_and_runs() {
     let root = scratch("units_build");
     let home = scratch("units_build_home");
-    let src = root.join("main.oir");
+    let src = root.join("main.kiln");
     std::fs::write(
         &src,
         "module unitsapp\nuse units\n\nsub main\n  call print_double(units_c_to_f(100.0))\n  call print_double(units_f_to_c(32.0))\nend\n",
@@ -326,7 +326,7 @@ fn the_shipped_kit_builds_and_runs() {
     .unwrap();
     let bin = root.join("unitsapp");
     // Run from the repository, which is where `kits/units` is the project kit.
-    openepl(
+    kiln(
         &repo(),
         &home,
         &["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()],
@@ -345,25 +345,25 @@ fn the_shipped_kit_builds_and_runs() {
 fn a_library_built_against_an_older_abi_is_diagnosed() {
     let root = scratch("staleabi");
     let home = root.join("home");
-    let kit = home.join(".openepl/kits/stale");
+    let kit = home.join(".kiln/kits/stale");
     write_kit(&kit, "stale", "0.1.0");
     // The one difference from a kit that works: a version that is not ours.
     let libinfo = kit.join("stale_libinfo.c");
     let src = std::fs::read_to_string(&libinfo).expect("read libinfo");
-    std::fs::write(&libinfo, src.replace("OPENEPL_ABI_VERSION,", "1,")).expect("write libinfo");
+    std::fs::write(&libinfo, src.replace("KILN_ABI_VERSION,", "1,")).expect("write libinfo");
 
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["commands", "--use", "stale"])
         .current_dir(&root)
         .env("HOME", &home)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl");
+        .expect("run kiln");
 
     assert!(!out.status.success(), "a stale ABI must not be accepted");
     assert!(
         out.status.code().is_some(),
-        "openepl died on a signal instead of reporting the mismatch: {}",
+        "kiln died on a signal instead of reporting the mismatch: {}",
         out.status
     );
     let msg = String::from_utf8_lossy(&out.stderr);

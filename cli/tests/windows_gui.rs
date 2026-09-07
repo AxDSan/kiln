@@ -1,4 +1,4 @@
-//! A windowed program cross-built for Windows: `openepl build --os windows`
+//! A windowed program cross-built for Windows: `kiln build --os windows`
 //! on a module with a form produces a PE32+ image for the GUI subsystem, with
 //! the DLLs it imports beside it, and — where wine is installed — that image
 //! gets through Windows' loader and as far as this machine's display lets it.
@@ -60,7 +60,7 @@ fn windows_ui_present() -> bool {
 }
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_windows_gui_{tag}_test"));
+    let dir = std::env::temp_dir().join(format!("kiln_windows_gui_{tag}_test"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -68,14 +68,14 @@ fn scratch(tag: &str) -> PathBuf {
 
 fn build_windows(source: &Path, out: &Path, extra: &[&str]) {
     let repo = repo();
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", source.to_str().unwrap(), "--os", "windows", "-o"])
         .arg(out)
         .args(extra)
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
-        .expect("run openepl");
-    assert!(status.success(), "openepl build --os windows failed for {}", source.display());
+        .expect("run kiln");
+    assert!(status.success(), "kiln build --os windows failed for {}", source.display());
 }
 
 /// The image's own headers: PE32+ for x86-64, and the optional header's
@@ -137,7 +137,7 @@ fn wine(image: &Path, cwd: &Path, env: &[(&str, &str)]) -> Option<std::process::
     Some(cmd.output().expect("run wine"))
 }
 
-/// A binary PPM's pixel at (x, y), top-left origin — what `OPENEPL_UI_DUMP`
+/// A binary PPM's pixel at (x, y), top-left origin — what `KILN_UI_DUMP`
 /// writes.
 fn ppm_pixel(path: &Path, x: usize, y: usize) -> (u8, u8, u8) {
     let bytes = std::fs::read(path).expect("read the dump");
@@ -167,7 +167,7 @@ fn form_cross_builds_to_a_gui_subsystem_pe_with_its_dlls_beside_it() {
     }
     let dir = scratch("form");
     let image = dir.join("form.exe");
-    build_windows(&repo().join("examples/form.oir"), &image, &[]);
+    build_windows(&repo().join("examples/form.kiln"), &image, &[]);
 
     assert_eq!(pe_subsystem(&image), 2, "a form must link for the GUI subsystem");
 
@@ -188,8 +188,8 @@ fn form_cross_builds_to_a_gui_subsystem_pe_with_its_dlls_beside_it() {
         &image,
         &dir,
         &[
-            ("OPENEPL_UI_EXIT_AFTER_FRAMES", "3"),
-            ("OPENEPL_UI_DUMP", dump.to_str().unwrap()),
+            ("KILN_UI_EXIT_AFTER_FRAMES", "3"),
+            ("KILN_UI_DUMP", dump.to_str().unwrap()),
         ],
     ) else {
         return;
@@ -236,7 +236,7 @@ fn console_program_that_uses_ui_runs_under_wine_with_the_dlls_beside_it() {
         return;
     }
     let dir = scratch("conui");
-    let source = dir.join("conui.oir");
+    let source = dir.join("conui.kiln");
     std::fs::write(
         &source,
         "module conui\nuse ui\n\nsub main\n  call print_text(\"loaded with ui beside it\")\nend\n",
@@ -274,7 +274,7 @@ fn console_cross_build_ships_no_dlls() {
     }
     let dir = scratch("console");
     let image = dir.join("hello.exe");
-    build_windows(&repo().join("examples/hello.oir"), &image, &[]);
+    build_windows(&repo().join("examples/hello.kiln"), &image, &[]);
     assert_eq!(pe_subsystem(&image), 3, "a console program must link for the console subsystem");
     assert!(
         dlls_beside(&image).is_empty(),

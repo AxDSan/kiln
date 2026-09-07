@@ -1,0 +1,48 @@
+# An app that changes at run time: clicking increments a counter.
+#
+# The count lives in a module variable — state that outlives any single event
+# handler — rather than being read back out of the UI.
+module counter
+use ui
+
+var count: int = 0
+
+form main_window
+  title  = "Kiln — counter"
+  width  = 420
+  height = 240
+  background_color = "#1e2233"
+
+  label count_label
+    text  = "0"
+    left  = 40
+    top   = 40
+    width = 340
+    color = "#ffffff"
+  end
+
+  button add_button
+    text   = "Add one"
+    left   = 40
+    top    = 110
+    width  = 160
+    height = 44
+    border_radius = 8
+    on click: on_add
+  end
+end
+
+sub on_add
+  increment count
+
+  if count >= 10
+    count_label.text = "{count} — that's enough!"
+    add_button.text = "Done"
+  else if count = 1
+    count_label.text = "1 (first click)"
+  else
+    count_label.text = "{count}"
+  end
+
+  call print_text("count = {count}")
+end

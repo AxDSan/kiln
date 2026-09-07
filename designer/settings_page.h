@@ -30,8 +30,8 @@
  * other pages"). A row that cannot take effect until relaunch says so on the
  * row instead of pretending.
  */
-#ifndef OPENEPL_DESIGNER_SETTINGS_PAGE_H
-#define OPENEPL_DESIGNER_SETTINGS_PAGE_H
+#ifndef KILN_DESIGNER_SETTINGS_PAGE_H
+#define KILN_DESIGNER_SETTINGS_PAGE_H
 
 #include <sstream>
 #include <string>
@@ -39,7 +39,7 @@
 #include "settings.h"
 #include "theme.h"
 
-namespace openepl::designer::settings_page {
+namespace kiln::designer::settings_page {
 
 inline std::string esc_attr(const std::string& v) {
     std::string out;
@@ -60,8 +60,8 @@ constexpr int RAIL_W = 150;
 
 /// The whole document, for a window `w` x `h`, showing `category`.
 inline std::string markup(const std::string& family, int w, int h, const std::string& category) {
-    using namespace openepl::designer::theme;
-    namespace st = openepl::settings;
+    using namespace kiln::designer::theme;
+    namespace st = kiln::settings;
 
     const int left = (w - DLG_W) / 2 > 0 ? (w - DLG_W) / 2 : 0;
     const int top = (h - DLG_H) / 2 > 0 ? (h - DLG_H) / 2 : 0;
@@ -215,6 +215,6 @@ inline std::string markup(const std::string& family, int w, int h, const std::st
     return s.str();
 }
 
-} // namespace openepl::designer::settings_page
+} // namespace kiln::designer::settings_page
 
 #endif

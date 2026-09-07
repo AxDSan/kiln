@@ -1,0 +1,470 @@
+# kernel32_mem.kdecl — kernel32.dll: memory, modules, files.
+#
+# This file is the memory/module/file third of the `win` kit. Everything here
+# lives in kernel32.dll and needs no window and no message loop: it is the
+# surface a console program, a loader, a patcher or a file tool is written
+# against. Windows only — `use win` is gated by lib.json "platforms".
+#
+# How the C types are spelled here:
+#
+#   HANDLE, HMODULE, HINSTANCE, LPVOID, LPCVOID, FARPROC, any pointer  -> ptr
+#   DWORD, UINT, BOOL, int                                             -> int / bool
+#   SIZE_T, DWORD_PTR, ULONGLONG, LARGE_INTEGER (its QuadPart)         -> int64
+#   LPCSTR that is always a real string                                -> text
+#   LPCSTR / LPSTR that may be NULL, or is an out buffer               -> ptr
+#   a struct the callee fills                                          -> the
+#     c-record itself (the pointer is taken for you) or `ptr` when NULL
+#     is a normal argument, as it is for SECURITY_ATTRIBUTES and OVERLAPPED.
+#
+# An out-parameter cell (LPDWORD, PLARGE_INTEGER, SIZE_T*) is `ptr`: allocate
+# it with `mem_alloc(4)` or `mem_alloc(8)` and read it back with
+# `ptr_read_int` / `ptr_read_int64`.
+#
+# Flags combine with `bor` and are tested with `band`, the way a C header
+# means them. The pairs a program reaches for every time
+# (GENERIC_READ_WRITE, MEM_COMMIT_RESERVE, FILE_SHARE_READ_WRITE) still ship
+# pre-combined, because naming the common case is worth a line. `+` is also
+# exact for the disjoint bit families below, and older programs that used it
+# keep working — but `bor` is what these are.
+#
+# Constants are decimal here for the same reason a diff is: they were written
+# before the lexer had hex literals. Hex with `_` grouping does compile now
+# (`0x1234_5678`), and the hex a header would show is in the comment beside
+# each one either way.
+#
+# A flag constant whose top bit is set is written as its signed 32-bit value
+# (GENERIC_READ is -2147483648, which is 0x80000000) so that it types as `int`
+# and lands in the DWORD parameter as the same 32 bits C would put there.
+#
+# An `int` literal or `const` widens into an `int64` parameter on its own; an
+# `int` variable does not, and nor does a comparison. `int_to_int64` is what
+# carries those across — `ptr_read_int64(cell, 0) = int_to_int64(16)`.
+
+# ---------------------------------------------------------------------------
+# WHAT THIS FILE BORROWS FROM ITS SIBLINGS
+#
+# A name may be declared once per kit, and these belong to the process and
+# registry halves of `win`, which declare them already. They are used freely
+# below and by any program that says `use win`:
+#
+#   CloseHandle, GetCurrentProcess, SECURITY_ATTRIBUTES,
+#   INVALID_HANDLE_VALUE   -- kernel32_proc.kdecl
+#   ERROR_SUCCESS, ERROR_FILE_NOT_FOUND, ERROR_ACCESS_DENIED
+#                          -- advapi32.kdecl
+#
+# INVALID_HANDLE_VALUE is (HANDLE)-1, not a null pointer, and it is what
+# CreateFileA and FindFirstFileA answer on failure. A handle is a `ptr`, so
+# the test a program writes is
+#   if ptr_to_int(h) = int_to_int64(INVALID_HANDLE_VALUE)
+#
+# FILETIME is declared here because two structs below embed it by value.
+# ---------------------------------------------------------------------------
+
+record FILETIME is c
+  dwLowDateTime: int
+  dwHighDateTime: int
+end
+
+# The rest of the error codes this file's calls set.
+const ERROR_PATH_NOT_FOUND = 3
+const ERROR_INVALID_HANDLE = 6
+const ERROR_NOT_ENOUGH_MEMORY = 8
+const ERROR_NO_MORE_FILES = 18
+const ERROR_INVALID_PARAMETER = 87
+const ERROR_INSUFFICIENT_BUFFER = 122
+const ERROR_ALREADY_EXISTS = 183
+const ERROR_MOD_NOT_FOUND = 126
+const ERROR_PROC_NOT_FOUND = 127
+
+# ---------------------------------------------------------------------------
+# VIRTUAL MEMORY
+#
+# VirtualAlloc reserves and commits pages in the calling process; the *Ex forms
+# do the same in another process, given a handle opened with the right access.
+# Sizes are SIZE_T, so `int64` — a reservation may be larger than 4 GB.
+# ---------------------------------------------------------------------------
+
+dll VirtualAlloc(lpAddress: ptr, dwSize: int64, flAllocationType: int, flProtect: int): ptr from "kernel32" system
+dll VirtualAllocEx(hProcess: ptr, lpAddress: ptr, dwSize: int64, flAllocationType: int, flProtect: int): ptr from "kernel32" system
+dll VirtualFree(lpAddress: ptr, dwSize: int64, dwFreeType: int): bool from "kernel32" system
+dll VirtualFreeEx(hProcess: ptr, lpAddress: ptr, dwSize: int64, dwFreeType: int): bool from "kernel32" system
+
+# lpflOldProtect is an out DWORD cell: mem_alloc(4), then ptr_read_int(cell, 0).
+# It is not optional — VirtualProtect fails when it is NULL.
+dll VirtualProtect(lpAddress: ptr, dwSize: int64, flNewProtect: int, lpflOldProtect: ptr): bool from "kernel32" system
+dll VirtualProtectEx(hProcess: ptr, lpAddress: ptr, dwSize: int64, flNewProtect: int, lpflOldProtect: ptr): bool from "kernel32" system
+
+dll VirtualLock(lpAddress: ptr, dwSize: int64): bool from "kernel32" system
+dll VirtualUnlock(lpAddress: ptr, dwSize: int64): bool from "kernel32" system
+
+# MEMORY_BASIC_INFORMATION as x64 lays it out: 48 bytes. `PartitionId` is a
+# WORD on current SDKs and was DWORD `__alignment1` before; either way the two
+# bytes after it are padding the struct carries, and they are declared so the
+# fields that follow sit at the offsets C puts them at.
+record MEMORY_BASIC_INFORMATION is c
+  BaseAddress: ptr
+  AllocationBase: ptr
+  AllocationProtect: int
+  PartitionId: word
+  Alignment1: word
+  RegionSize: int64
+  State: int
+  Protect: int
+  Type: int
+  Alignment2: int
+end
+
+# Both answer the number of bytes written into the buffer — 0 on failure — so
+# the return is SIZE_T, `int64`. Pass `size of MEMORY_BASIC_INFORMATION` as
+# dwLength.
+dll VirtualQuery(lpAddress: ptr, lpBuffer: MEMORY_BASIC_INFORMATION, dwLength: int64): int64 from "kernel32" system
+dll VirtualQueryEx(hProcess: ptr, lpAddress: ptr, lpBuffer: MEMORY_BASIC_INFORMATION, dwLength: int64): int64 from "kernel32" system
+
+# lpNumberOfBytesRead / lpNumberOfBytesWritten are out SIZE_T cells:
+# mem_alloc(8), then ptr_read_int64(cell, 0). Both may be NULL.
+dll ReadProcessMemory(hProcess: ptr, lpBaseAddress: ptr, lpBuffer: ptr, nSize: int64, lpNumberOfBytesRead: ptr): bool from "kernel32" system
+dll WriteProcessMemory(hProcess: ptr, lpBaseAddress: ptr, lpBuffer: ptr, nSize: int64, lpNumberOfBytesWritten: ptr): bool from "kernel32" system
+
+# The CPU may hold stale decoded instructions for a page whose bytes just
+# changed; this is what makes the new bytes the ones that execute.
+dll FlushInstructionCache(hProcess: ptr, lpBaseAddress: ptr, dwSize: int64): bool from "kernel32" system
+
+# ---------------------------------------------------------------------------
+# HEAPS
+# ---------------------------------------------------------------------------
+
+dll GetProcessHeap(): ptr from "kernel32" system
+dll HeapCreate(flOptions: int, dwInitialSize: int64, dwMaximumSize: int64): ptr from "kernel32" system
+dll HeapDestroy(hHeap: ptr): bool from "kernel32" system
+dll HeapAlloc(hHeap: ptr, dwFlags: int, dwBytes: int64): ptr from "kernel32" system
+dll HeapReAlloc(hHeap: ptr, dwFlags: int, lpMem: ptr, dwBytes: int64): ptr from "kernel32" system
+dll HeapFree(hHeap: ptr, dwFlags: int, lpMem: ptr): bool from "kernel32" system
+dll HeapSize(hHeap: ptr, dwFlags: int, lpMem: ptr): int64 from "kernel32" system
+dll HeapValidate(hHeap: ptr, dwFlags: int, lpMem: ptr): bool from "kernel32" system
+dll HeapCompact(hHeap: ptr, dwFlags: int): int64 from "kernel32" system
+
+# ---------------------------------------------------------------------------
+# BLOCK MOVES
+#
+# CopyMemory and MoveMemory are macros in the C headers; the symbol behind
+# both is RtlMoveMemory, which kernel32 really exports and which handles
+# overlap. RtlZeroMemory and RtlFillMemory are exported under their own names.
+# These are the Win32 spellings of what mem_copy and mem_zero already do —
+# they are here so a transcription of C source keeps its own vocabulary.
+# ---------------------------------------------------------------------------
+
+dll CopyMemory(Destination: ptr, Source: ptr, Length: int64) from "kernel32" as "RtlMoveMemory" system
+dll MoveMemory(Destination: ptr, Source: ptr, Length: int64) from "kernel32" as "RtlMoveMemory" system
+dll RtlMoveMemory(Destination: ptr, Source: ptr, Length: int64) from "kernel32" system
+dll ZeroMemory(Destination: ptr, Length: int64) from "kernel32" as "RtlZeroMemory" system
+dll FillMemory(Destination: ptr, Length: int64, Fill: int) from "kernel32" as "RtlFillMemory" system
+
+# ---------------------------------------------------------------------------
+# WHAT THE MACHINE HAS
+# ---------------------------------------------------------------------------
+
+# The head of SYSTEM_INFO is a union: `DWORD dwOemId` over
+# `struct { WORD wProcessorArchitecture; WORD wReserved; }`. The WORD pair is
+# the half anyone reads, so that is what is declared; the DWORD view is the
+# same four bytes.
+record SYSTEM_INFO is c
+  wProcessorArchitecture: word
+  wReserved: word
+  dwPageSize: int
+  lpMinimumApplicationAddress: ptr
+  lpMaximumApplicationAddress: ptr
+  dwActiveProcessorMask: int64
+  dwNumberOfProcessors: int
+  dwProcessorType: int
+  dwAllocationGranularity: int
+  wProcessorLevel: word
+  wProcessorRevision: word
+end
+
+dll GetSystemInfo(lpSystemInfo: SYSTEM_INFO) from "kernel32" system
+dll GetNativeSystemInfo(lpSystemInfo: SYSTEM_INFO) from "kernel32" system
+
+# dwLength must be set to `size of MEMORYSTATUSEX` (64) before the call.
+record MEMORYSTATUSEX is c
+  dwLength: int
+  dwMemoryLoad: int
+  ullTotalPhys: int64
+  ullAvailPhys: int64
+  ullTotalPageFile: int64
+  ullAvailPageFile: int64
+  ullTotalVirtual: int64
+  ullAvailVirtual: int64
+  ullAvailExtendedVirtual: int64
+end
+
+dll GlobalMemoryStatusEx(lpBuffer: MEMORYSTATUSEX): bool from "kernel32" system
+
+# ---------------------------------------------------------------------------
+# MODULES
+# ---------------------------------------------------------------------------
+
+dll LoadLibraryA(lpLibFileName: text): ptr from "kernel32" system
+dll LoadLibraryExA(lpLibFileName: text, hFile: ptr, dwFlags: int): ptr from "kernel32" system
+dll FreeLibrary(hLibModule: ptr): bool from "kernel32" system
+dll GetProcAddress(hModule: ptr, lpProcName: text): ptr from "kernel32" system
+dll GetModuleHandleA(lpModuleName: text): ptr from "kernel32" system
+
+# GetModuleHandleA(NULL) answers the base of the running .exe itself. A `text`
+# parameter has no null value, so the same symbol is bound a second time with
+# a `ptr` name for that call: GetModuleHandleNull(ptr_null()).
+dll GetModuleHandleNull(lpModuleName: ptr): ptr from "kernel32" as "GetModuleHandleA" system
+
+# lpModuleName is `ptr` because with GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS it
+# is an address inside a module rather than a name. phModule is an out cell:
+# mem_alloc(8), then ptr_read_ptr(cell, 0).
+dll GetModuleHandleExA(dwFlags: int, lpModuleName: ptr, phModule: ptr): bool from "kernel32" system
+
+# lpFilename is a caller-supplied buffer — mem_alloc(MAX_PATH) — and the return
+# is how many characters were written. Read it with ptr_read_text.
+dll GetModuleFileNameA(hModule: ptr, lpFilename: ptr, nSize: int): int from "kernel32" system
+
+dll DisableThreadLibraryCalls(hLibModule: ptr): bool from "kernel32" system
+
+# ---------------------------------------------------------------------------
+# FILES
+# ---------------------------------------------------------------------------
+
+# lpSecurityAttributes is NULL in almost every call, so it is `ptr`: pass
+# ptr_null(), or `address of` a SECURITY_ATTRIBUTES when a child must inherit
+# the handle. CreateFileA answers INVALID_HANDLE_VALUE, not null, on failure.
+dll CreateFileA(lpFileName: text, dwDesiredAccess: int, dwShareMode: int, lpSecurityAttributes: ptr, dwCreationDisposition: int, dwFlagsAndAttributes: int, hTemplateFile: ptr): ptr from "kernel32" system
+
+# OVERLAPPED's third and fourth DWORDs are a union with `PVOID Pointer`; the
+# DWORD pair is the half a file offset is written through.
+record OVERLAPPED is c
+  Internal: int64
+  InternalHigh: int64
+  Offset: int
+  OffsetHigh: int
+  hEvent: ptr
+end
+
+# lpNumberOfBytesRead / lpNumberOfBytesWritten are out DWORD cells:
+# mem_alloc(4), then ptr_read_int(cell, 0). lpOverlapped is ptr_null() for a
+# synchronous handle.
+dll ReadFile(hFile: ptr, lpBuffer: ptr, nNumberOfBytesToRead: int, lpNumberOfBytesRead: ptr, lpOverlapped: ptr): bool from "kernel32" system
+dll WriteFile(hFile: ptr, lpBuffer: ptr, nNumberOfBytesToWrite: int, lpNumberOfBytesWritten: ptr, lpOverlapped: ptr): bool from "kernel32" system
+
+# LARGE_INTEGER is a union over a 64-bit integer; its QuadPart is what crosses
+# here, so the distance is `int64` by value and lpNewFilePointer is an out
+# 8-byte cell (or ptr_null() when the new position is not wanted).
+dll SetFilePointerEx(hFile: ptr, liDistanceToMove: int64, lpNewFilePointer: ptr, dwMoveMethod: int): bool from "kernel32" system
+dll GetFileSizeEx(hFile: ptr, lpFileSize: ptr): bool from "kernel32" system
+dll SetEndOfFile(hFile: ptr): bool from "kernel32" system
+dll FlushFileBuffers(hFile: ptr): bool from "kernel32" system
+
+record BY_HANDLE_FILE_INFORMATION is c
+  dwFileAttributes: int
+  ftCreationTime: FILETIME
+  ftLastAccessTime: FILETIME
+  ftLastWriteTime: FILETIME
+  dwVolumeSerialNumber: int
+  nFileSizeHigh: int
+  nFileSizeLow: int
+  nNumberOfLinks: int
+  nFileIndexHigh: int
+  nFileIndexLow: int
+end
+
+dll GetFileInformationByHandle(hFile: ptr, lpFileInformation: BY_HANDLE_FILE_INFORMATION): bool from "kernel32" system
+dll GetFileAttributesA(lpFileName: text): int from "kernel32" system
+dll SetFileAttributesA(lpFileName: text, dwFileAttributes: int): bool from "kernel32" system
+dll DeleteFileA(lpFileName: text): bool from "kernel32" system
+dll MoveFileA(lpExistingFileName: text, lpNewFileName: text): bool from "kernel32" system
+dll CopyFileA(lpExistingFileName: text, lpNewFileName: text, bFailIfExists: bool): bool from "kernel32" system
+dll CreateDirectoryA(lpPathName: text, lpSecurityAttributes: ptr): bool from "kernel32" system
+dll RemoveDirectoryA(lpPathName: text): bool from "kernel32" system
+dll SetCurrentDirectoryA(lpPathName: text): bool from "kernel32" system
+
+# Each of these fills a caller-supplied buffer and answers the length written.
+dll GetCurrentDirectoryA(nBufferLength: int, lpBuffer: ptr): int from "kernel32" system
+dll GetTempPathA(nBufferLength: int, lpBuffer: ptr): int from "kernel32" system
+dll GetFullPathNameA(lpFileName: text, nBufferLength: int, lpBuffer: ptr, lpFilePart: ptr): int from "kernel32" system
+
+# ---------------------------------------------------------------------------
+# FILE MAPPINGS
+#
+# A mapping is how a file becomes bytes at an address: CreateFileMappingA over
+# an open file (or INVALID_HANDLE_VALUE for pages backed by the page file),
+# then MapViewOfFile for the pointer.
+# ---------------------------------------------------------------------------
+
+# lpName is `ptr` because an unnamed mapping — the usual case — passes NULL;
+# a shared one passes ptr_of_text("Local\\whatever").
+dll CreateFileMappingA(hFile: ptr, lpFileMappingAttributes: ptr, flProtect: int, dwMaximumSizeHigh: int, dwMaximumSizeLow: int, lpName: ptr): ptr from "kernel32" system
+dll OpenFileMappingA(dwDesiredAccess: int, bInheritHandle: bool, lpName: text): ptr from "kernel32" system
+
+# dwNumberOfBytesToMap is SIZE_T; 0 means "to the end of the mapping".
+dll MapViewOfFile(hFileMappingObject: ptr, dwDesiredAccess: int, dwFileOffsetHigh: int, dwFileOffsetLow: int, dwNumberOfBytesToMap: int64): ptr from "kernel32" system
+dll UnmapViewOfFile(lpBaseAddress: ptr): bool from "kernel32" system
+dll FlushViewOfFile(lpBaseAddress: ptr, dwNumberOfBytesToFlush: int64): bool from "kernel32" system
+
+# ---------------------------------------------------------------------------
+# DIRECTORY ENUMERATION
+# ---------------------------------------------------------------------------
+
+# WIN32_FIND_DATAA, 320 bytes. cFileName is CHAR[MAX_PATH] laid inline — read
+# the name with ptr_read_text(address of fd.cFileName), which stops at the NUL
+# the API wrote. The array count must be a literal, so it is 260 and not
+# MAX_PATH.
+record WIN32_FIND_DATAA is c
+  dwFileAttributes: int
+  ftCreationTime: FILETIME
+  ftLastAccessTime: FILETIME
+  ftLastWriteTime: FILETIME
+  nFileSizeHigh: int
+  nFileSizeLow: int
+  dwReserved0: int
+  dwReserved1: int
+  cFileName: byte[260]
+  cAlternateFileName: byte[14]
+end
+
+# FindFirstFileA answers INVALID_HANDLE_VALUE when nothing matches.
+# FindNextFileA answers false at the end of the walk, with GetLastError() then
+# ERROR_NO_MORE_FILES.
+dll FindFirstFileA(lpFileName: text, lpFindFileData: WIN32_FIND_DATAA): ptr from "kernel32" system
+dll FindNextFileA(hFindFile: ptr, lpFindFileData: WIN32_FIND_DATAA): bool from "kernel32" system
+dll FindClose(hFindFile: ptr): bool from "kernel32" system
+
+# ---------------------------------------------------------------------------
+# ERRORS
+# ---------------------------------------------------------------------------
+
+dll GetLastError(): int from "kernel32" system
+dll SetLastError(dwErrCode: int) from "kernel32" system
+
+# lpSource is NULL for FORMAT_MESSAGE_FROM_SYSTEM; lpBuffer is a caller
+# buffer (with FORMAT_MESSAGE_ALLOCATE_BUFFER it is instead a cell the API
+# writes an allocated pointer into); Arguments is ptr_null().
+dll FormatMessageA(dwFlags: int, lpSource: ptr, dwMessageId: int, dwLanguageId: int, lpBuffer: ptr, nSize: int, Arguments: ptr): int from "kernel32" system
+
+# ---------------------------------------------------------------------------
+# CONSTANTS
+# ---------------------------------------------------------------------------
+
+# VirtualAlloc / VirtualFree types
+const MEM_COMMIT = 4096                    # 0x00001000
+const MEM_RESERVE = 8192                   # 0x00002000
+const MEM_COMMIT_RESERVE = 12288           # 0x00003000 — the pair, pre-combined
+const MEM_DECOMMIT = 16384                 # 0x00004000
+const MEM_RELEASE = 32768                  # 0x00008000
+const MEM_FREE = 65536                     # 0x00010000
+const MEM_PRIVATE = 131072                 # 0x00020000
+const MEM_MAPPED = 262144                  # 0x00040000
+const MEM_RESET = 524288                   # 0x00080000
+const MEM_TOP_DOWN = 1048576               # 0x00100000
+const MEM_IMAGE = 16777216                 # 0x01000000
+
+# Page protection
+const PAGE_NOACCESS = 1                    # 0x01
+const PAGE_READONLY = 2                    # 0x02
+const PAGE_READWRITE = 4                   # 0x04
+const PAGE_WRITECOPY = 8                   # 0x08
+const PAGE_EXECUTE = 16                    # 0x10
+const PAGE_EXECUTE_READ = 32               # 0x20
+const PAGE_EXECUTE_READWRITE = 64          # 0x40
+const PAGE_EXECUTE_WRITECOPY = 128         # 0x80
+const PAGE_GUARD = 256                     # 0x100
+const PAGE_NOCACHE = 512                   # 0x200
+const PAGE_WRITECOMBINE = 1024             # 0x400
+
+# Heaps
+const HEAP_NO_SERIALIZE = 1                # 0x00000001
+const HEAP_GENERATE_EXCEPTIONS = 4         # 0x00000004
+const HEAP_ZERO_MEMORY = 8                 # 0x00000008
+const HEAP_REALLOC_IN_PLACE_ONLY = 16      # 0x00000010
+const HEAP_CREATE_ENABLE_EXECUTE = 262144  # 0x00040000
+
+# Access rights. The top bit makes these negative as a signed 32-bit int; the
+# bits handed to the API are the ones the header names.
+const GENERIC_READ = -2147483648           # 0x80000000
+const GENERIC_WRITE = 1073741824           # 0x40000000
+const GENERIC_EXECUTE = 536870912          # 0x20000000
+const GENERIC_ALL = 268435456              # 0x10000000
+const GENERIC_READ_WRITE = -1073741824     # 0xC0000000 — the pair, pre-combined
+
+# Sharing
+const FILE_SHARE_READ = 1
+const FILE_SHARE_WRITE = 2
+const FILE_SHARE_DELETE = 4
+const FILE_SHARE_READ_WRITE = 3            # the pair, pre-combined
+
+# Creation disposition
+const CREATE_NEW = 1
+const CREATE_ALWAYS = 2
+const OPEN_EXISTING = 3
+const OPEN_ALWAYS = 4
+const TRUNCATE_EXISTING = 5
+
+# File attributes and flags
+const FILE_ATTRIBUTE_READONLY = 1          # 0x0001
+const FILE_ATTRIBUTE_HIDDEN = 2            # 0x0002
+const FILE_ATTRIBUTE_SYSTEM = 4            # 0x0004
+const FILE_ATTRIBUTE_DIRECTORY = 16        # 0x0010
+const FILE_ATTRIBUTE_ARCHIVE = 32          # 0x0020
+const FILE_ATTRIBUTE_NORMAL = 128          # 0x0080
+const FILE_ATTRIBUTE_TEMPORARY = 256       # 0x0100
+const INVALID_FILE_ATTRIBUTES = -1         # 0xFFFFFFFF as a DWORD
+const FILE_FLAG_DELETE_ON_CLOSE = 67108864 # 0x04000000
+const FILE_FLAG_SEQUENTIAL_SCAN = 134217728 # 0x08000000
+const FILE_FLAG_RANDOM_ACCESS = 268435456  # 0x10000000
+const FILE_FLAG_NO_BUFFERING = 536870912   # 0x20000000
+const FILE_FLAG_OVERLAPPED = 1073741824    # 0x40000000
+const FILE_FLAG_WRITE_THROUGH = -2147483648 # 0x80000000
+
+# SetFilePointerEx origins
+const FILE_BEGIN = 0
+const FILE_CURRENT = 1
+const FILE_END = 2
+
+# GetFileSize / SetFilePointer failure sentinels, both 0xFFFFFFFF as a DWORD
+const INVALID_FILE_SIZE = -1
+const INVALID_SET_FILE_POINTER = -1
+
+# MapViewOfFile access
+const FILE_MAP_COPY = 1                    # 0x0001
+const FILE_MAP_WRITE = 2                   # 0x0002
+const FILE_MAP_READ = 4                    # 0x0004
+const FILE_MAP_EXECUTE = 32                # 0x0020
+const FILE_MAP_ALL_ACCESS = 983071         # 0x000F001F
+
+# Section flags for CreateFileMappingA's flProtect
+const SEC_COMMIT = 134217728               # 0x08000000
+const SEC_IMAGE = 16777216                 # 0x01000000
+const SEC_RESERVE = 67108864               # 0x04000000
+
+# LoadLibraryExA flags
+const DONT_RESOLVE_DLL_REFERENCES = 1      # 0x0001
+const LOAD_LIBRARY_AS_DATAFILE = 2         # 0x0002
+const LOAD_WITH_ALTERED_SEARCH_PATH = 8    # 0x0008
+const LOAD_LIBRARY_SEARCH_SYSTEM32 = 2048  # 0x0800
+
+# GetModuleHandleExA flags
+const GET_MODULE_HANDLE_EX_FLAG_PIN = 1
+const GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT = 2
+const GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS = 4
+
+# FormatMessageA flags
+const FORMAT_MESSAGE_ALLOCATE_BUFFER = 256 # 0x0100
+const FORMAT_MESSAGE_IGNORE_INSERTS = 512  # 0x0200
+const FORMAT_MESSAGE_FROM_STRING = 1024    # 0x0400
+const FORMAT_MESSAGE_FROM_HMODULE = 2048   # 0x0800
+const FORMAT_MESSAGE_FROM_SYSTEM = 4096    # 0x1000
+const FORMAT_MESSAGE_MAX_WIDTH_MASK = 255  # 0x00FF
+
+# Processor architectures, as SYSTEM_INFO reports them
+const PROCESSOR_ARCHITECTURE_INTEL = 0
+const PROCESSOR_ARCHITECTURE_ARM = 5
+const PROCESSOR_ARCHITECTURE_AMD64 = 9
+const PROCESSOR_ARCHITECTURE_ARM64 = 12
+const PROCESSOR_ARCHITECTURE_UNKNOWN = 65535
+
+# The longest ANSI path the classic API accepts, and the count cFileName is
+# declared with above.
+const MAX_PATH = 260

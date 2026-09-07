@@ -1,0 +1,40 @@
+# A window with a label and a button, and a handler wired to its click.
+#
+# This is exactly the shape the visual designer reads and writes, so you can
+# open it in Studio, drag things around, and the file stays yours.
+#
+#   kiln run examples/form.kiln
+module hello_form
+use ui
+
+form main_window
+  title  = "Kiln"
+  width  = 480
+  height = 300
+  background_color = "#1e2233"
+
+  label greeting
+    text  = "Click the button."
+    left  = 40
+    top   = 40
+    width = 400
+    color = "#ffffff"
+  end
+
+  button ok_button
+    text   = "Click me"
+    left   = 40
+    top    = 110
+    width  = 160
+    height = 44
+    background_color = "#4a86e8"
+    border_radius = 8
+    on click: on_ok_click
+  end
+end
+
+# The click handler is an ordinary subroutine — bound by function pointer, so
+# its name never reaches the shipped binary (G8).
+sub on_ok_click
+  call print_text("button clicked!")
+end

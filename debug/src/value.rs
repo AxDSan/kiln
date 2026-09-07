@@ -1,6 +1,6 @@
-//! Rendering an OpenEPL value out of a stopped program's memory.
+//! Rendering an Kiln value out of a stopped program's memory.
 //!
-//! This is the layer that makes the debugger OpenEPL's rather than a small
+//! This is the layer that makes the debugger Kiln's rather than a small
 //! gdb, and every rule in it comes from something only the compiler knows:
 //!
 //! - **Arrays are 1-based.** `names = [1] "ada", [2] "grace"`, because that is
@@ -26,37 +26,37 @@ use crate::unwind::Memory;
 use crate::Error;
 
 /// The width of one stored value, mirroring the value union of
-/// `OpenEPL_Slot` in `abi/openepl_abi.h`. An array element, a heap record's
+/// `Kiln_Slot` in `abi/kiln_abi.h`. An array element, a heap record's
 /// field and a dictionary's value are each one of these whatever narrower type
 /// they hold, because the runtime widens everything it stores to 64 bits.
 const CELL_BYTES: u64 = 8;
 
-/// `OpenEPL_Array` in `abi/openepl_abi.h`: `{ int32 elem_tag; int32 len;
+/// `Kiln_Array` in `abi/kiln_abi.h`: `{ int32 elem_tag; int32 len;
 /// int32 cap; int32 _pad; }`, with the elements laid out immediately after it
-/// (`runtime/oe_array.c:29`).
+/// (`runtime/kn_array.c:29`).
 const ARRAY_HEADER_BYTES: u64 = 16;
 
 /// Where `len` sits inside that header, one `int32` past `elem_tag`.
 const ARRAY_LEN_OFFSET: u64 = 4;
 
-/// `OpenEPL_Record` in `runtime/openepl_core.h`: `{ int32 count; int32 _pad; }`
-/// followed by `count` cells (`runtime/oe_record.c:23`). Only the count is read
+/// `Kiln_Record` in `runtime/kiln_core.h`: `{ int32 count; int32 _pad; }`
+/// followed by `count` cells (`runtime/kn_record.c:23`). Only the count is read
 /// from it; every field's position comes from the debug information, which
 /// already measures from the start of this header.
 const RECORD_HEADER_BYTES: u64 = 8;
 
-/// Where the entry block hangs off `OpenEPL_Dict`
-/// (`runtime/openepl_core.h:46`): three `int32`s and a pad, then the pointer.
+/// Where the entry block hangs off `Kiln_Dict`
+/// (`runtime/kiln_core.h:46`): three `int32`s and a pad, then the pointer.
 const DICT_ENTRIES_OFFSET: u64 = 16;
 
 /// Where `len` sits in that same header, one `int32` past `val_tag`.
 const DICT_LEN_OFFSET: u64 = 4;
 
-/// One `OpenEPL_DictEntry` (`runtime/openepl_core.h:34`): a `char *` key and
+/// One `Kiln_DictEntry` (`runtime/kiln_core.h:34`): a `char *` key and
 /// an `int64` value, in that order.
 const DICT_ENTRY_BYTES: u64 = 16;
 
-/// Where `len` sits in `OpenEPL_Bin` (`abi/openepl_abi.h`), which is
+/// Where `len` sits in `Kiln_Bin` (`abi/kiln_abi.h`), which is
 /// `{ int32 dims; int32 len; }` with the bytes immediately after it.
 const BIN_LEN_OFFSET: u64 = 4;
 
@@ -76,12 +76,12 @@ const MAX_ELEMENTS: i64 = 1 << 20;
 ///
 /// The same bound and the same reason. It is not a length the runtime knows:
 /// a heap text carries an eight-byte header, but that header is a `next` link
-/// in the runtime's allocation list (`runtime/oe_mem.c:11`), not a size, so
+/// in the runtime's allocation list (`runtime/kn_mem.c:11`), not a size, so
 /// walking to the terminator is the only way to measure one.
 const MAX_TEXT_BYTES: u64 = 1 << 20;
 
-/// The `OE_SDT_*` tags an element or a dictionary value can carry, mirrored
-/// from `abi/openepl_abi.h`. Their numeric values are frozen there.
+/// The `KN_SDT_*` tags an element or a dictionary value can carry, mirrored
+/// from `abi/kiln_abi.h`. Their numeric values are frozen there.
 mod tag {
     pub const INT: i32 = 3;
     pub const INT64: i32 = 4;
@@ -204,7 +204,7 @@ impl Local {
 /// covering both would render garbage for one of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordShape {
-    /// A `record`: `oe_rec_new`'s allocation, held by pointer.
+    /// A `record`: `kn_rec_new`'s allocation, held by pointer.
     Heap,
     /// A `c record`: flat bytes laid out where the local lives.
     Flat,
@@ -428,11 +428,11 @@ fn read_typed(type_name: &str, address: u64, memory: &dyn Memory) -> Value {
 /// Read one array, 1-based and already rendered element by element.
 ///
 /// The element type comes from the array's own header rather than from the
-/// local's type name, which is what `elem_text` does in `runtime/oe_array.c`:
+/// local's type name, which is what `elem_text` does in `runtime/kn_array.c`:
 /// the header is the runtime's own answer, and a disagreement between the two
 /// is a bug worth seeing rather than papering over.
 fn read_array(memory: &dyn Memory, pointer: u64) -> Value {
-    // `ary_len(NULL)` is 0 (`runtime/oe_array.c:35`) — an array that was never
+    // `ary_len(NULL)` is 0 (`runtime/kn_array.c:35`) — an array that was never
     // created reads as empty, which is the language's own answer and not a
     // failure to report.
     if pointer == 0 {
@@ -472,7 +472,7 @@ fn read_array(memory: &dyn Memory, pointer: u64) -> Value {
 /// Read one dictionary, in the insertion order its entries are kept in.
 fn read_dict(memory: &dyn Memory, pointer: u64) -> Value {
     // A dictionary that was never created reads as empty for the reason an
-    // array does (`runtime/oe_dict.c:41`).
+    // array does (`runtime/kn_dict.c:41`).
     if pointer == 0 {
         return Value::Dict(Vec::new());
     }
@@ -523,7 +523,7 @@ fn read_dict(memory: &dyn Memory, pointer: u64) -> Value {
 ///
 /// Every cell is 64 raw bits and only the tag says what they mean, which is
 /// the same sentence `elem_cmp` and `elem_text` are written under in
-/// `runtime/oe_array.c:117`.
+/// `runtime/kn_array.c:117`.
 fn read_cell(memory: &dyn Memory, tag: i32, bits: u64) -> Value {
     match tag {
         tag::INT => Value::Int(bits as i32),
@@ -543,13 +543,13 @@ fn read_cell(memory: &dyn Memory, tag: i32, bits: u64) -> Value {
 /// Read a `text` pointer as the characters the user wrote.
 ///
 /// `NULL` is the empty text and not a failure: that is what the ABI says
-/// (`abi/openepl_abi.h`, `OE_SDT_TEXT`) and what every command that takes text
+/// (`abi/kiln_abi.h`, `KN_SDT_TEXT`) and what every command that takes text
 /// already does with one.
 ///
 /// The eight bytes *before* the payload are never touched. A heap text has a
 /// header there and a literal has whatever the linker put there, and even for
 /// the heap text the header is a `next` link in the allocation list
-/// (`runtime/oe_mem.c:11`) rather than a length — so reading it would be
+/// (`runtime/kn_mem.c:11`) rather than a length — so reading it would be
 /// meaningless for one provenance and wrong for the other. Walking to the NUL
 /// is correct for both, which is why there is one path here and not two.
 fn read_text(memory: &dyn Memory, pointer: u64) -> Value {
@@ -594,7 +594,7 @@ fn read_text(memory: &dyn Memory, pointer: u64) -> Value {
 ///
 /// `Value` has no variant of its own for one, and a list of its bytes is both
 /// truthful and indexed the way the language indexes it
-/// (`runtime/oe_array.c:90`).
+/// (`runtime/kn_array.c:90`).
 fn read_bin(memory: &dyn Memory, pointer: u64) -> Value {
     if pointer == 0 {
         return Value::Array(Vec::new());
@@ -631,7 +631,7 @@ fn unreadable_at(what: &str, address: u64) -> Value {
 /// below actually supports.
 ///
 /// Bytes come back in the order they sit in memory, which is what
-/// `to_le_bytes` gives on the little-endian targets OpenEPL builds for.
+/// `to_le_bytes` gives on the little-endian targets Kiln builds for.
 fn read_bytes(memory: &dyn Memory, address: u64, len: usize) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(len);
     let mut word = address & !7;

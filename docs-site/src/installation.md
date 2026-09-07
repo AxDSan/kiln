@@ -6,9 +6,9 @@ Releases are self-contained: unpack one anywhere and run it. There is no
 installer, nothing to add to `PATH`, and no configuration.
 
 ```sh
-tar xzf openepl-<version>-linux-x86_64.tar.gz
-cd openepl-<version>-linux-x86_64
-bin/openepl-studio
+tar xzf kiln-<version>-linux-x86_64.tar.gz
+cd kiln-<version>-linux-x86_64
+bin/kiln-studio
 ```
 
 The binaries find everything they need relative to themselves, so you can move
@@ -44,8 +44,8 @@ sudo apt install clang binutils pkg-config \
 You will also need a Rust toolchain.
 
 ```sh
-git clone https://github.com/AxDSan/openepl
-cd openepl
+git clone https://github.com/AxDSan/kiln
+cd kiln
 
 tools/fetch-rmlui.sh          # vendor the UI library
 tools/fetch-accesskit.sh      # vendor the accessibility bridge
@@ -55,8 +55,8 @@ designer/build.sh             # the IDE
 cargo test                    # the test suite
 ```
 
-The compiler is then `target/release/openepl` and the IDE is
-`designer/openepl-designer`.
+The compiler is then `target/release/kiln` and the IDE is
+`designer/kiln-designer`.
 
 `https://` is opt-in: it needs mbedTLS vendored, and everything else builds
 without it.
@@ -71,12 +71,12 @@ To produce a release bundle of your own:
 
 ```sh
 tools/package.sh                                # -> dist/
-tools/verify-bundle.sh dist/openepl-*.tar.gz    # prove it works unpacked elsewhere
+tools/verify-bundle.sh dist/kiln-*.tar.gz    # prove it works unpacked elsewhere
 ```
 
 ## Platform support
 
-Linux on x86-64, and Windows x86-64 as a cross build from it: `openepl build
+Linux on x86-64, and Windows x86-64 as a cross build from it: `kiln build
 --os windows` produces a `.exe`, a DLL or a static library, and needs the mingw-w64 cross
 compiler above. Studio cross-builds for Windows too, and nothing is built
 natively *on* Windows; macOS and arm64 are not supported yet. See [Build

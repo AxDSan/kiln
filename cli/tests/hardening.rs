@@ -13,7 +13,7 @@ fn repo() -> PathBuf {
         .to_path_buf()
 }
 
-/// Build `examples/hello.oir`, once per mode for the whole test binary.
+/// Build `examples/hello.kiln`, once per mode for the whole test binary.
 ///
 /// Once, because tests run in parallel and two of them writing one output path
 /// race — one truncating the file the other is reading.
@@ -23,18 +23,18 @@ fn hello(release: bool) -> &'static Path {
     let cell = if release { &RELEASE } else { &DEBUG };
     cell.get_or_init(|| {
         let repo = repo();
-        let example = repo.join("examples").join("hello.oir");
+        let example = repo.join("examples").join("hello.kiln");
         let mode = if release { "release" } else { "debug" };
-        let out = std::env::temp_dir().join(format!("openepl_hardening_{mode}"));
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_openepl"));
+        let out = std::env::temp_dir().join(format!("kiln_hardening_{mode}"));
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_kiln"));
         cmd.args(["build", example.to_str().unwrap()]);
         if release {
             cmd.arg("--release");
         }
         cmd.args(["-o", out.to_str().unwrap()])
-            .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"));
-        let status = cmd.status().expect("run openepl");
-        assert!(status.success(), "openepl build --{mode} failed");
+            .env("KILN_RUNTIME_DIR", repo.join("runtime"));
+        let status = cmd.status().expect("run kiln");
+        assert!(status.success(), "kiln build --{mode} failed");
         out
     })
 }
@@ -122,7 +122,7 @@ fn release_is_stripped_and_debug_is_not() {
         return;
     };
     assert!(
-        debug_symbols.contains("oe_print_text"),
+        debug_symbols.contains("kn_print_text"),
         "a debug build should keep its symbol table"
     );
 
@@ -146,17 +146,17 @@ fn release_is_stripped_and_debug_is_not() {
 ///
 /// A stripped binary has no symbol names left to ask `nm` about, so the witness
 /// is data instead: the strftime format inside `format_time`, a command
-/// `hello.oir` never calls. `-fdata-sections` and `--gc-sections` drop it;
+/// `hello.kiln` never calls. `-fdata-sections` and `--gc-sections` drop it;
 /// stripping would not, which is what makes it a test of the right thing. The
 /// program's own literal is there to prove the search can find anything at all.
 #[test]
 fn release_still_drops_unused_commands() {
     let unused = "%Y-%m-%d %H:%M:%S";
-    let used = "OpenEPL — arithmetic demo";
+    let used = "Kiln — arithmetic demo";
     // Absence proves nothing about a string that no longer exists: if the
     // format ever moves or is reworded, this test must fail rather than pass
     // for the wrong reason.
-    let source = std::fs::read_to_string(repo().join("runtime").join("oe_datetime.c"))
+    let source = std::fs::read_to_string(repo().join("runtime").join("kn_datetime.c"))
         .expect("read the datetime commands");
     assert!(
         source.contains(unused),

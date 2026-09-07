@@ -1,0 +1,19 @@
+# Printing and arithmetic — the smallest useful Kiln program.
+#
+#   kiln build examples/hello.kiln -o hello
+#   ./hello
+module hello
+
+sub main
+  # A binding takes its type from its value, so an annotation only earns its
+  # place where the value cannot supply one.
+  let title = "Kiln — arithmetic demo"
+  call print_text(title)
+
+  # 6 * 7, and operator precedence: 2 + 3 * 4 == 14
+  let answer = 6 * 7
+  call print_int(answer)
+  call print_int(2 + 3 * 4)
+  call print_int(100 - 58)
+  call print_int(84 / 2)
+end

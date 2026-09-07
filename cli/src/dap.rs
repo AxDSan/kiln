@@ -1,13 +1,13 @@
-//! `openepl dap` — the Debug Adapter Protocol, spoken over stdio.
+//! `kiln dap` — the Debug Adapter Protocol, spoken over stdio.
 //!
-//! This is the surface every editor debugs OpenEPL through. Studio drives it
-//! as a subprocess on a pipe, exactly as it already drives `openepl lsp`, and
+//! This is the surface every editor debugs Kiln through. Studio drives it
+//! as a subprocess on a pipe, exactly as it already drives `kiln lsp`, and
 //! VS Code's generic DAP client speaks it without a line of adapter code — one
 //! server, many editors, which is the whole reason the protocol was chosen
 //! over inventing one.
 //!
 //! The layer is deliberately thin: it translates requests into calls on
-//! [`openepl_debug::session::Session`] and translates the answers back. Every
+//! [`kiln_debug::session::Session`] and translates the answers back. Every
 //! decision about *what* a stop means, which frames are the user's, and how a
 //! value reads lives in the engine below. What lives here is the protocol, and
 //! the protocol has four ways to fail silently that are worth naming, because
@@ -47,11 +47,11 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value as Json};
 
-use openepl_debug::session::{Breakpoint, Session, Stopped};
-use openepl_debug::step::Step;
-use openepl_debug::target::Interrupt;
-use openepl_debug::unwind::Frame;
-use openepl_debug::value::Value;
+use kiln_debug::session::{Breakpoint, Session, Stopped};
+use kiln_debug::step::Step;
+use kiln_debug::target::Interrupt;
+use kiln_debug::unwind::Frame;
+use kiln_debug::value::Value;
 
 /// The one thread the protocol reports.
 ///
@@ -65,7 +65,7 @@ const THREAD_ID: i64 = 1;
 pub fn run() -> i32 {
     // Everything diagnostic goes to stderr. stdout is the protocol channel and
     // a stray `println!` on it corrupts the stream for good.
-    eprintln!("openepl-dap: starting on stdio");
+    eprintln!("kiln-dap: starting on stdio");
     let mut out = Out::new(io::stdout());
     let mut adapter = Adapter::new(Box::new(Cli));
 
@@ -107,7 +107,7 @@ pub fn run() -> i32 {
                 // is not an error.
                 Ok(None) => break,
                 Err(e) => {
-                    eprintln!("openepl-dap: {e}");
+                    eprintln!("kiln-dap: {e}");
                     break;
                 }
             }
@@ -123,7 +123,7 @@ pub fn run() -> i32 {
     // A traced child outlives its tracer unless it is told not to, so the exit
     // path has to stop it even when the client vanished without disconnecting.
     adapter.shutdown();
-    eprintln!("openepl-dap: shutting down");
+    eprintln!("kiln-dap: shutting down");
     0
 }
 
@@ -323,7 +323,7 @@ struct Location {
 
 /// A program under control, as the protocol layer needs to see it.
 ///
-/// This is [`openepl_debug::session::Session`] with two differences, and both
+/// This is [`kiln_debug::session::Session`] with two differences, and both
 /// exist so the protocol can be exercised without a traced process: errors are
 /// already rendered to strings, because they end up in a DAP message either
 /// way, and address-to-line lookup is a method here rather than a second copy
@@ -401,7 +401,7 @@ impl Backend for Cli {
         out: &mut dyn Sink,
     ) -> Result<(), String> {
         let exe = std::env::current_exe()
-            .map_err(|e| format!("cannot find the OpenEPL compiler to build with: {e}"))?;
+            .map_err(|e| format!("cannot find the Kiln compiler to build with: {e}"))?;
         let mut command = Command::new(exe);
         command
             .arg("build")
@@ -416,7 +416,7 @@ impl Backend for Cli {
         }
         let mut child = command
             .spawn()
-            .map_err(|e| format!("cannot run the OpenEPL compiler: {e}"))?;
+            .map_err(|e| format!("cannot run the Kiln compiler: {e}"))?;
 
         let (tx, rx) = std::sync::mpsc::channel::<(bool, String)>();
         let mut readers = Vec::new();
@@ -446,7 +446,7 @@ impl Backend for Cli {
 
         let status = child
             .wait()
-            .map_err(|e| format!("the OpenEPL compiler could not be waited for: {e}"))?;
+            .map_err(|e| format!("the Kiln compiler could not be waited for: {e}"))?;
         if status.success() {
             Ok(())
         } else if diagnostic.trim().is_empty() {
@@ -460,7 +460,7 @@ impl Backend for Cli {
         // The symbol table is loaded here rather than taken from the session,
         // which keeps its own copy but does not expose it. Reading a mapped
         // file twice is cheap; guessing at line numbers is not.
-        let program = openepl_debug::load(binary).map_err(|e| e.to_string())?;
+        let program = kiln_debug::load(binary).map_err(|e| e.to_string())?;
         let session = Session::launch(binary, args).map_err(|e| e.to_string())?;
         Ok(Box::new(Live { session, program }))
     }
@@ -488,7 +488,7 @@ fn pump<R: std::io::Read + Send + 'static>(
 /// A live session, plus the symbols needed to describe where it is.
 struct Live {
     session: Session,
-    program: openepl_debug::Program,
+    program: kiln_debug::Program,
 }
 
 impl Debuggee for Live {
@@ -801,7 +801,7 @@ impl Adapter {
             out.send(failure(
                 request,
                 "nothing to debug",
-                "`launch` needs a `program`: the path of the .oir file to debug",
+                "`launch` needs a `program`: the path of the .kiln file to debug",
             ));
             out.send(event("terminated", None));
             return;
@@ -1386,7 +1386,7 @@ impl Adapter {
 
 /// Where a build goes when the client did not say.
 ///
-/// The same place `openepl build` would put it: the source with its extension
+/// The same place `kiln build` would put it: the source with its extension
 /// taken off. A name that already has no extension gets one rather than
 /// overwriting the source.
 fn default_binary(program: &Path) -> PathBuf {
@@ -1422,7 +1422,7 @@ fn source_matches(program: Option<&str>, requested: Option<&Path>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openepl_debug::unwind::Registers;
+    use kiln_debug::unwind::Registers;
     use std::collections::VecDeque;
 
     /// A sink that keeps what it was sent, so a test can look at the exact
@@ -1588,7 +1588,7 @@ mod tests {
             out: &mut dyn Sink,
         ) -> Result<(), String> {
             self.built = true;
-            out.send(output("console", "openepl: compiling\n"));
+            out.send(output("console", "kiln: compiling\n"));
             match &self.build_error {
                 Some(e) => Err(e.clone()),
                 None => Ok(()),
@@ -1617,7 +1617,7 @@ mod tests {
         let mut out = Recorder::new();
         adapter.handle(&request(1, "initialize", json!({})), &mut out);
         adapter.handle(
-            &request(2, "launch", json!({ "program": "/tmp/x.oir", "stopOnEntry": true })),
+            &request(2, "launch", json!({ "program": "/tmp/x.kiln", "stopOnEntry": true })),
             &mut out,
         );
         adapter.handle(&request(3, "configurationDone", json!({})), &mut out);
@@ -1664,7 +1664,7 @@ mod tests {
         let mut out = Recorder::new();
         adapter.handle(&request(1, "initialize", json!({})), &mut out);
         adapter.handle(
-            &request(2, "launch", json!({ "program": "/tmp/x.oir", "stopOnEntry": true })),
+            &request(2, "launch", json!({ "program": "/tmp/x.kiln", "stopOnEntry": true })),
             &mut out,
         );
 
@@ -1693,7 +1693,7 @@ mod tests {
     #[test]
     fn set_breakpoints_answers_in_the_order_it_was_asked() {
         let (mut adapter, mut out) = started(FakeDebuggee {
-            source: Some("/tmp/x.oir".to_string()),
+            source: Some("/tmp/x.kiln".to_string()),
             ..Default::default()
         });
         adapter.handle(
@@ -1701,7 +1701,7 @@ mod tests {
                 10,
                 "setBreakpoints",
                 json!({
-                    "source": { "path": "/tmp/x.oir" },
+                    "source": { "path": "/tmp/x.kiln" },
                     "breakpoints": [{ "line": 30 }, { "line": 10 }, { "line": 20 }],
                 }),
             ),
@@ -1724,14 +1724,14 @@ mod tests {
     #[test]
     fn set_breakpoints_replaces_rather_than_adds() {
         let (mut adapter, mut out) = started(FakeDebuggee {
-            source: Some("/tmp/x.oir".to_string()),
+            source: Some("/tmp/x.kiln".to_string()),
             ..Default::default()
         });
         adapter.handle(
             &request(
                 10,
                 "setBreakpoints",
-                json!({ "source": { "path": "/tmp/x.oir" }, "breakpoints": [{ "line": 4 }] }),
+                json!({ "source": { "path": "/tmp/x.kiln" }, "breakpoints": [{ "line": 4 }] }),
             ),
             &mut out,
         );
@@ -1739,7 +1739,7 @@ mod tests {
             &request(
                 11,
                 "setBreakpoints",
-                json!({ "source": { "path": "/tmp/x.oir" }, "breakpoints": [{ "line": 7 }] }),
+                json!({ "source": { "path": "/tmp/x.kiln" }, "breakpoints": [{ "line": 7 }] }),
             ),
             &mut out,
         );
@@ -1757,7 +1757,7 @@ mod tests {
     #[test]
     fn breakpoints_in_another_file_come_back_unverified_and_in_order() {
         let (mut adapter, mut out) = started(FakeDebuggee {
-            source: Some("/tmp/x.oir".to_string()),
+            source: Some("/tmp/x.kiln".to_string()),
             ..Default::default()
         });
         adapter.handle(
@@ -1765,7 +1765,7 @@ mod tests {
                 10,
                 "setBreakpoints",
                 json!({
-                    "source": { "path": "/tmp/other.oir" },
+                    "source": { "path": "/tmp/other.kiln" },
                     "breakpoints": [{ "line": 9 }, { "line": 2 }],
                 }),
             ),
@@ -1793,7 +1793,7 @@ mod tests {
             &request(
                 1,
                 "setBreakpoints",
-                json!({ "source": { "path": "/tmp/x.oir" }, "breakpoints": [{ "line": 3 }] }),
+                json!({ "source": { "path": "/tmp/x.kiln" }, "breakpoints": [{ "line": 3 }] }),
             ),
             &mut out,
         );
@@ -1813,7 +1813,7 @@ mod tests {
     fn zero_based_clients_get_their_own_line_numbers_back() {
         let asked = Arc::new(Mutex::new(Vec::new()));
         let mut adapter = Adapter::new(Box::new(FakeBackend::with(FakeDebuggee {
-            source: Some("/tmp/x.oir".to_string()),
+            source: Some("/tmp/x.kiln".to_string()),
             asked: Arc::clone(&asked),
             ..Default::default()
         })));
@@ -1823,7 +1823,7 @@ mod tests {
             &mut out,
         );
         adapter.handle(
-            &request(2, "launch", json!({ "program": "/tmp/x.oir", "stopOnEntry": true })),
+            &request(2, "launch", json!({ "program": "/tmp/x.kiln", "stopOnEntry": true })),
             &mut out,
         );
         adapter.handle(&request(3, "configurationDone", json!({})), &mut out);
@@ -1832,7 +1832,7 @@ mod tests {
             &request(
                 4,
                 "setBreakpoints",
-                json!({ "source": { "path": "/tmp/x.oir" }, "breakpoints": [{ "line": 11 }] }),
+                json!({ "source": { "path": "/tmp/x.kiln" }, "breakpoints": [{ "line": 11 }] }),
             ),
             &mut out,
         );
@@ -1887,12 +1887,12 @@ mod tests {
     #[test]
     fn a_build_failure_is_reported_and_the_session_ends() {
         let mut adapter = Adapter::new(Box::new(FakeBackend::failing(
-            "openepl: x.oir:4: `foo` is not a command",
+            "kiln: x.kiln:4: `foo` is not a command",
         )));
         let mut out = Recorder::new();
         adapter.handle(&request(1, "initialize", json!({})), &mut out);
         adapter.handle(
-            &request(2, "launch", json!({ "program": "/tmp/x.oir" })),
+            &request(2, "launch", json!({ "program": "/tmp/x.kiln" })),
             &mut out,
         );
 
@@ -1901,7 +1901,7 @@ mod tests {
         assert_eq!(launch["success"], false);
         assert_eq!(
             launch["body"]["error"]["format"],
-            "openepl: x.oir:4: `foo` is not a command"
+            "kiln: x.kiln:4: `foo` is not a command"
         );
         assert_eq!(launch["body"]["error"]["showUser"], true);
         assert!(
@@ -1916,7 +1916,7 @@ mod tests {
         assert!(out
             .messages
             .iter()
-            .any(|m| m["event"] == "output" && m["body"]["output"] == "openepl: compiling\n"));
+            .any(|m| m["event"] == "output" && m["body"]["output"] == "kiln: compiling\n"));
     }
 
     #[test]
@@ -1993,7 +1993,7 @@ mod tests {
         let (mut adapter, mut out) = started(FakeDebuggee {
             // The stack grows down, so the caller's CFA is the larger one.
             frames: vec![frame(0x40_0012, 0x7fff_0100), frame(0x40_0024, 0x7fff_0200)],
-            source: Some("/tmp/x.oir".to_string()),
+            source: Some("/tmp/x.kiln".to_string()),
             ..Default::default()
         });
         adapter.handle(&request(20, "stackTrace", json!({ "threadId": 1 })), &mut out);
@@ -2007,8 +2007,8 @@ mod tests {
         // A caller's saved program counter is the return address, so the frame
         // is described one byte back, inside the call itself.
         assert_eq!(frames[1]["line"], 0x23);
-        assert_eq!(frames[0]["source"]["path"], "/tmp/x.oir");
-        assert_eq!(frames[0]["source"]["name"], "x.oir");
+        assert_eq!(frames[0]["source"]["path"], "/tmp/x.kiln");
+        assert_eq!(frames[0]["source"]["name"], "x.kiln");
     }
 
     #[test]
@@ -2091,7 +2091,7 @@ mod tests {
             .as_array()
             .unwrap()
             .clone();
-        assert_eq!(items[0]["name"], "[1]", "OpenEPL indexes from 1");
+        assert_eq!(items[0]["name"], "[1]", "Kiln indexes from 1");
         assert_eq!(items[1]["name"], "[2]");
         assert_eq!(items[0]["value"], "\"ada\"");
     }
@@ -2160,7 +2160,7 @@ mod tests {
         let mut out = Recorder::new();
         adapter.handle(&request(1, "initialize", json!({})), &mut out);
         adapter.handle(
-            &request(2, "launch", json!({ "program": "/tmp/x.oir" })),
+            &request(2, "launch", json!({ "program": "/tmp/x.kiln" })),
             &mut out,
         );
         out.messages.clear();
@@ -2211,7 +2211,7 @@ mod tests {
         let mut out = Recorder::new();
         adapter.handle(&request(1, "initialize", json!({})), &mut out);
         adapter.handle(
-            &request(2, "launch", json!({ "program": "/tmp/x.oir", "stopOnEntry": true })),
+            &request(2, "launch", json!({ "program": "/tmp/x.kiln", "stopOnEntry": true })),
             &mut out,
         );
         adapter.handle(&request(3, "configurationDone", json!({})), &mut out);
@@ -2232,7 +2232,7 @@ mod tests {
         let mut out = Recorder::new();
         adapter.handle(&request(1, "initialize", json!({})), &mut out);
         adapter.handle(
-            &request(2, "launch", json!({ "program": "/tmp/x.oir" })),
+            &request(2, "launch", json!({ "program": "/tmp/x.kiln" })),
             &mut out,
         );
         adapter.handle(&request(3, "configurationDone", json!({})), &mut out);
@@ -2267,9 +2267,9 @@ mod tests {
             json!({ "type": "request", "seq": 1, "command": "initialize",
                     "arguments": { "linesStartAt1": true } }),
             json!({ "type": "request", "seq": 2, "command": "launch",
-                    "arguments": { "program": "/tmp/x.oir", "stopOnEntry": true } }),
+                    "arguments": { "program": "/tmp/x.kiln", "stopOnEntry": true } }),
             json!({ "type": "request", "seq": 3, "command": "setBreakpoints",
-                    "arguments": { "source": { "path": "/tmp/x.oir" },
+                    "arguments": { "source": { "path": "/tmp/x.kiln" },
                                    "breakpoints": [{ "line": 12 }] } }),
             json!({ "type": "request", "seq": 4, "command": "configurationDone" }),
             json!({ "type": "request", "seq": 5, "command": "threads" }),
@@ -2281,7 +2281,7 @@ mod tests {
         }
 
         let mut adapter = Adapter::new(Box::new(FakeBackend::with(FakeDebuggee {
-            source: Some("/tmp/x.oir".to_string()),
+            source: Some("/tmp/x.kiln".to_string()),
             ..Default::default()
         })));
         let mut out = Out::new(Vec::new());
@@ -2365,7 +2365,7 @@ mod tests {
 
     #[test]
     fn a_binary_defaults_to_the_source_without_its_extension() {
-        assert_eq!(default_binary(Path::new("/tmp/x.oir")), Path::new("/tmp/x"));
+        assert_eq!(default_binary(Path::new("/tmp/x.kiln")), Path::new("/tmp/x"));
         // Never over the source itself.
         assert_eq!(default_binary(Path::new("/tmp/x")), Path::new("/tmp/x.bin"));
     }

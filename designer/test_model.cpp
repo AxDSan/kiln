@@ -7,7 +7,7 @@
 #include "json.h"
 #include "model.h"
 
-using namespace openepl::designer;
+using namespace kiln::designer;
 
 static int failures = 0;
 static void check(const char* what, bool ok) {
@@ -23,14 +23,14 @@ static std::string slurp(const std::string& p) {
 }
 
 static void test_json();
-static void test_module_components(const std::string& openepl, const NeedsQuotes& quoted);
-static void test_multiline(const std::string& openepl);
-static void test_round_trip(const std::string& openepl, const NeedsQuotes& quoted);
-static void test_rename(const std::string& openepl, const NeedsQuotes& quoted);
+static void test_module_components(const std::string& kiln, const NeedsQuotes& quoted);
+static void test_multiline(const std::string& kiln);
+static void test_round_trip(const std::string& kiln, const NeedsQuotes& quoted);
+static void test_rename(const std::string& kiln, const NeedsQuotes& quoted);
 
 int main(int argc, char** argv) {
-    const std::string openepl = argc > 1 ? argv[1] : "./target/debug/openepl";
-    const std::string fixture = "/tmp/openepl_designer_fixture.oir";
+    const std::string kiln = argc > 1 ? argv[1] : "./target/debug/kiln";
+    const std::string fixture = "/tmp/kiln_designer_fixture.kiln";
 
     // A file with a hand-written subroutine body that MUST survive a save.
     const char* source =
@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
 
     Model m;
     std::string err;
-    check("load via `openepl inspect`", load_model(openepl, fixture, m, err));
+    check("load via `kiln inspect`", load_model(kiln, fixture, m, err));
     if (!err.empty()) std::printf("    error: %s\n", err.c_str());
     check("module name", m.module_name == "fixture");
     check("form span found", m.form_first_line == 6 && m.form_last_line == 17);
@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
 
     // Reload: the saved file must parse and report the edit.
     Model m2;
-    check("saved file re-inspects", load_model(openepl, fixture, m2, err));
+    check("saved file re-inspects", load_model(kiln, fixture, m2, err));
     check("reloaded value", m2.find("go") && *m2.find("go")->property("left") == "42");
 
     // Adding a component + wiring a new handler appends a stub.
@@ -118,7 +118,7 @@ int main(int argc, char** argv) {
     // the form, so every line below it moves; a save that did not recompute
     // the span would splice the second save over somebody's subroutine.
     Model m3;
-    check("reload before the two-save test", load_model(openepl, fixture, m3, err));
+    check("reload before the two-save test", load_model(kiln, fixture, m3, err));
     Component extra;
     extra.id = m3.fresh_id("label");
     extra.type_name = "label";
@@ -134,13 +134,13 @@ int main(int argc, char** argv) {
     check("two saves left one form", twice.find("form win") == twice.rfind("form win"));
     check("second edit applied", twice.find("top = 77") != std::string::npos);
     Model m4;
-    check("file after two saves still parses", load_model(openepl, fixture, m4, err));
+    check("file after two saves still parses", load_model(kiln, fixture, m4, err));
 
     // Undo across a save. The snapshot remembers where the form was BEFORE the
     // save moved it; restoring those line numbers and saving again splices over
     // whatever now lives there, which is somebody's subroutine.
     Model m5;
-    check("reload before the undo test", load_model(openepl, fixture, m5, err));
+    check("reload before the undo test", load_model(kiln, fixture, m5, err));
     const Model snapshot = m5;              // what push_undo() keeps
     Component third;
     third.id = m5.fresh_id("label");
@@ -156,12 +156,12 @@ int main(int argc, char** argv) {
     check("undo-then-save left one form",
           after_undo.find("form win") == after_undo.rfind("form win"));
     Model m6;
-    check("file after undo-then-save still parses", load_model(openepl, fixture, m6, err));
+    check("file after undo-then-save still parses", load_model(kiln, fixture, m6, err));
 
-    test_multiline(openepl);
-    test_module_components(openepl, quoted);
-    test_round_trip(openepl, quoted);
-    test_rename(openepl, quoted);
+    test_multiline(kiln);
+    test_module_components(kiln, quoted);
+    test_round_trip(kiln, quoted);
+    test_rename(kiln, quoted);
     test_json();
 
 
@@ -177,8 +177,8 @@ int main(int argc, char** argv) {
  * it to that line — a user losing a paragraph without being told.
  */
 
-static void test_multiline(const std::string& openepl) {
-    const std::string fixture = "/tmp/openepl_designer_mlfixture.oir";
+static void test_multiline(const std::string& kiln) {
+    const std::string fixture = "/tmp/kiln_designer_mlfixture.kiln";
     const char* source =
         "module mlfixture\n"
         "use ui\n"
@@ -195,7 +195,7 @@ static void test_multiline(const std::string& openepl) {
 
     Model m;
     std::string err;
-    check("multi-line fixture loads", load_model(openepl, fixture, m, err));
+    check("multi-line fixture loads", load_model(kiln, fixture, m, err));
     check("all three lines read back",
           m.find("notes") && *m.find("notes")->property("text") == "one\ntwo\nthree");
     check("the property after it still lands",
@@ -210,7 +210,7 @@ static void test_multiline(const std::string& openepl) {
     check("written as an escape, not a raw newline",
           saved.find("text = \"one\\ntwo\\nthree\"") != std::string::npos);
     Model back;
-    check("multi-line file still parses", load_model(openepl, fixture, back, err));
+    check("multi-line file still parses", load_model(kiln, fixture, back, err));
     check("round-trips unchanged",
           back.find("notes") && *back.find("notes")->property("text") == "one\ntwo\nthree");
 }
@@ -222,8 +222,8 @@ static void test_multiline(const std::string& openepl) {
  * makes this the test that stops the tray from corrupting a project.
  */
 
-static void test_module_components(const std::string& openepl, const NeedsQuotes& quoted) {
-    const std::string fixture = "/tmp/openepl_designer_modfixture.oir";
+static void test_module_components(const std::string& kiln, const NeedsQuotes& quoted) {
+    const std::string fixture = "/tmp/kiln_designer_modfixture.kiln";
     const char* source =
         "module modfixture\n"
         "use ui\n"
@@ -242,7 +242,7 @@ static void test_module_components(const std::string& openepl, const NeedsQuotes
 
     Model m;
     std::string err;
-    check("module fixture loads", load_model(openepl, fixture, m, err));
+    check("module fixture loads", load_model(kiln, fixture, m, err));
 
     Component t;
     t.id = m.fresh_id("timer");
@@ -272,7 +272,7 @@ static void test_module_components(const std::string& openepl, const NeedsQuotes
     check("module component edit applied", twice.find("interval = 250") != std::string::npos);
 
     Model back;
-    check("file with a module component re-inspects", load_model(openepl, fixture, back, err));
+    check("file with a module component re-inspects", load_model(kiln, fixture, back, err));
     check("form still found", back.form_first_line == 4 && back.form_last_line == 8);
 
     // A stale span must be refused rather than spliced over live code.
@@ -305,7 +305,7 @@ static void test_module_components(const std::string& openepl, const NeedsQuotes
     check("still one use net", again.find("use net") == again.rfind("use net"));
     check("still one tcpserver", again.find("tcpserver tcpserver1") == again.rfind("tcpserver tcpserver1"));
     Model reread;
-    check("file with a new use re-inspects", load_model(openepl, fixture, reread, err));
+    check("file with a new use re-inspects", load_model(kiln, fixture, reread, err));
     check("inspect agrees on the spans",
           reread.form_first_line == n.form_first_line && reread.form_last_line == n.form_last_line &&
               reread.module_components.size() == 2 &&
@@ -323,8 +323,8 @@ static void test_module_components(const std::string& openepl, const NeedsQuotes
  * rather than a pass.
  */
 
-static void test_round_trip(const std::string& openepl, const NeedsQuotes& quoted) {
-    const std::string fixture = "/tmp/openepl_designer_rtfixture.oir";
+static void test_round_trip(const std::string& kiln, const NeedsQuotes& quoted) {
+    const std::string fixture = "/tmp/kiln_designer_rtfixture.kiln";
     const char* source =
         "module rtfixture\n"
         "use ui\n"
@@ -352,7 +352,7 @@ static void test_round_trip(const std::string& openepl, const NeedsQuotes& quote
 
     Model m;
     std::string err;
-    check("round-trip fixture loads", load_model(openepl, fixture, m, err));
+    check("round-trip fixture loads", load_model(kiln, fixture, m, err));
     if (!err.empty()) std::printf("    error: %s\n", err.c_str());
     check("timer arrived as a module component, not a child",
           m.module_components.size() == 1 && m.children.size() == 1 &&
@@ -381,7 +381,7 @@ static void test_round_trip(const std::string& openepl, const NeedsQuotes& quote
 /// designer emits carries the new name, the hand-written lines that refer to
 /// the component are rewritten as they are copied, and a literal, a comment
 /// and a longer word that merely ends in the old name are left alone.
-static void test_rename(const std::string& openepl, const NeedsQuotes& quoted) {
+static void test_rename(const std::string& kiln, const NeedsQuotes& quoted) {
     std::printf("rename\n");
     check("a plain word is an identifier", is_identifier("go_button") && is_identifier("_x1"));
     check("a digit first, a dash or a keyword is not",
@@ -399,7 +399,7 @@ static void test_rename(const std::string& openepl, const NeedsQuotes& quoted) {
     check("a handler line names a sub, not an id",
           rename_references("    on click: go", "go", "run") == "    on click: go");
 
-    const std::string fixture = "/tmp/openepl_designer_renamefixture.oir";
+    const std::string fixture = "/tmp/kiln_designer_renamefixture.kiln";
     const char* source =
         "module renamefixture\n"
         "use ui\n"
@@ -428,7 +428,7 @@ static void test_rename(const std::string& openepl, const NeedsQuotes& quoted) {
     { std::ofstream f(fixture, std::ios::trunc); f << source; }
     Model m;
     std::string err;
-    check("load", load_model(openepl, fixture, m, err));
+    check("load", load_model(kiln, fixture, m, err));
     check("a taken id is refused", !rename_id(m, "go", "tick", err) && m.find("go"));
     check("a sub's name is refused", !rename_id(m, "go", "on_go", err) && m.find("go"));
     check("a keyword is refused", !rename_id(m, "go", "sub", err) && m.find("go"));
@@ -454,12 +454,12 @@ static void test_rename(const std::string& openepl, const NeedsQuotes& quoted) {
           saved.find("# go.text is what the button says\n") != std::string::npos);
     check("the handler line still names the sub", saved.find("    on click: on_go\n") != std::string::npos);
     check("nothing pending after the save", m.renames.empty());
-    check("the file still inspects", load_model(openepl, fixture, m, err) && m.find("start") &&
+    check("the file still inspects", load_model(kiln, fixture, m, err) && m.find("start") &&
                                          m.form_name == "main");
 }
 
 static void test_json() {
-    using namespace openepl;
+    using namespace kiln;
 
     // Escaping is where an LSP client breaks silently: one unescaped quote or
     // backslash corrupts the frame, the server stops answering, and the editor
@@ -477,7 +477,7 @@ static void test_json() {
     check("escape/parse round-trips", round == nasty);
 
     const json::Value v = json::parse(
-        "{\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///x.oir\","
+        "{\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///x.kiln\","
         "\"diagnostics\":[{\"range\":{\"start\":{\"line\":7,\"character\":0}},"
         "\"severity\":1,\"message\":\"unknown command\"}]}}");
     check("reads the method", v["method"].str() == "textDocument/publishDiagnostics");

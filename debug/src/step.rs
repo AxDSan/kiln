@@ -290,13 +290,13 @@ mod tests {
         vec![
             Subprogram {
                 name: "main".into(),
-                symbol: "oe_user_main".into(),
+                symbol: "kn_user_main".into(),
                 low_pc: 0x1000,
                 size: 0x40,
             },
             Subprogram {
                 name: "helper".into(),
-                symbol: "oe_user_helper".into(),
+                symbol: "kn_user_helper".into(),
                 low_pc: 0x1040,
                 size: 0x20,
             },

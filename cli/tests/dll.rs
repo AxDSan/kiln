@@ -1,5 +1,5 @@
 //! End-to-end tests for the `dll` foreign-function interface: build a tiny C
-//! library, build an OpenEPL program that calls into it, run the two together,
+//! library, build an Kiln program that calls into it, run the two together,
 //! and prove the value, string and pointer paths across the boundary — plus
 //! that a missing symbol is a named failure, an `as` rename maps a symbol, the
 //! validator rejects a bad call at build time, and a declaration compiles with
@@ -26,7 +26,7 @@ fn on_path(tool: &str) -> bool {
 /// beside its own executable, so the built `.so` and the built program must
 /// share one directory — and two tests must not share it.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_dll_{tag}_test"));
+    let dir = std::env::temp_dir().join(format!("kiln_dll_{tag}_test"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -44,17 +44,17 @@ fn build_mathdll_so(dir: &Path) {
     assert!(status.success(), "clang failed to build libmathdll.so");
 }
 
-/// Build `examples/dll/<name>.oir` to `dir/<name>`; return the binary path.
+/// Build `examples/dll/<name>.kiln` to `dir/<name>`; return the binary path.
 fn build_oir(name: &str, dir: &Path) -> PathBuf {
     let repo = repo();
-    let src = repo.join("examples/dll").join(format!("{name}.oir"));
+    let src = repo.join("examples/dll").join(format!("{name}.kiln"));
     let out = dir.join(name);
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", out.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
-        .expect("run openepl");
-    assert!(status.success(), "openepl build {name} failed");
+        .expect("run kiln");
+    assert!(status.success(), "kiln build {name} failed");
     out
 }
 
@@ -81,7 +81,7 @@ fn mathdll_value_string_and_pointer_paths() {
         lines,
         vec![
             "42",            // add_ints(40, 2)
-            "OpenEPL <-> C", // banner() copied out of C
+            "Kiln <-> C", // banner() copied out of C
             "42",            // bump() wrote through the ptr: 41 -> 42
             "50",            // tentimes(5) via `as "times_ten"`
             "9000000001",    // add_bignums: int64 past the 32-bit range
@@ -126,22 +126,22 @@ fn a_missing_symbol_is_a_named_runtime_error() {
 #[test]
 fn a_missing_library_is_a_named_runtime_error() {
     let dir = scratch("badlib");
-    // No library at all in `dir`, and — unlike `lazy.oir` — this program DOES
+    // No library at all in `dir`, and — unlike `lazy.kiln` — this program DOES
     // call its foreign function, so the absent library must surface at the call.
-    let src = dir.join("badlib.oir");
+    let src = dir.join("badlib.kiln");
     std::fs::write(
         &src,
         "module badlib\n\
          dll f(x: int): int from \"an_absent_library\"\n\
          sub main\n  call print_int(f(1))\nend\n",
     )
-    .expect("write badlib.oir");
+    .expect("write badlib.kiln");
     let out_bin = dir.join("badlib");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", out_bin.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(status.success(), "the program should BUILD (load is lazy)");
 
     let out = Command::new(&out_bin).output().expect("run badlib program");
@@ -162,7 +162,7 @@ fn the_validator_rejects_a_bad_call() {
         ("call print_int(add_ints(1))", "expects 2 argument"),
         ("call print_int(add_ints(1, \"two\"))", "expects int, got text"),
     ] {
-        let src = dir.join("bad.oir");
+        let src = dir.join("bad.kiln");
         std::fs::write(
             &src,
             format!(
@@ -171,12 +171,12 @@ fn the_validator_rejects_a_bad_call() {
                  sub main\n  {body}\nend\n"
             ),
         )
-        .expect("write bad.oir");
-        let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+        .expect("write bad.kiln");
+        let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
             .args(["build", src.to_str().unwrap(), "-o", dir.join("x").to_str().unwrap()])
-            .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+            .env("KILN_RUNTIME_DIR", repo().join("runtime"))
             .output()
-            .expect("run openepl");
+            .expect("run kiln");
         assert!(!out.status.success(), "a bad call must not build: {body}");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
@@ -217,13 +217,13 @@ fn mathdll_cross_builds_for_windows_and_runs_under_wine() {
 
     // The program as a PE32+ image.
     let image = dir.join("mathdll.exe");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
-        .args(["build", repo().join("examples/dll/mathdll.oir").to_str().unwrap(), "--os", "windows", "-o"])
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["build", repo().join("examples/dll/mathdll.kiln").to_str().unwrap(), "--os", "windows", "-o"])
         .arg(&image)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl --os windows");
-    assert!(status.success(), "openepl build --os windows failed");
+        .expect("run kiln --os windows");
+    assert!(status.success(), "kiln build --os windows failed");
     assert!(image.exists(), "no Windows image was produced");
 
     if !on_path("wine") {
@@ -247,7 +247,7 @@ fn mathdll_cross_builds_for_windows_and_runs_under_wine() {
         .collect();
     assert_eq!(
         lines,
-        vec!["42", "OpenEPL <-> C", "42", "50", "9000000001", "3.5", "positive"],
+        vec!["42", "Kiln <-> C", "42", "50", "9000000001", "3.5", "positive"],
         "unexpected FFI output under wine"
     );
 }

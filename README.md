@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/openepl-wordmark.png" alt="OpenEPL" width="440">
+<img src="assets/kiln-wordmark.png" alt="Kiln" width="440">
 
 **Draw an app. Wire an event. Ship a native binary.**
 
@@ -9,7 +9,7 @@ visual, RAD-first way of building desktop software — rebuilt as open source,
 English-first and cross-platform, with a compiler that produces clean native
 executables: no runtime to install, nothing to unpack.
 
-**[Documentation](https://axdsan.github.io/openepl/)** · [Quick start](#quick-start) ·
+**[Documentation](https://axdsan.github.io/kiln/)** · [Quick start](#quick-start) ·
 [Build targets](#one-project-every-artifact) · [Editor support](#editor-support) ·
 [Building from source](#building-from-source) · [Status](#status)
 
@@ -19,7 +19,7 @@ executables: no runtime to install, nothing to unpack.
 
 ## What it is
 
-OpenEPL is an IDE and a compiler that belong together. You lay a form out
+Kiln is an IDE and a compiler that belong together. You lay a form out
 visually, set properties in an inspector, wire a button's click to a
 subroutine, and press **Run** — and what comes out the other side is an
 ordinary native binary you can hand to someone.
@@ -29,7 +29,7 @@ implementation of it: the same RAD-first way of working — draw the window,
 wire the events, build a real executable — without a proprietary toolchain,
 and readable to anyone who does not speak Chinese.
 
-**On compatibility:** OpenEPL is a fresh, open implementation of the idea, not
+**On compatibility:** Kiln is a fresh, open implementation of the idea, not
 a drop-in replacement. It does not read or run existing EPL programs, and its
 keywords are English rather than Chinese. What it takes from EPL is the model:
 a visual designer over a component library, event-driven code, and a compiler
@@ -58,7 +58,7 @@ end
 ```
 
 <div align="center">
-<img src="assets/screenshot-designer.png" alt="The OpenEPL Studio visual designer" width="860">
+<img src="assets/screenshot-designer.png" alt="The Kiln Studio visual designer" width="860">
 </div>
 
 ## Quick start
@@ -67,9 +67,9 @@ Download a release, unpack it anywhere, and run it — there is no installer and
 nothing to configure:
 
 ```sh
-tar xzf openepl-0.11.1-linux-x86_64.tar.gz
-cd openepl-0.11.1-linux-x86_64
-bin/openepl-studio
+tar xzf kiln-0.11.1-linux-x86_64.tar.gz
+cd kiln-0.11.1-linux-x86_64
+bin/kiln-studio
 ```
 
 Studio opens on a welcome screen. Pick a project kind and it is created and
@@ -82,9 +82,9 @@ opened for you.
 From the command line:
 
 ```sh
-bin/openepl templates                 # what you can create
-bin/openepl new gui-app my-app        # create a project
-bin/openepl run my-app/main.oir       # build it and run it
+bin/kiln templates                 # what you can create
+bin/kiln new gui-app my-app        # create a project
+bin/kiln run my-app/main.kiln       # build it and run it
 ```
 
 A first program is as short as it looks:
@@ -94,7 +94,7 @@ module hello
 target console
 
 sub main
-  call print_text("Hello from OpenEPL.")
+  call print_text("Hello from Kiln.")
 
   let answer: int = 6 * 7
   call print_text("six times seven is {answer}")
@@ -133,8 +133,8 @@ end
 
 Beyond that: 13 bundled kits — `file`, `text`, `json`, `net`, `time`, `ui`
 and the rest — 337 commands and 21 components, and `use <name>` is the whole
-of asking for a kit. `openepl commands --use <name>` lists what each adds;
-the [Commands](https://axdsan.github.io/openepl/docs/reference-commands.html)
+of asking for a kit. `kiln commands --use <name>` lists what each adds;
+the [Commands](https://axdsan.github.io/kiln/docs/reference-commands.html)
 reference is generated from the same answer.
 
 ## One project, every artifact
@@ -152,7 +152,7 @@ Declare it in the module, or override it per build with `--target`. Left out,
 a module with a form is a GUI program and anything else is a console one.
 
 ```sh
-openepl build lib.oir --target sharedlib -o libgreet.so
+kiln build lib.kiln --target sharedlib -o libgreet.so
 ```
 
 Libraries export their subroutines under their own names, so a C host — or
@@ -162,7 +162,7 @@ Native interop runs both ways: a program calls into native libraries and is
 called back by them — a `ptr` type, `dll` declarations, `address of` for C
 function pointers, and a `dll_attach` that gives a shared library a real
 `DllMain` (an ELF constructor on Linux) so it can hook a function the moment it
-loads. See the [interop guide](https://axdsan.github.io/openepl/interop.html).
+loads. See the [interop guide](https://axdsan.github.io/kiln/interop.html).
 
 The `win` kit is the largest thing that rides on this: `use win` is the Win32
 API — over four hundred entry points, the structs they take and the constants
@@ -172,7 +172,7 @@ registers a window class, pumps a message loop, reads its own memory through
 `ReadProcessMemory` or writes the registry does it with `use win` as its only
 foreign declaration. It is Windows-only, cross-built from Linux with
 `--os windows`, and tested by running under wine. See the
-[`win` kit guide](https://axdsan.github.io/openepl/win-kit.html).
+[`win` kit guide](https://axdsan.github.io/kiln/win-kit.html).
 
 ## Editing
 
@@ -187,7 +187,7 @@ indents, Enter carries the indentation and opens a block after `sub`, `if` or
 
 ### Editor support
 
-`openepl lsp` is a Language Server Protocol server: diagnostics that name the
+`kiln lsp` is a Language Server Protocol server: diagnostics that name the
 fix and underline the name they are about, completion, signature help, hover,
 go-to-definition and find-references. It resolves kits exactly as the compiler
 does, so an editor never underlines code that builds.
@@ -201,7 +201,7 @@ highlighting.
 **Tools ▸ Settings**, or `Ctrl+,`. A **dark theme** that repaints the whole
 IDE as you pick it — chrome, canvas, syntax colours and all — plus the editor
 font size and indent width, the designer's grid and snapping, where built
-binaries go, whether exiting saves your file, and which `openepl` binary
+binaries go, whether exiting saves your file, and which `kiln` binary
 Studio drives.
 
 <div align="center">
@@ -210,7 +210,7 @@ Studio drives.
 
 Nothing here is a control that remembers a value and changes nothing: every
 row is wired to the code it names. Settings live in
-`~/.local/share/openepl/settings` as the same `key: value` lines as everything
+`~/.local/share/kiln/settings` as the same `key: value` lines as everything
 else, and only what you changed is written — delete a line to get the default
 back.
 
@@ -242,7 +242,7 @@ To produce a release bundle of your own:
 
 ```sh
 tools/package.sh                                    # -> dist/
-tools/verify-bundle.sh dist/openepl-*.tar.gz        # prove it works unpacked elsewhere
+tools/verify-bundle.sh dist/kiln-*.tar.gz        # prove it works unpacked elsewhere
 ```
 
 ## Accessibility
@@ -253,7 +253,7 @@ model rather than something added later.
 
 ## Status
 
-OpenEPL is young, and honest about it:
+Kiln is young, and honest about it:
 
 - **Linux x86-64, plus a Windows cross build.** Programs — windowed and
   console — and libraries cross-build for Windows x86-64 from Linux
@@ -272,7 +272,7 @@ OpenEPL is young, and honest about it:
 - **Memory is reclaimed at exit**, not before: a program that runs for days
   grows with the work it has done.
 - Twenty-one components. The
-  [limitations page](https://axdsan.github.io/openepl/docs/limitations.html)
+  [limitations page](https://axdsan.github.io/kiln/docs/limitations.html)
   is the full list, checked against the toolchain.
 
 What does work, end to end: design a form, wire an event, build it, run it,
@@ -285,7 +285,7 @@ there.
 Full documentation — installation, a tour of the language, the component
 model, the visual designer, and generated references for every command and
 component — is at
-**[axdsan.github.io/openepl](https://axdsan.github.io/openepl/)**.
+**[axdsan.github.io/kiln](https://axdsan.github.io/kiln/)**.
 
 The landing page is `docs-site/landing/`, and the book is `docs-site/`. To work
 on them locally:
@@ -304,4 +304,4 @@ mdbook build docs-site && mkdir -p _site && cp -r docs-site/landing/. _site/ \
 ## Licence
 
 MIT OR BSD-3-Clause, at your option. See [`LICENSE`](LICENSE), and
-[`THIRD-PARTY.md`](THIRD-PARTY.md) for the components OpenEPL bundles.
+[`THIRD-PARTY.md`](THIRD-PARTY.md) for the components Kiln bundles.

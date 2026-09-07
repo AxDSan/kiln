@@ -1,17 +1,17 @@
 #!/bin/bash
-# Compile every OpenEPL code sample in the documentation.
+# Compile every Kiln code sample in the documentation.
 #
 # A sample that does not build is worse than no sample: it is the first thing a
 # newcomer copies, and it teaches them the language wrong. Fenced blocks with
-# no language tag are treated as OpenEPL and must contain `module` to be
+# no language tag are treated as Kiln and must contain `module` to be
 # considered a whole program — fragments are skipped deliberately.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-OPENEPL="${OPENEPL:-$ROOT/target/release/openepl}"
-[ -x "$OPENEPL" ] || OPENEPL="$ROOT/target/debug/openepl"
-[ -x "$OPENEPL" ] || { echo "build openepl first (cargo build)" >&2; exit 1; }
+KILN="${KILN:-$ROOT/target/release/kiln}"
+[ -x "$KILN" ] || KILN="$ROOT/target/debug/kiln"
+[ -x "$KILN" ] || { echo "build kiln first (cargo build)" >&2; exit 1; }
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -30,16 +30,16 @@ text = open(doc, encoding='utf-8').read()
 stem = os.path.basename(doc).replace('.', '_')
 for i, m in enumerate(re.finditer(r'^```([a-zA-Z]*)\n(.*?)^```', text, re.S | re.M)):
     lang, body = m.group(1), m.group(2)
-    if lang not in ('', 'openepl', 'oir'):
+    if lang not in ('', 'kiln'):
         continue
     if not re.search(r'^module\s+\w+', body, re.M):
         continue
-    open(os.path.join(work, f'{stem}_{i}.oir'), 'w', encoding='utf-8').write(body)
+    open(os.path.join(work, f'{stem}_{i}.kiln'), 'w', encoding='utf-8').write(body)
 PY
 done
 
 # The landing page is hand-written HTML rather than Markdown, and its sample is
-# the first OpenEPL most visitors read. Its <pre> block is highlighted with
+# the first Kiln most visitors read. Its <pre> block is highlighted with
 # spans, so strip those and undo the entity escaping before compiling it.
 python3 - docs-site/landing/index.html "$WORK" <<'PY'
 import html, re, sys
@@ -48,19 +48,19 @@ text = open(page, encoding='utf-8').read()
 for i, m in enumerate(re.finditer(r'<pre>(.*?)</pre>', text, re.S)):
     body = html.unescape(re.sub(r'</?span[^>]*>', '', m.group(1)))
     if re.search(r'^module\s+\w+', body, re.M):
-        open(f'{work}/landing_{i}.oir', 'w', encoding='utf-8').write(body + '\n')
+        open(f'{work}/landing_{i}.kiln', 'w', encoding='utf-8').write(body + '\n')
 PY
 
 shopt -s nullglob
-for sample in "$WORK"/*.oir; do
-    name="$(basename "$sample" .oir)"
+for sample in "$WORK"/*.kiln; do
+    name="$(basename "$sample" .kiln)"
     # Build when we can — that checks the whole chain including the link. On a
     # machine without the vendored UI stack (a fresh checkout, or CI), fall back
     # to emitting IR, which still parses, validates and lowers the sample.
-    if out=$("$OPENEPL" build "$sample" -o "$WORK/$name.bin" 2>&1); then
+    if out=$("$KILN" build "$sample" -o "$WORK/$name.bin" 2>&1); then
         printf '  %-44s PASS\n' "$name"
         pass=$((pass + 1))
-    elif grep -q "not vendored" <<<"$out" && out=$("$OPENEPL" emit "$sample" 2>&1 >/dev/null); then
+    elif grep -q "not vendored" <<<"$out" && out=$("$KILN" emit "$sample" 2>&1 >/dev/null); then
         printf '  %-44s PASS (validated, not linked)\n' "$name"
         pass=$((pass + 1))
     else
@@ -79,9 +79,9 @@ echo "  $pass sample(s) compiled, $fail failed"
 # that core plus those kits declare. A count that included a project or user
 # kit would depend on where the check happened to run.
 counts_ok=1
-kits=$("$OPENEPL" kits | awk '/^kit: / && $4 == "bundled" { print $2 }')
-"$OPENEPL" commands > "$WORK/all.txt"
-for k in $kits; do "$OPENEPL" commands --use "$k" >> "$WORK/all.txt"; done
+kits=$("$KILN" kits | awk '/^kit: / && $4 == "bundled" { print $2 }')
+"$KILN" commands > "$WORK/all.txt"
+for k in $kits; do "$KILN" commands --use "$k" >> "$WORK/all.txt"; done
 want_kits=$(wc -w <<<"$kits")
 want_cmds=$(sed -n 's/^command: //p' "$WORK/all.txt" | sort -u | wc -l)
 want_comps=$(sed -n 's/^component: //p' "$WORK/all.txt" | sort -u | wc -l)

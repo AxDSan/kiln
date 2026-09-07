@@ -1,10 +1,10 @@
 <div align="center">
-  <img src="./assets/openepl-wordmark.png" alt="OpenEPL" width="380">
+  <img src="./assets/kiln-wordmark.png" alt="Kiln" width="380">
 </div>
 
 # Introduction
 
-OpenEPL is an open implementation of **Easy Programming Language** (易语言,
+Kiln is an open implementation of **Easy Programming Language** (易语言,
 usually shortened to EPL) — a RAD environment where you build desktop software
 by drawing it.
 
@@ -12,7 +12,7 @@ You lay a window out visually, set properties in an inspector, wire a button's
 click to a subroutine, and press **Run** — and what comes out is an ordinary
 native binary you can hand to someone.
 
-![The OpenEPL Studio visual designer](./assets/screenshot-designer.png)
+![The Kiln Studio visual designer](./assets/screenshot-designer.png)
 
 The language is English-first and deliberately small. There is one way to call
 things, no pointers, no manual memory management, and no ceremony:
@@ -22,7 +22,7 @@ module hello
 target console
 
 sub main
-  call print_text("Hello from OpenEPL.")
+  call print_text("Hello from Kiln.")
 
   let answer = 6 * 7
   call print_text("six times seven is {answer}")
@@ -57,9 +57,9 @@ See [Components](./components.md).
 
 Easy Programming Language is a Chinese RAD environment with a large following:
 a visual designer, a component library, event-driven code, and a compiler that
-produces standalone native executables. That model is what OpenEPL implements.
+produces standalone native executables. That model is what Kiln implements.
 
-It is an open implementation of the idea rather than a clone. OpenEPL does not
+It is an open implementation of the idea rather than a clone. Kiln does not
 read or run existing EPL programs, and its keywords are English rather than
 Chinese, so the language is approachable to people who do not read Chinese —
 and the whole toolchain is open source, cross-platform and inspectable.
@@ -74,5 +74,5 @@ and the whole toolchain is open source, cross-platform and inspectable.
 
 ## What is not here yet
 
-OpenEPL is young. [Limitations](./limitations.md) lists what does not exist
+Kiln is young. [Limitations](./limitations.md) lists what does not exist
 yet, plainly — it is worth reading before you plan anything around it.

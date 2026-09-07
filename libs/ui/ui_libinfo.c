@@ -5,20 +5,20 @@
  * to learn which component types exist, what properties and events they have,
  * and their accessibility roles (D16).
  */
-#include "openepl_abi.h"
+#include "kiln_abi.h"
 
 /* --- form ------------------------------------------------------------- */
-static const OpenEPL_PropertyDesc FORM_PROPS[] = {
-    { "title",            OE_SDT_TEXT, "OpenEPL Application", NULL },
-    { "width",            OE_SDT_INT,  "800",                 NULL },
-    { "height",           OE_SDT_INT,  "600",                 NULL },
+static const Kiln_PropertyDesc FORM_PROPS[] = {
+    { "title",            KN_SDT_TEXT, "Kiln Application", NULL },
+    { "width",            KN_SDT_INT,  "800",                 NULL },
+    { "height",           KN_SDT_INT,  "600",                 NULL },
     /* A window's ground, not a terminal's. Every desktop the target audience
      * has used draws a form in light grey; a dark default reads as a theme
      * someone has to switch off before their first app looks normal. */
-    { "background_color", OE_SDT_TEXT, "#f3f3f3",             "color" },
+    { "background_color", KN_SDT_TEXT, "#f3f3f3",             "color" },
     /* The window's icon: a PNG beside the source, embedded at build time like
      * an image's source, so the shipped binary carries it. */
-    { "icon",             OE_SDT_TEXT, "",                    "file" },
+    { "icon",             KN_SDT_TEXT, "",                    "file" },
     /* Where the window opens. `default` leaves it to the window manager (the
      * substrate centres it today); `center` asks for the middle of the
      * screen; `manual` puts its top-left corner at `left`,`top`. A later
@@ -26,11 +26,11 @@ static const OpenEPL_PropertyDesc FORM_PROPS[] = {
      * form is `manual`; assigning `position` after the window exists is
      * ignored, because a window that jumps between modes mid-run is a bug a
      * program cannot mean. */
-    { "position",         OE_SDT_TEXT, "default",             NULL },
-    { "left",             OE_SDT_INT,  "0",                   NULL },
-    { "top",              OE_SDT_INT,  "0",                   NULL },
+    { "position",         KN_SDT_TEXT, "default",             NULL },
+    { "left",             KN_SDT_INT,  "0",                   NULL },
+    { "top",              KN_SDT_INT,  "0",                   NULL },
 };
-static const OpenEPL_EventDesc FORM_EVENTS[] = { { "load", 0, NULL } };
+static const Kiln_EventDesc FORM_EVENTS[] = { { "load", 0, NULL } };
 
 /* Delphi's `Anchors`, on every control that has a rectangle: which edges of
  * the window it keeps its distance from when the window is resized. The far
@@ -38,18 +38,18 @@ static const OpenEPL_EventDesc FORM_EVENTS[] = { { "load", 0, NULL } };
  * the default keeps it where the form put it — so a form written without a
  * thought for resizing behaves exactly as it always has. The layout rule is
  * `anchored_rect` in ui_mapping.h, shared with the designer. */
-#define ANCHORS { "anchors", OE_SDT_TEXT, "left,top", "anchors" }
+#define ANCHORS { "anchors", KN_SDT_TEXT, "left,top", "anchors" }
 
 /* --- button ----------------------------------------------------------- */
-static const OpenEPL_PropertyDesc BUTTON_PROPS[] = {
-    { "text",             OE_SDT_TEXT, "Button",  NULL },
-    { "left",             OE_SDT_INT,  "0",       NULL },
-    { "top",              OE_SDT_INT,  "0",       NULL },
-    { "width",            OE_SDT_INT,  "120",     NULL },
+static const Kiln_PropertyDesc BUTTON_PROPS[] = {
+    { "text",             KN_SDT_TEXT, "Button",  NULL },
+    { "left",             KN_SDT_INT,  "0",       NULL },
+    { "top",              KN_SDT_INT,  "0",       NULL },
+    { "width",            KN_SDT_INT,  "120",     NULL },
     /* 32px is the specification's control height, and the whole palette is
      * sized to that grid: an editbox, a combobox and a button drawn on one
      * row line up without anyone reaching for the inspector. */
-    { "height",           OE_SDT_INT,  "32",      NULL },
+    { "height",           KN_SDT_INT,  "32",      NULL },
     ANCHORS,
     /* NO default colour, deliberately. The stylesheet's neutral button —
      * white ground, hairline outline, and the hover and pressed shades that
@@ -59,84 +59,84 @@ static const OpenEPL_PropertyDesc BUTTON_PROPS[] = {
      * exactly that colour, and the backend's own hover shades with it: the
      * language has no `primary`/`accent` property yet, and inventing one
      * silently in a stylesheet would be worse than the omission. */
-    { "background_color", OE_SDT_TEXT, NULL,      "color" },
-    { "color",            OE_SDT_TEXT, NULL,      "color" },
-    { "border_radius",    OE_SDT_INT,  "4",       NULL },
-    { "enabled",          OE_SDT_BOOL, "true",    NULL },
-    { "action",           OE_SDT_TEXT, "",        NULL },
+    { "background_color", KN_SDT_TEXT, NULL,      "color" },
+    { "color",            KN_SDT_TEXT, NULL,      "color" },
+    { "border_radius",    KN_SDT_INT,  "4",       NULL },
+    { "enabled",          KN_SDT_BOOL, "true",    NULL },
+    { "action",           KN_SDT_TEXT, "",        NULL },
 };
-static const OpenEPL_EventDesc BUTTON_EVENTS[] = { { "click", 0, NULL } };
+static const Kiln_EventDesc BUTTON_EVENTS[] = { { "click", 0, NULL } };
 
 /* --- label ------------------------------------------------------------ */
-static const OpenEPL_PropertyDesc LABEL_PROPS[] = {
-    { "text",  OE_SDT_TEXT, "Label",   NULL },
-    { "left",  OE_SDT_INT,  "0",       NULL },
-    { "top",   OE_SDT_INT,  "0",       NULL },
-    { "width", OE_SDT_INT,  "200",     NULL },
+static const Kiln_PropertyDesc LABEL_PROPS[] = {
+    { "text",  KN_SDT_TEXT, "Label",   NULL },
+    { "left",  KN_SDT_INT,  "0",       NULL },
+    { "top",   KN_SDT_INT,  "0",       NULL },
+    { "width", KN_SDT_INT,  "200",     NULL },
     /* A label the designer can size only sideways is a label the designer
      * writes a `height` into anyway, and the build then rejects. */
-    { "height", OE_SDT_INT, "24",      NULL },
+    { "height", KN_SDT_INT, "24",      NULL },
     ANCHORS,
-    { "color", OE_SDT_TEXT, "#1a1a1a", "color" },
+    { "color", KN_SDT_TEXT, "#1a1a1a", "color" },
 };
 
 /* --- editbox ---------------------------------------------------------- */
-static const OpenEPL_PropertyDesc EDIT_PROPS[] = {
-    { "text",      OE_SDT_TEXT, "",        NULL },
-    { "left",      OE_SDT_INT,  "0",       NULL },
-    { "top",       OE_SDT_INT,  "0",       NULL },
-    { "width",     OE_SDT_INT,  "160",     NULL },
-    { "height",    OE_SDT_INT,  "32",      NULL },
+static const Kiln_PropertyDesc EDIT_PROPS[] = {
+    { "text",      KN_SDT_TEXT, "",        NULL },
+    { "left",      KN_SDT_INT,  "0",       NULL },
+    { "top",       KN_SDT_INT,  "0",       NULL },
+    { "width",     KN_SDT_INT,  "160",     NULL },
+    { "height",    KN_SDT_INT,  "32",      NULL },
     ANCHORS,
-    { "color",     OE_SDT_TEXT, "#1a1a1a", "color" },
+    { "color",     KN_SDT_TEXT, "#1a1a1a", "color" },
     /* Off by default: a single-line field. On, the box becomes a multi-line
      * text area whose height is honoured — and the designer lets it be resized
      * vertically only then, clamping a single-line field to one row. */
-    { "multiline", OE_SDT_BOOL, "false",   NULL },
+    { "multiline", KN_SDT_BOOL, "false",   NULL },
 };
-static const OpenEPL_EventDesc EDIT_EVENTS[] = { { "change", 0, NULL } };
+static const Kiln_EventDesc EDIT_EVENTS[] = { { "change", 0, NULL } };
 
 /* --- checkbox --------------------------------------------------------- */
-static const OpenEPL_PropertyDesc CHECK_PROPS[] = {
-    { "text",    OE_SDT_TEXT, "Check me", NULL },
-    { "checked", OE_SDT_BOOL, "false",    NULL },
-    { "left",    OE_SDT_INT,  "0",        NULL },
-    { "top",     OE_SDT_INT,  "0",        NULL },
-    { "width",   OE_SDT_INT,  "140",      NULL },
-    { "height",  OE_SDT_INT,  "24",       NULL },
+static const Kiln_PropertyDesc CHECK_PROPS[] = {
+    { "text",    KN_SDT_TEXT, "Check me", NULL },
+    { "checked", KN_SDT_BOOL, "false",    NULL },
+    { "left",    KN_SDT_INT,  "0",        NULL },
+    { "top",     KN_SDT_INT,  "0",        NULL },
+    { "width",   KN_SDT_INT,  "140",      NULL },
+    { "height",  KN_SDT_INT,  "24",       NULL },
     ANCHORS,
-    { "color",   OE_SDT_TEXT, "#1a1a1a",  "color" },
+    { "color",   KN_SDT_TEXT, "#1a1a1a",  "color" },
 };
-static const OpenEPL_EventDesc CHECK_EVENTS[] = { { "change", 0, NULL } };
+static const Kiln_EventDesc CHECK_EVENTS[] = { { "change", 0, NULL } };
 
 /* --- groupbox --------------------------------------------------------- */
-static const OpenEPL_PropertyDesc GROUP_PROPS[] = {
-    { "text",         OE_SDT_TEXT, "Group",   NULL },
-    { "left",         OE_SDT_INT,  "0",       NULL },
-    { "top",          OE_SDT_INT,  "0",       NULL },
-    { "width",        OE_SDT_INT,  "200",     NULL },
-    { "height",       OE_SDT_INT,  "120",     NULL },
+static const Kiln_PropertyDesc GROUP_PROPS[] = {
+    { "text",         KN_SDT_TEXT, "Group",   NULL },
+    { "left",         KN_SDT_INT,  "0",       NULL },
+    { "top",          KN_SDT_INT,  "0",       NULL },
+    { "width",        KN_SDT_INT,  "200",     NULL },
+    { "height",       KN_SDT_INT,  "120",     NULL },
     ANCHORS,
-    { "border_color", OE_SDT_TEXT, "#e5e5e5", "color" },
+    { "border_color", KN_SDT_TEXT, "#e5e5e5", "color" },
 };
 
 /* --- image ------------------------------------------------------------ */
-static const OpenEPL_PropertyDesc IMAGE_PROPS[] = {
-    { "source", OE_SDT_TEXT, "",    "file" },
-    { "left",   OE_SDT_INT,  "0",   NULL },
-    { "top",    OE_SDT_INT,  "0",   NULL },
-    { "width",  OE_SDT_INT,  "120", NULL },
-    { "height", OE_SDT_INT,  "120", NULL },
+static const Kiln_PropertyDesc IMAGE_PROPS[] = {
+    { "source", KN_SDT_TEXT, "",    "file" },
+    { "left",   KN_SDT_INT,  "0",   NULL },
+    { "top",    KN_SDT_INT,  "0",   NULL },
+    { "width",  KN_SDT_INT,  "120", NULL },
+    { "height", KN_SDT_INT,  "120", NULL },
     ANCHORS,
 };
 
 /* --- progressbar ------------------------------------------------------ */
-static const OpenEPL_PropertyDesc PROG_PROPS[] = {
-    { "value",  OE_SDT_INT, "50",  NULL },
-    { "left",   OE_SDT_INT, "0",   NULL },
-    { "top",    OE_SDT_INT, "0",   NULL },
-    { "width",  OE_SDT_INT, "200", NULL },
-    { "height", OE_SDT_INT, "16",  NULL },
+static const Kiln_PropertyDesc PROG_PROPS[] = {
+    { "value",  KN_SDT_INT, "50",  NULL },
+    { "left",   KN_SDT_INT, "0",   NULL },
+    { "top",    KN_SDT_INT, "0",   NULL },
+    { "width",  KN_SDT_INT, "200", NULL },
+    { "height", KN_SDT_INT, "16",  NULL },
     ANCHORS,
 };
 
@@ -156,55 +156,55 @@ static const OpenEPL_PropertyDesc PROG_PROPS[] = {
  * `selected` counts from 1 and answers 0 for nothing selected, like every
  * other position in the language. `count` is read-only.
  */
-static const OpenEPL_PropertyDesc COMBO_PROPS[] = {
-    { "items",    OE_SDT_TEXT, "",    "multiline" },
-    { "selected", OE_SDT_INT,  "0",   NULL },
-    { "count",    OE_SDT_INT,  "0",   NULL },
-    { "left",     OE_SDT_INT,  "0",   NULL },
-    { "top",      OE_SDT_INT,  "0",   NULL },
-    { "width",    OE_SDT_INT,  "160", NULL },
-    { "height",   OE_SDT_INT,  "32",  NULL },
+static const Kiln_PropertyDesc COMBO_PROPS[] = {
+    { "items",    KN_SDT_TEXT, "",    "multiline" },
+    { "selected", KN_SDT_INT,  "0",   NULL },
+    { "count",    KN_SDT_INT,  "0",   NULL },
+    { "left",     KN_SDT_INT,  "0",   NULL },
+    { "top",      KN_SDT_INT,  "0",   NULL },
+    { "width",    KN_SDT_INT,  "160", NULL },
+    { "height",   KN_SDT_INT,  "32",  NULL },
     ANCHORS,
-    { "enabled",  OE_SDT_BOOL, "true", NULL },
+    { "enabled",  KN_SDT_BOOL, "true", NULL },
 };
 /* `change`, not `changed`: the palette already spells this event `change` on
  * editbox and checkbox, and one vocabulary for one concept is worth more than
  * matching the word a request happened to use. */
-static const OpenEPL_EventDesc COMBO_EVENTS[] = { { "change", 0, NULL } };
+static const Kiln_EventDesc COMBO_EVENTS[] = { { "change", 0, NULL } };
 
-static const OpenEPL_PropertyDesc LIST_PROPS[] = {
-    { "items",    OE_SDT_TEXT, "",    "multiline" },
-    { "selected", OE_SDT_INT,  "0",   NULL },
-    { "count",    OE_SDT_INT,  "0",   NULL },
-    { "left",     OE_SDT_INT,  "0",   NULL },
-    { "top",      OE_SDT_INT,  "0",   NULL },
-    { "width",    OE_SDT_INT,  "160", NULL },
-    { "height",   OE_SDT_INT,  "120", NULL },
+static const Kiln_PropertyDesc LIST_PROPS[] = {
+    { "items",    KN_SDT_TEXT, "",    "multiline" },
+    { "selected", KN_SDT_INT,  "0",   NULL },
+    { "count",    KN_SDT_INT,  "0",   NULL },
+    { "left",     KN_SDT_INT,  "0",   NULL },
+    { "top",      KN_SDT_INT,  "0",   NULL },
+    { "width",    KN_SDT_INT,  "160", NULL },
+    { "height",   KN_SDT_INT,  "120", NULL },
     ANCHORS,
-    { "enabled",  OE_SDT_BOOL, "true", NULL },
+    { "enabled",  KN_SDT_BOOL, "true", NULL },
 };
-static const OpenEPL_EventDesc LIST_EVENTS[] = { { "change", 0, NULL } };
+static const Kiln_EventDesc LIST_EVENTS[] = { { "change", 0, NULL } };
 
 /* --- radiobutton ------------------------------------------------------ *
  *
  * Exclusion is by `group` NAME rather than by containment, because the
  * component tree is flat: a form holds children, and a groupbox holds nothing
- * (openepl_ir::Form). Naming the group is the same answer `action` gives to
+ * (kiln_ir::Form). Naming the group is the same answer `action` gives to
  * the same problem, and it survives the designer moving a button out of the
  * rectangle it happened to be drawn over.
  */
-static const OpenEPL_PropertyDesc RADIO_PROPS[] = {
-    { "text",    OE_SDT_TEXT, "Option",  NULL },
-    { "group",   OE_SDT_TEXT, "default", NULL },
-    { "checked", OE_SDT_BOOL, "false",   NULL },
-    { "left",    OE_SDT_INT,  "0",       NULL },
-    { "top",     OE_SDT_INT,  "0",       NULL },
-    { "width",   OE_SDT_INT,  "140",     NULL },
-    { "height",  OE_SDT_INT,  "24",      NULL },
+static const Kiln_PropertyDesc RADIO_PROPS[] = {
+    { "text",    KN_SDT_TEXT, "Option",  NULL },
+    { "group",   KN_SDT_TEXT, "default", NULL },
+    { "checked", KN_SDT_BOOL, "false",   NULL },
+    { "left",    KN_SDT_INT,  "0",       NULL },
+    { "top",     KN_SDT_INT,  "0",       NULL },
+    { "width",   KN_SDT_INT,  "140",     NULL },
+    { "height",  KN_SDT_INT,  "24",      NULL },
     ANCHORS,
-    { "color",   OE_SDT_TEXT, "#1a1a1a", "color" },
+    { "color",   KN_SDT_TEXT, "#1a1a1a", "color" },
 };
-static const OpenEPL_EventDesc RADIO_EVENTS[] = { { "change", 0, NULL } };
+static const Kiln_EventDesc RADIO_EVENTS[] = { { "change", 0, NULL } };
 
 /* --- memo ------------------------------------------------------------- *
  *
@@ -212,35 +212,35 @@ static const OpenEPL_EventDesc RADIO_EVENTS[] = { { "change", 0, NULL } };
  * this is the component it was written for. An inspector offering a one-line
  * field for a paragraph is the whole reason the hint exists.
  */
-static const OpenEPL_PropertyDesc MEMO_PROPS[] = {
-    { "text",   OE_SDT_TEXT, "",       "multiline" },
-    { "left",   OE_SDT_INT,  "0",      NULL },
-    { "top",    OE_SDT_INT,  "0",      NULL },
-    { "width",  OE_SDT_INT,  "240",    NULL },
-    { "height", OE_SDT_INT,  "100",    NULL },
+static const Kiln_PropertyDesc MEMO_PROPS[] = {
+    { "text",   KN_SDT_TEXT, "",       "multiline" },
+    { "left",   KN_SDT_INT,  "0",      NULL },
+    { "top",    KN_SDT_INT,  "0",      NULL },
+    { "width",  KN_SDT_INT,  "240",    NULL },
+    { "height", KN_SDT_INT,  "100",    NULL },
     ANCHORS,
-    { "color",  OE_SDT_TEXT, "#1a1a1a", "color" },
-    { "enabled", OE_SDT_BOOL, "true",  NULL },
+    { "color",  KN_SDT_TEXT, "#1a1a1a", "color" },
+    { "enabled", KN_SDT_BOOL, "true",  NULL },
 };
-static const OpenEPL_EventDesc MEMO_EVENTS[] = { { "change", 0, NULL } };
+static const Kiln_EventDesc MEMO_EVENTS[] = { { "change", 0, NULL } };
 
 /* --- slider ----------------------------------------------------------- *
  *
  * `min`/`max` are the range and `value` is where the handle sits. Unlike a
  * progressbar this reports back, so it carries `change`.
  */
-static const OpenEPL_PropertyDesc SLIDER_PROPS[] = {
-    { "value",   OE_SDT_INT,  "50",   NULL },
-    { "min",     OE_SDT_INT,  "0",    NULL },
-    { "max",     OE_SDT_INT,  "100",  NULL },
-    { "left",    OE_SDT_INT,  "0",    NULL },
-    { "top",     OE_SDT_INT,  "0",    NULL },
-    { "width",   OE_SDT_INT,  "200",  NULL },
-    { "height",  OE_SDT_INT,  "20",   NULL },
+static const Kiln_PropertyDesc SLIDER_PROPS[] = {
+    { "value",   KN_SDT_INT,  "50",   NULL },
+    { "min",     KN_SDT_INT,  "0",    NULL },
+    { "max",     KN_SDT_INT,  "100",  NULL },
+    { "left",    KN_SDT_INT,  "0",    NULL },
+    { "top",     KN_SDT_INT,  "0",    NULL },
+    { "width",   KN_SDT_INT,  "200",  NULL },
+    { "height",  KN_SDT_INT,  "20",   NULL },
     ANCHORS,
-    { "enabled", OE_SDT_BOOL, "true", NULL },
+    { "enabled", KN_SDT_BOOL, "true", NULL },
 };
-static const OpenEPL_EventDesc SLIDER_EVENTS[] = { { "change", 0, NULL } };
+static const Kiln_EventDesc SLIDER_EVENTS[] = { { "change", 0, NULL } };
 
 /* --- spinner ---------------------------------------------------------- *
  *
@@ -249,19 +249,19 @@ static const OpenEPL_EventDesc SLIDER_EVENTS[] = { { "change", 0, NULL } };
  * stepped, or assigned from a subroutine — because a spinner whose bounds hold
  * only for the arrows is not bounded.
  */
-static const OpenEPL_PropertyDesc SPIN_PROPS[] = {
-    { "value",   OE_SDT_INT,  "0",    NULL },
-    { "min",     OE_SDT_INT,  "0",    NULL },
-    { "max",     OE_SDT_INT,  "100",  NULL },
-    { "step",    OE_SDT_INT,  "1",    NULL },
-    { "left",    OE_SDT_INT,  "0",    NULL },
-    { "top",     OE_SDT_INT,  "0",    NULL },
-    { "width",   OE_SDT_INT,  "110",  NULL },
-    { "height",  OE_SDT_INT,  "32",   NULL },
+static const Kiln_PropertyDesc SPIN_PROPS[] = {
+    { "value",   KN_SDT_INT,  "0",    NULL },
+    { "min",     KN_SDT_INT,  "0",    NULL },
+    { "max",     KN_SDT_INT,  "100",  NULL },
+    { "step",    KN_SDT_INT,  "1",    NULL },
+    { "left",    KN_SDT_INT,  "0",    NULL },
+    { "top",     KN_SDT_INT,  "0",    NULL },
+    { "width",   KN_SDT_INT,  "110",  NULL },
+    { "height",  KN_SDT_INT,  "32",   NULL },
     ANCHORS,
-    { "enabled", OE_SDT_BOOL, "true", NULL },
+    { "enabled", KN_SDT_BOOL, "true", NULL },
 };
-static const OpenEPL_EventDesc SPIN_EVENTS[] = { { "change", 0, NULL } };
+static const Kiln_EventDesc SPIN_EVENTS[] = { { "change", 0, NULL } };
 
 /* --- action ----------------------------------------------------------- *
  *
@@ -274,13 +274,13 @@ static const OpenEPL_EventDesc SPIN_EVENTS[] = { { "change", 0, NULL } };
  * because a property value is a literal (backend/src/lib.rs) and component
  * identifiers deliberately never reach the binary.
  */
-static const OpenEPL_PropertyDesc ACTION_PROPS[] = {
-    { "name",     OE_SDT_TEXT, "",        NULL },
-    { "text",     OE_SDT_TEXT, "",        NULL },
-    { "shortcut", OE_SDT_TEXT, "",        NULL },
-    { "enabled",  OE_SDT_BOOL, "true",    NULL },
+static const Kiln_PropertyDesc ACTION_PROPS[] = {
+    { "name",     KN_SDT_TEXT, "",        NULL },
+    { "text",     KN_SDT_TEXT, "",        NULL },
+    { "shortcut", KN_SDT_TEXT, "",        NULL },
+    { "enabled",  KN_SDT_BOOL, "true",    NULL },
 };
-static const OpenEPL_EventDesc ACTION_EVENTS[] = { { "execute", 0, NULL } };
+static const Kiln_EventDesc ACTION_EVENTS[] = { { "execute", 0, NULL } };
 
 /* --- grid / datasource ------------------------------------------------ *
  *
@@ -310,91 +310,91 @@ static const OpenEPL_EventDesc ACTION_EVENTS[] = { { "execute", 0, NULL } };
  * that position, and `activate` — a double-click, or Enter on the selected
  * row — hands it the same.  `count` is read-only.
  */
-static const OpenEPL_PropertyDesc GRID_PROPS[] = {
-    { "name",     OE_SDT_TEXT, "",     NULL },
-    { "bind",     OE_SDT_TEXT, "",     NULL },
-    { "columns",  OE_SDT_TEXT, "",     NULL },
-    { "rows",     OE_SDT_TEXT, "",     "multiline" },
-    { "selected", OE_SDT_INT,  "0",    NULL },
-    { "count",    OE_SDT_INT,  "0",    NULL },
-    { "left",     OE_SDT_INT,  "0",    NULL },
-    { "top",      OE_SDT_INT,  "0",    NULL },
-    { "width",    OE_SDT_INT,  "320",  NULL },
-    { "height",   OE_SDT_INT,  "160",  NULL },
+static const Kiln_PropertyDesc GRID_PROPS[] = {
+    { "name",     KN_SDT_TEXT, "",     NULL },
+    { "bind",     KN_SDT_TEXT, "",     NULL },
+    { "columns",  KN_SDT_TEXT, "",     NULL },
+    { "rows",     KN_SDT_TEXT, "",     "multiline" },
+    { "selected", KN_SDT_INT,  "0",    NULL },
+    { "count",    KN_SDT_INT,  "0",    NULL },
+    { "left",     KN_SDT_INT,  "0",    NULL },
+    { "top",      KN_SDT_INT,  "0",    NULL },
+    { "width",    KN_SDT_INT,  "320",  NULL },
+    { "height",   KN_SDT_INT,  "160",  NULL },
     ANCHORS,
-    { "enabled",  OE_SDT_BOOL, "true", NULL },
+    { "enabled",  KN_SDT_BOOL, "true", NULL },
 };
-static const int32_t ROW_PARAM[] = { OE_SDT_INT };
-static const OpenEPL_EventDesc GRID_EVENTS[] = {
+static const int32_t ROW_PARAM[] = { KN_SDT_INT };
+static const Kiln_EventDesc GRID_EVENTS[] = {
     { "select",   1, ROW_PARAM },
     { "activate", 1, ROW_PARAM },
 };
 
 /* A datasource is rows with no rectangle: filled once, shown by every grid
  * that binds it.  It has no events — the grids watch it, not the program. */
-static const OpenEPL_PropertyDesc DATASOURCE_PROPS[] = {
-    { "name",    OE_SDT_TEXT, "", NULL },
-    { "columns", OE_SDT_TEXT, "", NULL },
-    { "rows",    OE_SDT_TEXT, "", "multiline" },
-    { "count",   OE_SDT_INT,  "0", NULL },
+static const Kiln_PropertyDesc DATASOURCE_PROPS[] = {
+    { "name",    KN_SDT_TEXT, "", NULL },
+    { "columns", KN_SDT_TEXT, "", NULL },
+    { "rows",    KN_SDT_TEXT, "", "multiline" },
+    { "count",   KN_SDT_INT,  "0", NULL },
 };
 
 #define N(a) (int32_t)(sizeof(a) / sizeof((a)[0]))
 
 /* One signature table per shape; the grid and datasource families share
  * them, and differ only in which component the name is looked up among. */
-static const int32_t A_NAME[]          = { OE_SDT_TEXT };
-static const int32_t A_NAME_ROW[]      = { OE_SDT_TEXT, OE_SDT_TEXT };
-static const int32_t A_NAME_CELL[]     = { OE_SDT_TEXT, OE_SDT_INT, OE_SDT_INT };
-static const int32_t A_NAME_CELL_VAL[] = { OE_SDT_TEXT, OE_SDT_INT, OE_SDT_INT, OE_SDT_TEXT };
+static const int32_t A_NAME[]          = { KN_SDT_TEXT };
+static const int32_t A_NAME_ROW[]      = { KN_SDT_TEXT, KN_SDT_TEXT };
+static const int32_t A_NAME_CELL[]     = { KN_SDT_TEXT, KN_SDT_INT, KN_SDT_INT };
+static const int32_t A_NAME_CELL_VAL[] = { KN_SDT_TEXT, KN_SDT_INT, KN_SDT_INT, KN_SDT_TEXT };
 
-static const OpenEPL_CommandDesc UI_COMMANDS[] = {
-    { "grid_clear",           "ui_grid_clear",           OE_SDT_BOOL, 1, A_NAME },
-    { "grid_add_row",         "ui_grid_add_row",         OE_SDT_INT,  2, A_NAME_ROW },
-    { "grid_cell",            "ui_grid_cell",            OE_SDT_TEXT, 3, A_NAME_CELL },
-    { "grid_set_cell",        "ui_grid_set_cell",        OE_SDT_BOOL, 4, A_NAME_CELL_VAL },
-    { "grid_row_count",       "ui_grid_row_count",       OE_SDT_INT,  1, A_NAME },
-    { "datasource_clear",     "ui_datasource_clear",     OE_SDT_BOOL, 1, A_NAME },
-    { "datasource_add_row",   "ui_datasource_add_row",   OE_SDT_INT,  2, A_NAME_ROW },
-    { "datasource_cell",      "ui_datasource_cell",      OE_SDT_TEXT, 3, A_NAME_CELL },
-    { "datasource_set_cell",  "ui_datasource_set_cell",  OE_SDT_BOOL, 4, A_NAME_CELL_VAL },
-    { "datasource_row_count", "ui_datasource_row_count", OE_SDT_INT,  1, A_NAME },
+static const Kiln_CommandDesc UI_COMMANDS[] = {
+    { "grid_clear",           "ui_grid_clear",           KN_SDT_BOOL, 1, A_NAME },
+    { "grid_add_row",         "ui_grid_add_row",         KN_SDT_INT,  2, A_NAME_ROW },
+    { "grid_cell",            "ui_grid_cell",            KN_SDT_TEXT, 3, A_NAME_CELL },
+    { "grid_set_cell",        "ui_grid_set_cell",        KN_SDT_BOOL, 4, A_NAME_CELL_VAL },
+    { "grid_row_count",       "ui_grid_row_count",       KN_SDT_INT,  1, A_NAME },
+    { "datasource_clear",     "ui_datasource_clear",     KN_SDT_BOOL, 1, A_NAME },
+    { "datasource_add_row",   "ui_datasource_add_row",   KN_SDT_INT,  2, A_NAME_ROW },
+    { "datasource_cell",      "ui_datasource_cell",      KN_SDT_TEXT, 3, A_NAME_CELL },
+    { "datasource_set_cell",  "ui_datasource_set_cell",  KN_SDT_BOOL, 4, A_NAME_CELL_VAL },
+    { "datasource_row_count", "ui_datasource_row_count", KN_SDT_INT,  1, A_NAME },
 };
-#define VISUAL OE_COMPONENT_VISUAL
-#define NONVISUAL OE_COMPONENT_NONVISUAL
+#define VISUAL KN_COMPONENT_VISUAL
+#define NONVISUAL KN_COMPONENT_NONVISUAL
 
-static const OpenEPL_ComponentDesc UI_COMPONENTS[] = {
-    { "form",   OE_ROLE_WINDOW, N(FORM_PROPS),   FORM_PROPS,   N(FORM_EVENTS),   FORM_EVENTS,   VISUAL },
-    { "button", OE_ROLE_BUTTON, N(BUTTON_PROPS), BUTTON_PROPS, N(BUTTON_EVENTS), BUTTON_EVENTS, VISUAL },
-    { "label",  OE_ROLE_LABEL,  N(LABEL_PROPS),  LABEL_PROPS,  0,                0,             VISUAL },
-    { "editbox", OE_ROLE_TEXTBOX, N(EDIT_PROPS),  EDIT_PROPS,   N(EDIT_EVENTS),   EDIT_EVENTS,  VISUAL },
-    { "checkbox", OE_ROLE_CHECKBOX, N(CHECK_PROPS), CHECK_PROPS, N(CHECK_EVENTS), CHECK_EVENTS, VISUAL },
-    { "groupbox", OE_ROLE_GROUP,  N(GROUP_PROPS),  GROUP_PROPS,  0,               0,            VISUAL },
-    { "image",   OE_ROLE_UNKNOWN, N(IMAGE_PROPS),  IMAGE_PROPS,  0,               0,            VISUAL },
-    { "progressbar", OE_ROLE_UNKNOWN, N(PROG_PROPS), PROG_PROPS, 0,               0,            VISUAL },
-    { "combobox", OE_ROLE_LIST, N(COMBO_PROPS), COMBO_PROPS, N(COMBO_EVENTS), COMBO_EVENTS, VISUAL },
-    { "listbox", OE_ROLE_LIST, N(LIST_PROPS), LIST_PROPS, N(LIST_EVENTS), LIST_EVENTS, VISUAL },
-    /* No OE_ROLE_RADIO exists in abi/openepl_abi.h, and that header is not
+static const Kiln_ComponentDesc UI_COMPONENTS[] = {
+    { "form",   KN_ROLE_WINDOW, N(FORM_PROPS),   FORM_PROPS,   N(FORM_EVENTS),   FORM_EVENTS,   VISUAL },
+    { "button", KN_ROLE_BUTTON, N(BUTTON_PROPS), BUTTON_PROPS, N(BUTTON_EVENTS), BUTTON_EVENTS, VISUAL },
+    { "label",  KN_ROLE_LABEL,  N(LABEL_PROPS),  LABEL_PROPS,  0,                0,             VISUAL },
+    { "editbox", KN_ROLE_TEXTBOX, N(EDIT_PROPS),  EDIT_PROPS,   N(EDIT_EVENTS),   EDIT_EVENTS,  VISUAL },
+    { "checkbox", KN_ROLE_CHECKBOX, N(CHECK_PROPS), CHECK_PROPS, N(CHECK_EVENTS), CHECK_EVENTS, VISUAL },
+    { "groupbox", KN_ROLE_GROUP,  N(GROUP_PROPS),  GROUP_PROPS,  0,               0,            VISUAL },
+    { "image",   KN_ROLE_UNKNOWN, N(IMAGE_PROPS),  IMAGE_PROPS,  0,               0,            VISUAL },
+    { "progressbar", KN_ROLE_UNKNOWN, N(PROG_PROPS), PROG_PROPS, 0,               0,            VISUAL },
+    { "combobox", KN_ROLE_LIST, N(COMBO_PROPS), COMBO_PROPS, N(COMBO_EVENTS), COMBO_EVENTS, VISUAL },
+    { "listbox", KN_ROLE_LIST, N(LIST_PROPS), LIST_PROPS, N(LIST_EVENTS), LIST_EVENTS, VISUAL },
+    /* No KN_ROLE_RADIO exists in abi/kiln_abi.h, and that header is not
      * this library's to extend; checkbox is the nearest true role — a
      * two-state control that announces its state. */
-    { "radiobutton", OE_ROLE_CHECKBOX, N(RADIO_PROPS), RADIO_PROPS, N(RADIO_EVENTS), RADIO_EVENTS, VISUAL },
-    { "memo", OE_ROLE_TEXTBOX, N(MEMO_PROPS), MEMO_PROPS, N(MEMO_EVENTS), MEMO_EVENTS, VISUAL },
-    { "slider", OE_ROLE_UNKNOWN, N(SLIDER_PROPS), SLIDER_PROPS, N(SLIDER_EVENTS), SLIDER_EVENTS, VISUAL },
-    { "spinner", OE_ROLE_TEXTBOX, N(SPIN_PROPS), SPIN_PROPS, N(SPIN_EVENTS), SPIN_EVENTS, VISUAL },
-    { "action", OE_ROLE_UNKNOWN, N(ACTION_PROPS), ACTION_PROPS, N(ACTION_EVENTS), ACTION_EVENTS, NONVISUAL },
-    /* No table role exists in abi/openepl_abi.h; a list of rows is the
+    { "radiobutton", KN_ROLE_CHECKBOX, N(RADIO_PROPS), RADIO_PROPS, N(RADIO_EVENTS), RADIO_EVENTS, VISUAL },
+    { "memo", KN_ROLE_TEXTBOX, N(MEMO_PROPS), MEMO_PROPS, N(MEMO_EVENTS), MEMO_EVENTS, VISUAL },
+    { "slider", KN_ROLE_UNKNOWN, N(SLIDER_PROPS), SLIDER_PROPS, N(SLIDER_EVENTS), SLIDER_EVENTS, VISUAL },
+    { "spinner", KN_ROLE_TEXTBOX, N(SPIN_PROPS), SPIN_PROPS, N(SPIN_EVENTS), SPIN_EVENTS, VISUAL },
+    { "action", KN_ROLE_UNKNOWN, N(ACTION_PROPS), ACTION_PROPS, N(ACTION_EVENTS), ACTION_EVENTS, NONVISUAL },
+    /* No table role exists in abi/kiln_abi.h; a list of rows is the
      * nearest true one, and a reader stepping through rows is served by it. */
-    { "grid", OE_ROLE_LIST, N(GRID_PROPS), GRID_PROPS, N(GRID_EVENTS), GRID_EVENTS, VISUAL },
-    { "datasource", OE_ROLE_UNKNOWN, N(DATASOURCE_PROPS), DATASOURCE_PROPS, 0, 0, NONVISUAL },
+    { "grid", KN_ROLE_LIST, N(GRID_PROPS), GRID_PROPS, N(GRID_EVENTS), GRID_EVENTS, VISUAL },
+    { "datasource", KN_ROLE_UNKNOWN, N(DATASOURCE_PROPS), DATASOURCE_PROPS, 0, 0, NONVISUAL },
 };
 
-static const OpenEPL_LibInfo UI_INFO = {
-    OPENEPL_ABI_VERSION,
+static const Kiln_LibInfo UI_INFO = {
+    KILN_ABI_VERSION,
     "ui",
-    "openepl-ui-0000-0000-0000-000000000003",
+    "kiln-ui-0000-0000-0000-000000000003",
     0, 1, 0,
     N(UI_COMMANDS), UI_COMMANDS,
     N(UI_COMPONENTS), UI_COMPONENTS,
 };
 
-const OpenEPL_LibInfo *openepl_get_lib_info(void) { return &UI_INFO; }
+const Kiln_LibInfo *kiln_get_lib_info(void) { return &UI_INFO; }

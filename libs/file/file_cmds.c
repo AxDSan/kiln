@@ -17,8 +17,8 @@
  * is why file_read_bytes / file_write_bytes / file_append_bytes exist beside
  * them: the byte-set carries its own length and so survives a NUL.
  *
- * Every fallible command below takes exactly one of oe_error_clear() or
- * oe_error_set*() on every exit path, and copies errno to a local on the line
+ * Every fallible command below takes exactly one of kn_error_clear() or
+ * kn_error_set*() on every exit path, and copies errno to a local on the line
  * immediately after the call that failed — fclose() and free() clobber it.
  */
 #include <errno.h>
@@ -45,10 +45,10 @@
 #include <unistd.h>
 #endif
 
-/* openepl_core.h rather than the ABI header alone, for oe_bin_new: a byte-set
+/* kiln_core.h rather than the ABI header alone, for kn_bin_new: a byte-set
  * is allocated by the runtime, and its constructor is a runtime internal the
- * same way oe_empty_text is. */
-#include "openepl_core.h"
+ * same way kn_empty_text is. */
+#include "kiln_core.h"
 
 /* --- small helpers ---------------------------------------------------- */
 
@@ -111,7 +111,7 @@ static wchar_t *file_to_wide(const char *s) {
 static char *file_from_wide(const wchar_t *w) {
     int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
     if (n <= 0) return NULL;
-    char *o = (char *)oe_malloc(n);
+    char *o = (char *)kn_malloc(n);
     if (!o) return NULL;
     if (WideCharToMultiByte(CP_UTF8, 0, w, -1, o, n, NULL, NULL) <= 0) return NULL;
     return o;
@@ -187,14 +187,14 @@ static char *file_getcwd_text(void) {
     char buf[4096];
     if (!file_getcwd_buf(buf, sizeof buf)) return NULL;
     size_t n = strlen(buf);
-    char *o = (char *)oe_malloc((long)n + 1);
+    char *o = (char *)kn_malloc((long)n + 1);
     if (o) memcpy(o, buf, n + 1);
     return o;
 }
 
 /* A result string, runtime-owned like every other text result. */
 static char *file_text_n(const char *s, size_t n) {
-    char *o = (char *)oe_malloc((long)n + 1);
+    char *o = (char *)kn_malloc((long)n + 1);
     if (!o) return NULL;
     if (n) memcpy(o, s, n);
     o[n] = '\0';
@@ -205,41 +205,41 @@ static char *file_text(const char *s) { return file_text_n(s, strlen(file_nz(s))
 static char *file_empty(void) { return file_text_n("", 0); }
 
 /* --- byte-sets --------------------------------------------------------
- * The layout is stated in abi/openepl_abi.h: a header, then the bytes, all one
+ * The layout is stated in abi/kiln_abi.h: a header, then the bytes, all one
  * runtime-owned allocation.  A bytes result that failed is an EMPTY byte-set
  * rather than NULL, the exact analog of the "" a failed text result returns —
  * a caller that ignores the error slot still holds something it can measure. */
 
-static unsigned char *file_bin_at(OpenEPL_Bin *b) { return (unsigned char *)(b + 1); }
-static int32_t file_bin_len(const OpenEPL_Bin *b) { return b ? b->len : 0; }
+static unsigned char *file_bin_at(Kiln_Bin *b) { return (unsigned char *)(b + 1); }
+static int32_t file_bin_len(const Kiln_Bin *b) { return b ? b->len : 0; }
 
-static void file_ret_bin(OpenEPL_Slot *ret, void *b) {
-    ret->tag = OE_SDT_BIN;
+static void file_ret_bin(Kiln_Slot *ret, void *b) {
+    ret->tag = KN_SDT_BIN;
     ret->v.ptr = b;
 }
-static void file_ret_bin_empty(OpenEPL_Slot *ret) { file_ret_bin(ret, oe_bin_new(0)); }
+static void file_ret_bin_empty(Kiln_Slot *ret) { file_ret_bin(ret, kn_bin_new(0)); }
 
 /* --- one-shot file commands ------------------------------------------- */
 
 /* file_read_text(path) -> text : the whole file, "" on failure.  Read in
  * chunks rather than by seeking to the end, so a pipe or a /proc file — which
  * report no size — read correctly too. */
-void file_read_text(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_read_text(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = file_nz(oe_arg_text(argv, 0));
+    const char *path = file_nz(kn_arg_text(argv, 0));
     FILE *f = file_fopen(path, "rb");
     int e = errno;
-    if (!f) { oe_error_set_errno(e, "open"); oe_ret_text(ret, file_empty()); return; }
+    if (!f) { kn_error_set_errno(e, "open"); kn_ret_text(ret, file_empty()); return; }
 
     long cap = 4096, len = 0;
-    char *buf = (char *)oe_malloc(cap);
-    if (!buf) { fclose(f); oe_error_set(OE_ERR_UNSUPPORTED, "out of memory"); oe_ret_text(ret, NULL); return; }
+    char *buf = (char *)kn_malloc(cap);
+    if (!buf) { fclose(f); kn_error_set(KN_ERR_UNSUPPORTED, "out of memory"); kn_ret_text(ret, NULL); return; }
     for (;;) {
         size_t got = fread(buf + len, 1, (size_t)(cap - len - 1), f);
         len += (long)got;
         if (got == 0) break;
         if (len + 1 >= cap) {
-            char *nb = (char *)oe_mrealloc(buf, cap * 2);
+            char *nb = (char *)kn_mrealloc(buf, cap * 2);
             if (!nb) break;
             buf = nb;
             cap *= 2;
@@ -248,35 +248,35 @@ void file_read_text(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     int bad = ferror(f);
     e = errno;
     fclose(f);
-    if (bad) { oe_error_set_errno(e, "read"); oe_ret_text(ret, file_empty()); return; }
+    if (bad) { kn_error_set_errno(e, "read"); kn_ret_text(ret, file_empty()); return; }
     buf[len] = '\0';
-    oe_error_clear();
-    oe_ret_text(ret, buf);
+    kn_error_clear();
+    kn_ret_text(ret, buf);
 }
 
 /* Shared by file_write_text and file_append_text. */
-static void file_put(OpenEPL_Slot *ret, OpenEPL_Slot *argv, const char *mode, const char *what) {
-    const char *path = file_nz(oe_arg_text(argv, 0));
-    const char *body = file_nz(oe_arg_text(argv, 1));
+static void file_put(Kiln_Slot *ret, Kiln_Slot *argv, const char *mode, const char *what) {
+    const char *path = file_nz(kn_arg_text(argv, 0));
+    const char *body = file_nz(kn_arg_text(argv, 1));
     FILE *f = file_fopen(path, mode);
     int e = errno;
-    if (!f) { oe_error_set_errno(e, what); oe_ret_bool(ret, 0); return; }
+    if (!f) { kn_error_set_errno(e, what); kn_ret_bool(ret, 0); return; }
     size_t n = strlen(body);
     int err = 0;
     if (n && fwrite(body, 1, n, f) != n) { err = errno ? errno : EIO; }
     /* fclose flushes, so a short write can surface here and nowhere earlier. */
     if (fclose(f) != 0 && !err) { err = errno ? errno : EIO; }
-    if (err) { oe_error_set_errno(err, "write"); oe_ret_bool(ret, 0); return; }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    if (err) { kn_error_set_errno(err, "write"); kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* file_write_text(path, content) -> bool : replaces the file. */
-void file_write_text(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_write_text(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; file_put(ret, argv, "wb", "create");
 }
 /* file_append_text(path, content) -> bool : adds to the end, creating it. */
-void file_append_text(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_append_text(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; file_put(ret, argv, "ab", "open for append");
 }
 
@@ -288,16 +288,16 @@ void file_append_text(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
  * the file is never held twice — a 200MB image read into a buffer and then
  * copied into a byte-set would peak at 400MB for no reason.  Read in chunks
  * rather than seeking to the end, so a pipe or a /proc file reads correctly. */
-void file_read_bytes(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_read_bytes(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = file_nz(oe_arg_text(argv, 0));
+    const char *path = file_nz(kn_arg_text(argv, 0));
     FILE *f = file_fopen(path, "rb");
     int e = errno;
-    if (!f) { oe_error_set_errno(e, "open"); file_ret_bin_empty(ret); return; }
+    if (!f) { kn_error_set_errno(e, "open"); file_ret_bin_empty(ret); return; }
 
     long cap = 8192, len = 0;
-    OpenEPL_Bin *b = (OpenEPL_Bin *)oe_bin_new((int32_t)cap);
-    if (!b) { fclose(f); oe_error_set(OE_ERR_UNSUPPORTED, "out of memory"); file_ret_bin_empty(ret); return; }
+    Kiln_Bin *b = (Kiln_Bin *)kn_bin_new((int32_t)cap);
+    if (!b) { fclose(f); kn_error_set(KN_ERR_UNSUPPORTED, "out of memory"); file_ret_bin_empty(ret); return; }
     for (;;) {
         size_t got = fread(file_bin_at(b) + len, 1, (size_t)(cap - len), f);
         len += (long)got;
@@ -306,47 +306,47 @@ void file_read_bytes(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
          * has no honest answer here — refuse it rather than wrap the header. */
         if (cap > (long)INT32_MAX / 2) {
             fclose(f);
-            oe_error_set(OE_ERR_OUT_OF_RANGE, "file is too large to hold in one byte-set");
+            kn_error_set(KN_ERR_OUT_OF_RANGE, "file is too large to hold in one byte-set");
             file_ret_bin_empty(ret);
             return;
         }
-        OpenEPL_Bin *nb = (OpenEPL_Bin *)oe_mrealloc(b, (long)sizeof(OpenEPL_Bin) + cap * 2);
-        if (!nb) { fclose(f); oe_error_set(OE_ERR_UNSUPPORTED, "out of memory"); file_ret_bin_empty(ret); return; }
+        Kiln_Bin *nb = (Kiln_Bin *)kn_mrealloc(b, (long)sizeof(Kiln_Bin) + cap * 2);
+        if (!nb) { fclose(f); kn_error_set(KN_ERR_UNSUPPORTED, "out of memory"); file_ret_bin_empty(ret); return; }
         b = nb;
         cap *= 2;
     }
     int bad = ferror(f);
     e = errno;
     fclose(f);
-    if (bad) { oe_error_set_errno(e, "read"); file_ret_bin_empty(ret); return; }
+    if (bad) { kn_error_set_errno(e, "read"); file_ret_bin_empty(ret); return; }
     b->dims = 1;
     b->len = (int32_t)len;                 /* the tail of the allocation is slack */
-    oe_error_clear();
+    kn_error_clear();
     file_ret_bin(ret, b);
 }
 
 /* Shared by file_write_bytes and file_append_bytes. */
-static void file_put_bytes(OpenEPL_Slot *ret, OpenEPL_Slot *argv, const char *mode, const char *what) {
-    const char *path = file_nz(oe_arg_text(argv, 0));
-    OpenEPL_Bin *b = (OpenEPL_Bin *)argv[1].v.ptr;
+static void file_put_bytes(Kiln_Slot *ret, Kiln_Slot *argv, const char *mode, const char *what) {
+    const char *path = file_nz(kn_arg_text(argv, 0));
+    Kiln_Bin *b = (Kiln_Bin *)argv[1].v.ptr;
     int32_t n = file_bin_len(b);
     FILE *f = file_fopen(path, mode);
     int e = errno;
-    if (!f) { oe_error_set_errno(e, what); oe_ret_bool(ret, 0); return; }
+    if (!f) { kn_error_set_errno(e, what); kn_ret_bool(ret, 0); return; }
     int err = 0;
     if (n && fwrite(file_bin_at(b), 1, (size_t)n, f) != (size_t)n) { err = errno ? errno : EIO; }
     if (fclose(f) != 0 && !err) { err = errno ? errno : EIO; }
-    if (err) { oe_error_set_errno(err, "write"); oe_ret_bool(ret, 0); return; }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    if (err) { kn_error_set_errno(err, "write"); kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* file_write_bytes(path, content) -> bool : replaces the file. */
-void file_write_bytes(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_write_bytes(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; file_put_bytes(ret, argv, "wb", "create");
 }
 /* file_append_bytes(path, content) -> bool : adds to the end, creating it. */
-void file_append_bytes(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_append_bytes(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; file_put_bytes(ret, argv, "ab", "open for append");
 }
 
@@ -354,62 +354,62 @@ void file_append_bytes(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
  * clear the slot and return false, so `false, code 0` means a genuine no. */
 static int file_absent(int e) { return e == ENOENT || e == ENOTDIR; }
 
-static void file_stat_is(OpenEPL_Slot *ret, OpenEPL_Slot *argv, int want_dir) {
-    const char *path = file_nz(oe_arg_text(argv, 0));
+static void file_stat_is(Kiln_Slot *ret, Kiln_Slot *argv, int want_dir) {
+    const char *path = file_nz(kn_arg_text(argv, 0));
     file_stat_t st;
     int rc = file_stat(path, &st);
     int e = errno;
     if (rc != 0) {
-        if (file_absent(e)) { oe_error_clear(); oe_ret_bool(ret, 0); return; }
-        oe_error_set_errno(e, "stat");
-        oe_ret_bool(ret, 0);
+        if (file_absent(e)) { kn_error_clear(); kn_ret_bool(ret, 0); return; }
+        kn_error_set_errno(e, "stat");
+        kn_ret_bool(ret, 0);
         return;
     }
-    oe_error_clear();
-    oe_ret_bool(ret, want_dir ? FILE_ISDIR(st) != 0 : FILE_ISREG(st) != 0);
+    kn_error_clear();
+    kn_ret_bool(ret, want_dir ? FILE_ISDIR(st) != 0 : FILE_ISREG(st) != 0);
 }
 
 /* file_exists(path) -> bool : true for a regular file.  A directory is not a
  * file, so this is false for one — ask dir_exists instead. */
-void file_exists(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_exists(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; file_stat_is(ret, argv, 0);
 }
 
 /* file_size(path) -> int64 : bytes, -1 on failure. */
-void file_size(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_size(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = file_nz(oe_arg_text(argv, 0));
+    const char *path = file_nz(kn_arg_text(argv, 0));
     file_stat_t st;
     int rc = file_stat(path, &st);
     int e = errno;
-    if (rc != 0) { oe_error_set_errno(e, "stat"); oe_ret_int64(ret, -1); return; }
-    oe_error_clear();
-    oe_ret_int64(ret, (int64_t)st.st_size);
+    if (rc != 0) { kn_error_set_errno(e, "stat"); kn_ret_int64(ret, -1); return; }
+    kn_error_clear();
+    kn_ret_int64(ret, (int64_t)st.st_size);
 }
 
 /* file_modified(path) -> int64 : last-modified time in seconds since the
  * epoch, the same scale core's now() and format_time() use.  -1 on failure. */
-void file_modified(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_modified(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = file_nz(oe_arg_text(argv, 0));
+    const char *path = file_nz(kn_arg_text(argv, 0));
     file_stat_t st;
     int rc = file_stat(path, &st);
     int e = errno;
-    if (rc != 0) { oe_error_set_errno(e, "stat"); oe_ret_int64(ret, -1); return; }
-    oe_error_clear();
-    oe_ret_int64(ret, (int64_t)st.st_mtime);
+    if (rc != 0) { kn_error_set_errno(e, "stat"); kn_ret_int64(ret, -1); return; }
+    kn_error_clear();
+    kn_ret_int64(ret, (int64_t)st.st_mtime);
 }
 
 /* file_delete(path) -> bool.  unlink, not remove: a directory must be refused
  * rather than quietly removed by a command whose name says "file". */
-void file_delete(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_delete(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = file_nz(oe_arg_text(argv, 0));
+    const char *path = file_nz(kn_arg_text(argv, 0));
     int rc = file_unlink(path);
     int e = errno;
-    if (rc != 0) { oe_error_set_errno(e, "delete"); oe_ret_bool(ret, 0); return; }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    if (rc != 0) { kn_error_set_errno(e, "delete"); kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* Byte-for-byte copy.  Returns 0 on success, otherwise an errno value, and
@@ -439,24 +439,24 @@ static int file_copy_bytes(const char *from, const char *to, const char **what) 
 
 /* file_copy(from, to) -> bool : contents only; permissions and timestamps are
  * whatever a newly created file gets. */
-void file_copy(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_copy(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *from = file_nz(oe_arg_text(argv, 0));
-    const char *to   = file_nz(oe_arg_text(argv, 1));
+    const char *from = file_nz(kn_arg_text(argv, 0));
+    const char *to   = file_nz(kn_arg_text(argv, 1));
     const char *what = "copy";
     int err = file_copy_bytes(from, to, &what);
-    if (err) { oe_error_set_errno(err, what); oe_ret_bool(ret, 0); return; }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    if (err) { kn_error_set_errno(err, what); kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* file_move(from, to) -> bool.  rename() first — it is atomic and cheap — and
  * fall back to copy-then-delete only for the one case it cannot do, a move
  * across filesystems. */
-void file_move(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_move(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *from = file_nz(oe_arg_text(argv, 0));
-    const char *to   = file_nz(oe_arg_text(argv, 1));
+    const char *from = file_nz(kn_arg_text(argv, 0));
+    const char *to   = file_nz(kn_arg_text(argv, 1));
 #ifdef _WIN32
     /* MoveFileExW does the cross-volume copy itself, so the fallback below is
      * POSIX-only: Windows never reports EXDEV to fall back on.  REPLACE_EXISTING
@@ -464,8 +464,8 @@ void file_move(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     wchar_t *wf = file_to_wide(from), *wt = file_to_wide(to);
     if (!wf || !wt) {
         free(wf); free(wt);
-        oe_error_set(OE_ERR_INVALID_ARG, "move: path is not valid UTF-8");
-        oe_ret_bool(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "move: path is not valid UTF-8");
+        kn_ret_bool(ret, 0);
         return;
     }
     BOOL ok = MoveFileExW(wf, wt, MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING);
@@ -474,37 +474,37 @@ void file_move(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     if (!ok) {
         char msg[96];
         snprintf(msg, sizeof msg, "move: Windows error %lu", (unsigned long)code);
-        oe_error_set((int32_t)code, msg);
-        oe_ret_bool(ret, 0);
+        kn_error_set((int32_t)code, msg);
+        kn_ret_bool(ret, 0);
         return;
     }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 #else
     int rc = rename(from, to);
     int e = errno;
-    if (rc == 0) { oe_error_clear(); oe_ret_bool(ret, 1); return; }
-    if (e != EXDEV) { oe_error_set_errno(e, "move"); oe_ret_bool(ret, 0); return; }
+    if (rc == 0) { kn_error_clear(); kn_ret_bool(ret, 1); return; }
+    if (e != EXDEV) { kn_error_set_errno(e, "move"); kn_ret_bool(ret, 0); return; }
 
     const char *what = "move";
     int err = file_copy_bytes(from, to, &what);
-    if (err) { oe_error_set_errno(err, what); oe_ret_bool(ret, 0); return; }
+    if (err) { kn_error_set_errno(err, what); kn_ret_bool(ret, 0); return; }
     rc = file_unlink(from);
     e = errno;
-    if (rc != 0) { oe_error_set_errno(e, "delete source"); oe_ret_bool(ret, 0); return; }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    if (rc != 0) { kn_error_set_errno(e, "delete source"); kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 #endif
 }
 
 /* file_line_count(path) -> int : -1 on failure.  A last line without a
  * trailing newline still counts, so the number matches what an editor shows. */
-void file_line_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_line_count(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = file_nz(oe_arg_text(argv, 0));
+    const char *path = file_nz(kn_arg_text(argv, 0));
     FILE *f = file_fopen(path, "rb");
     int e = errno;
-    if (!f) { oe_error_set_errno(e, "open"); oe_ret_int(ret, -1); return; }
+    if (!f) { kn_error_set_errno(e, "open"); kn_ret_int(ret, -1); return; }
 
     char buf[8192];
     long lines = 0;
@@ -518,10 +518,10 @@ void file_line_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     int bad = ferror(f);
     e = errno;
     fclose(f);
-    if (bad) { oe_error_set_errno(e, "read"); oe_ret_int(ret, -1); return; }
+    if (bad) { kn_error_set_errno(e, "read"); kn_ret_int(ret, -1); return; }
     if (last != '\n') lines++;
-    oe_error_clear();
-    oe_ret_int(ret, (int32_t)lines);
+    kn_error_clear();
+    kn_ret_int(ret, (int32_t)lines);
 }
 
 /* --- handles ----------------------------------------------------------- */
@@ -532,45 +532,45 @@ static void file_close_fn(void *payload) {
 
 /* file_open(path, mode) -> int : a handle, 0 on failure.  The mode is a word,
  * not a punctuation soup: "read", "write" or "append". */
-void file_open(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_open(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = file_nz(oe_arg_text(argv, 0));
-    const char *mode = file_nz(oe_arg_text(argv, 1));
+    const char *path = file_nz(kn_arg_text(argv, 0));
+    const char *mode = file_nz(kn_arg_text(argv, 1));
     const char *cmode = NULL;
     if      (strcmp(mode, "read")   == 0) cmode = "rb";
     else if (strcmp(mode, "write")  == 0) cmode = "wb";
     else if (strcmp(mode, "append") == 0) cmode = "ab";
     if (!cmode) {
-        oe_error_set(OE_ERR_INVALID_ARG, "mode must be \"read\", \"write\" or \"append\"");
-        oe_ret_int(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "mode must be \"read\", \"write\" or \"append\"");
+        kn_ret_int(ret, 0);
         return;
     }
     FILE *f = file_fopen(path, cmode);
     int e = errno;
-    if (!f) { oe_error_set_errno(e, "open"); oe_ret_int(ret, 0); return; }
+    if (!f) { kn_error_set_errno(e, "open"); kn_ret_int(ret, 0); return; }
 
-    int32_t h = oe_handle_new(OE_HK_FILE, f, file_close_fn);
-    if (h == 0) { fclose(f); oe_ret_int(ret, 0); return; }  /* slot set by the table */
-    oe_error_clear();
-    oe_ret_int(ret, h);
+    int32_t h = kn_handle_new(KN_HK_FILE, f, file_close_fn);
+    if (h == 0) { fclose(f); kn_ret_int(ret, 0); return; }  /* slot set by the table */
+    kn_error_clear();
+    kn_ret_int(ret, h);
 }
 
 /* file_read_line(handle) -> text : the next line without its newline, "" at
  * the end of the file.  A blank line and the end of the file both read "",
  * which is why file_at_end ships next to this one. */
-void file_read_line(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_read_line(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    FILE *f = (FILE *)oe_handle_resolve(oe_arg_int(argv, 0), OE_HK_FILE);
-    if (!f) { oe_ret_text(ret, file_empty()); return; }   /* slot set by the table */
+    FILE *f = (FILE *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_FILE);
+    if (!f) { kn_ret_text(ret, file_empty()); return; }   /* slot set by the table */
 
     long cap = 128, len = 0;
-    char *buf = (char *)oe_malloc(cap);
-    if (!buf) { oe_error_set(OE_ERR_UNSUPPORTED, "out of memory"); oe_ret_text(ret, NULL); return; }
+    char *buf = (char *)kn_malloc(cap);
+    if (!buf) { kn_error_set(KN_ERR_UNSUPPORTED, "out of memory"); kn_ret_text(ret, NULL); return; }
     for (;;) {
         int c = getc(f);
         if (c == EOF || c == '\n') break;
         if (len + 1 >= cap) {
-            char *nb = (char *)oe_mrealloc(buf, cap * 2);
+            char *nb = (char *)kn_mrealloc(buf, cap * 2);
             if (!nb) break;
             buf = nb;
             cap *= 2;
@@ -579,84 +579,84 @@ void file_read_line(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     }
     int bad = ferror(f);
     int e = errno;
-    if (bad) { oe_error_set_errno(e, "read"); oe_ret_text(ret, file_empty()); return; }
+    if (bad) { kn_error_set_errno(e, "read"); kn_ret_text(ret, file_empty()); return; }
     /* A trailing CR is stripped so a file written on Windows reads the same
      * here as it does there. */
     if (len > 0 && buf[len - 1] == '\r') len--;
     buf[len] = '\0';
-    oe_error_clear();
-    oe_ret_text(ret, buf);
+    kn_error_clear();
+    kn_ret_text(ret, buf);
 }
 
 /* file_at_end(handle) -> bool : true when the next read would find nothing.
  * Peeks one character and puts it back, so it can be asked before a read
  * without consuming anything — feof() alone only turns true after a read has
  * already run off the end. */
-void file_at_end(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_at_end(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    FILE *f = (FILE *)oe_handle_resolve(oe_arg_int(argv, 0), OE_HK_FILE);
-    if (!f) { oe_ret_bool(ret, 0); return; }              /* slot set by the table */
+    FILE *f = (FILE *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_FILE);
+    if (!f) { kn_ret_bool(ret, 0); return; }              /* slot set by the table */
     int c = getc(f);
     int e = errno;
     if (c == EOF) {
-        if (ferror(f)) { oe_error_set_errno(e, "read"); oe_ret_bool(ret, 0); return; }
-        oe_error_clear();
-        oe_ret_bool(ret, 1);
+        if (ferror(f)) { kn_error_set_errno(e, "read"); kn_ret_bool(ret, 0); return; }
+        kn_error_clear();
+        kn_ret_bool(ret, 1);
         return;
     }
     ungetc(c, f);
-    oe_error_clear();
-    oe_ret_bool(ret, 0);
+    kn_error_clear();
+    kn_ret_bool(ret, 0);
 }
 
 /* file_write_line(handle, line) -> bool : the line plus a newline. */
-void file_write_line(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_write_line(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    FILE *f = (FILE *)oe_handle_resolve(oe_arg_int(argv, 0), OE_HK_FILE);
-    if (!f) { oe_ret_bool(ret, 0); return; }              /* slot set by the table */
-    const char *line = file_nz(oe_arg_text(argv, 1));
+    FILE *f = (FILE *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_FILE);
+    if (!f) { kn_ret_bool(ret, 0); return; }              /* slot set by the table */
+    const char *line = file_nz(kn_arg_text(argv, 1));
     int rc = fputs(line, f);
     int e = errno;
     if (rc != EOF) { rc = fputc('\n', f); e = errno; }
-    if (rc == EOF) { oe_error_set_errno(e ? e : EIO, "write"); oe_ret_bool(ret, 0); return; }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    if (rc == EOF) { kn_error_set_errno(e ? e : EIO, "write"); kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* file_close(handle) -> bool.  Closing twice is a failure, not a crash: the
  * handle table bumps a generation and reports a stale handle. */
-void file_close(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_close(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     /* The table clears or sets the slot itself, so every family reports a bad
      * handle in the same words. */
-    oe_ret_bool(ret, oe_handle_close(oe_arg_int(argv, 0), OE_HK_FILE));
+    kn_ret_bool(ret, kn_handle_close(kn_arg_int(argv, 0), KN_HK_FILE));
 }
 
 /* file_close_all() -> int : how many were still open.  The safety net for a
  * program that lost track; exit closes them anyway. */
-void file_close_all(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void file_close_all(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
-    oe_ret_int(ret, oe_handle_close_kind(OE_HK_FILE));
+    kn_ret_int(ret, kn_handle_close_kind(KN_HK_FILE));
 }
 
 /* --- directories ------------------------------------------------------- */
 
 /* dir_exists(path) -> bool. */
-void dir_exists(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void dir_exists(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; file_stat_is(ret, argv, 1);
 }
 
 /* dir_create(path) -> bool : creates missing parents too, and succeeds when
  * the directory is already there — asking for a directory to exist should not
  * fail because it does. */
-void dir_create(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void dir_create(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = file_nz(oe_arg_text(argv, 0));
+    const char *path = file_nz(kn_arg_text(argv, 0));
     size_t n = strlen(path);
-    if (n == 0) { oe_error_set(OE_ERR_INVALID_ARG, "empty path"); oe_ret_bool(ret, 0); return; }
+    if (n == 0) { kn_error_set(KN_ERR_INVALID_ARG, "empty path"); kn_ret_bool(ret, 0); return; }
 
     char *work = (char *)malloc(n + 1);      /* bookkeeping, not program data */
-    if (!work) { oe_error_set(OE_ERR_UNSUPPORTED, "out of memory"); oe_ret_bool(ret, 0); return; }
+    if (!work) { kn_error_set(KN_ERR_UNSUPPORTED, "out of memory"); kn_ret_bool(ret, 0); return; }
     memcpy(work, path, n + 1);
 
     /* Start past the root: "C:" and "\\\\server\\share" are not directories that
@@ -670,8 +670,8 @@ void dir_create(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         int e = errno;
         if (rc != 0 && e != EEXIST) {
             free(work);
-            oe_error_set_errno(e, "create directory");
-            oe_ret_bool(ret, 0);
+            kn_error_set_errno(e, "create directory");
+            kn_ret_bool(ret, 0);
             return;
         }
         work[i] = saved;
@@ -681,55 +681,55 @@ void dir_create(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     file_stat_t st;
     int rc = file_stat(path, &st);
     int e = errno;
-    if (rc != 0) { oe_error_set_errno(e, "create directory"); oe_ret_bool(ret, 0); return; }
+    if (rc != 0) { kn_error_set_errno(e, "create directory"); kn_ret_bool(ret, 0); return; }
     if (!FILE_ISDIR(st)) {
-        oe_error_set_errno(ENOTDIR, "create directory");
-        oe_ret_bool(ret, 0);
+        kn_error_set_errno(ENOTDIR, "create directory");
+        kn_ret_bool(ret, 0);
         return;
     }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* dir_delete(path) -> bool : the directory must be empty.  There is no
  * recursive delete here on purpose — one mistyped path should not be able to
  * erase a tree. */
-void dir_delete(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void dir_delete(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = file_nz(oe_arg_text(argv, 0));
+    const char *path = file_nz(kn_arg_text(argv, 0));
     int rc = file_rmdir(path);
     int e = errno;
-    if (rc != 0) { oe_error_set_errno(e, "delete directory"); oe_ret_bool(ret, 0); return; }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    if (rc != 0) { kn_error_set_errno(e, "delete directory"); kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* dir_current() -> text : the working directory, "" on failure. */
-void dir_current(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void dir_current(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
     char *p = file_getcwd_text();
     int e = errno;
-    if (!p) { oe_error_set_errno(e, "current directory"); oe_ret_text(ret, file_empty()); return; }
-    oe_error_clear();
-    oe_ret_text(ret, p);
+    if (!p) { kn_error_set_errno(e, "current directory"); kn_ret_text(ret, file_empty()); return; }
+    kn_error_clear();
+    kn_ret_text(ret, p);
 }
 
 /* dir_set_current(path) -> bool. */
-void dir_set_current(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void dir_set_current(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = file_nz(oe_arg_text(argv, 0));
+    const char *path = file_nz(kn_arg_text(argv, 0));
     int rc = file_chdir(path);
     int e = errno;
-    if (rc != 0) { oe_error_set_errno(e, "change directory"); oe_ret_bool(ret, 0); return; }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    if (rc != 0) { kn_error_set_errno(e, "change directory"); kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* The listing snapshot.  A directory changes under a loop that reads it, so
  * dir_entry_count takes a sorted snapshot and dir_entry only reads it: a loop
  * sees one stable view, and refreshing is an explicit act — calling the count
  * again.  Plain malloc, like the handle table: this is bookkeeping, not
- * program data, and must not be freed by oe_free_all() at exit. */
+ * program data, and must not be freed by kn_free_all() at exit. */
 static char  *g_snap_path = NULL;
 static char **g_snap = NULL;
 static long   g_snap_n = 0;
@@ -768,9 +768,9 @@ static int file_snap_push(const char *name, long *cap) {
 
 /* dir_entry_count(path) -> int : -1 on failure.  Re-reads the directory and
  * re-takes the snapshot that dir_entry reads. */
-void dir_entry_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void dir_entry_count(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = file_nz(oe_arg_text(argv, 0));
+    const char *path = file_nz(kn_arg_text(argv, 0));
     long cap = 0;
 
 #ifdef _WIN32
@@ -779,7 +779,7 @@ void dir_entry_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
      * POSIX one. */
     size_t pn = strlen(path);
     char *pattern = (char *)malloc(pn + 3);
-    if (!pattern) { file_snap_free(); oe_error_set(OE_ERR_UNSUPPORTED, "out of memory"); oe_ret_int(ret, -1); return; }
+    if (!pattern) { file_snap_free(); kn_error_set(KN_ERR_UNSUPPORTED, "out of memory"); kn_ret_int(ret, -1); return; }
     memcpy(pattern, path, pn);
     size_t w = pn;
     if (w == 0 || !file_is_sep(pattern[w - 1])) pattern[w++] = FILE_SEP;
@@ -787,7 +787,7 @@ void dir_entry_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     pattern[w] = '\0';
     wchar_t *wide = file_to_wide(pattern);
     free(pattern);
-    if (!wide) { file_snap_free(); oe_error_set(OE_ERR_INVALID_ARG, "open directory: path is not valid UTF-8"); oe_ret_int(ret, -1); return; }
+    if (!wide) { file_snap_free(); kn_error_set(KN_ERR_INVALID_ARG, "open directory: path is not valid UTF-8"); kn_ret_int(ret, -1); return; }
 
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW(wide, &fd);
@@ -797,8 +797,8 @@ void dir_entry_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         file_snap_free();                    /* a failed listing leaves none */
         char msg[96];
         snprintf(msg, sizeof msg, "open directory: Windows error %lu", (unsigned long)code);
-        oe_error_set((int32_t)code, msg);
-        oe_ret_int(ret, -1);
+        kn_error_set((int32_t)code, msg);
+        kn_ret_int(ret, -1);
         return;
     }
     file_snap_free();
@@ -807,8 +807,8 @@ void dir_entry_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         if (!name || !file_snap_push(name, &cap)) {
             FindClose(h);
             file_snap_free();
-            oe_error_set(OE_ERR_UNSUPPORTED, "out of memory");
-            oe_ret_int(ret, -1);
+            kn_error_set(KN_ERR_UNSUPPORTED, "out of memory");
+            kn_ret_int(ret, -1);
             return;
         }
     } while (FindNextFileW(h, &fd));
@@ -818,8 +818,8 @@ void dir_entry_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         file_snap_free();
         char msg[96];
         snprintf(msg, sizeof msg, "read directory: Windows error %lu", (unsigned long)end);
-        oe_error_set((int32_t)end, msg);
-        oe_ret_int(ret, -1);
+        kn_error_set((int32_t)end, msg);
+        kn_ret_int(ret, -1);
         return;
     }
 #else
@@ -827,8 +827,8 @@ void dir_entry_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     int e = errno;
     if (!d) {
         file_snap_free();                    /* a failed listing leaves none */
-        oe_error_set_errno(e, "open directory");
-        oe_ret_int(ret, -1);
+        kn_error_set_errno(e, "open directory");
+        kn_ret_int(ret, -1);
         return;
     }
     file_snap_free();
@@ -839,8 +839,8 @@ void dir_entry_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         if (!file_snap_push(de->d_name, &cap)) {
             closedir(d);
             file_snap_free();
-            oe_error_set(OE_ERR_UNSUPPORTED, "out of memory");
-            oe_ret_int(ret, -1);
+            kn_error_set(KN_ERR_UNSUPPORTED, "out of memory");
+            kn_ret_int(ret, -1);
             return;
         }
         errno = 0;
@@ -849,8 +849,8 @@ void dir_entry_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     closedir(d);
     if (read_err != 0) {
         file_snap_free();
-        oe_error_set_errno(read_err, "read directory");
-        oe_ret_int(ret, -1);
+        kn_error_set_errno(read_err, "read directory");
+        kn_ret_int(ret, -1);
         return;
     }
 #endif
@@ -861,11 +861,11 @@ void dir_entry_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
 
     size_t keep = strlen(path);
     g_snap_path = (char *)malloc(keep + 1);
-    if (!g_snap_path) { file_snap_free(); oe_error_set(OE_ERR_UNSUPPORTED, "out of memory"); oe_ret_int(ret, -1); return; }
+    if (!g_snap_path) { file_snap_free(); kn_error_set(KN_ERR_UNSUPPORTED, "out of memory"); kn_ret_int(ret, -1); return; }
     memcpy(g_snap_path, path, keep + 1);
 
-    oe_error_clear();
-    oe_ret_int(ret, (int32_t)g_snap_n);
+    kn_error_clear();
+    kn_ret_int(ret, (int32_t)g_snap_n);
 }
 
 /* dir_entry(path, index) -> text : one name from the snapshot, without its
@@ -873,18 +873,18 @@ void dir_entry_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
  * and no real entry is ever named "".  Asking for a path that was not the last
  * one counted IS an error, because the answer would otherwise be silently
  * about a different directory. */
-void dir_entry(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void dir_entry(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = file_nz(oe_arg_text(argv, 0));
-    int32_t i = oe_arg_int(argv, 1);
+    const char *path = file_nz(kn_arg_text(argv, 0));
+    int32_t i = kn_arg_int(argv, 1);
     if (!g_snap_path || strcmp(g_snap_path, path) != 0) {
-        oe_error_set(OE_ERR_INVALID_ARG, "no listing for this path; call dir_entry_count first");
-        oe_ret_text(ret, file_empty());
+        kn_error_set(KN_ERR_INVALID_ARG, "no listing for this path; call dir_entry_count first");
+        kn_ret_text(ret, file_empty());
         return;
     }
-    if (i < 1 || (long)i > g_snap_n) { oe_error_clear(); oe_ret_text(ret, file_empty()); return; }
-    oe_error_clear();
-    oe_ret_text(ret, file_text(g_snap[i - 1]));
+    if (i < 1 || (long)i > g_snap_n) { kn_error_clear(); kn_ret_text(ret, file_empty()); return; }
+    kn_error_clear();
+    kn_ret_text(ret, file_text(g_snap[i - 1]));
 }
 
 /* --- paths ------------------------------------------------------------
@@ -894,22 +894,22 @@ void dir_entry(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
 
 /* path_join(a, b) -> text : one separator, never two.  An absolute b wins,
  * which is what every other path_join in the world does. */
-void path_join(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void path_join(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *a = file_nz(oe_arg_text(argv, 0));
-    const char *b = file_nz(oe_arg_text(argv, 1));
+    const char *a = file_nz(kn_arg_text(argv, 0));
+    const char *b = file_nz(kn_arg_text(argv, 1));
     /* "rooted" rather than "starts with a separator": on Windows "C:\\x" is
      * absolute and has no leading separator at all. */
-    if (file_root_len(b) > 0 || *a == '\0') { oe_ret_text(ret, file_text(b)); return; }
-    if (*b == '\0') { oe_ret_text(ret, file_text(a)); return; }
+    if (file_root_len(b) > 0 || *a == '\0') { kn_ret_text(ret, file_text(b)); return; }
+    if (*b == '\0') { kn_ret_text(ret, file_text(a)); return; }
     size_t la = strlen(a), lb = strlen(b);
     int sep = !file_is_sep(a[la - 1]);
-    char *o = (char *)oe_malloc((long)(la + (size_t)sep + lb + 1));
-    if (!o) { oe_ret_text(ret, NULL); return; }
+    char *o = (char *)kn_malloc((long)(la + (size_t)sep + lb + 1));
+    if (!o) { kn_ret_text(ret, NULL); return; }
     memcpy(o, a, la);
     if (sep) o[la] = FILE_SEP;
     memcpy(o + la + sep, b, lb + 1);
-    oe_ret_text(ret, o);
+    kn_ret_text(ret, o);
 }
 
 /* Where the last component starts, ignoring trailing slashes. */
@@ -926,43 +926,43 @@ static void file_split(const char *p, size_t *base, size_t *end) {
 }
 
 /* path_name(path) -> text : the last component. */
-void path_name(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void path_name(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *p = file_nz(oe_arg_text(argv, 0));
+    const char *p = file_nz(kn_arg_text(argv, 0));
     size_t b, e;
     file_split(p, &b, &e);
-    oe_ret_text(ret, file_text_n(p + b, e - b));
+    kn_ret_text(ret, file_text_n(p + b, e - b));
 }
 
 /* path_parent(path) -> text : everything before the last component, "" when
  * there is none.  "" joins as nothing, so path_join(path_parent(x), y) does
  * the right thing for a bare filename. */
-void path_parent(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void path_parent(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *p = file_nz(oe_arg_text(argv, 0));
+    const char *p = file_nz(kn_arg_text(argv, 0));
     size_t b, e;
     file_split(p, &b, &e);
     (void)e;
     size_t root = file_root_len(p);
-    if (b == 0) { oe_ret_text(ret, file_text_n("", 0)); return; }
+    if (b == 0) { kn_ret_text(ret, file_text_n("", 0)); return; }
     /* At the root the parent IS the root, separator included — dropping it
      * would turn "C:\\x" into a path relative to the drive's own directory. */
-    if (b <= root) { oe_ret_text(ret, file_text_n(p, root)); return; }
-    oe_ret_text(ret, file_text_n(p, b - 1));            /* drop the separator */
+    if (b <= root) { kn_ret_text(ret, file_text_n(p, root)); return; }
+    kn_ret_text(ret, file_text_n(p, b - 1));            /* drop the separator */
 }
 
 /* path_extension(path) -> text : after the last dot of the last component,
  * without the dot.  A name that only begins with a dot has no extension —
  * ".bashrc" is a hidden file, not a "bashrc" file. */
-void path_extension(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void path_extension(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *p = file_nz(oe_arg_text(argv, 0));
+    const char *p = file_nz(kn_arg_text(argv, 0));
     size_t b, e;
     file_split(p, &b, &e);
     size_t dot = e;
     for (size_t i = e; i > b; i--) if (p[i - 1] == '.') { dot = i - 1; break; }
-    if (dot == e || dot == b) { oe_ret_text(ret, file_text_n("", 0)); return; }
-    oe_ret_text(ret, file_text_n(p + dot + 1, e - dot - 1));
+    if (dot == e || dot == b) { kn_ret_text(ret, file_text_n("", 0)); return; }
+    kn_ret_text(ret, file_text_n(p + dot + 1, e - dot - 1));
 }
 
 /* path_absolute(path) -> text : the path rooted at the working directory, with
@@ -970,9 +970,9 @@ void path_extension(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
  * a path that does not exist yet, and "where would I write this?" is a
  * question about text, not about what is on disk.  It follows that a symbolic
  * link is not resolved. */
-void path_absolute(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void path_absolute(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *p = file_nz(oe_arg_text(argv, 0));
+    const char *p = file_nz(kn_arg_text(argv, 0));
     char cwd[4096];
     const char *parts[2];
     int np = 0;
@@ -981,15 +981,15 @@ void path_absolute(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         if (!file_getcwd_buf(cwd, sizeof cwd)) {
             /* Infallible by contract: hand back what we were given rather than
              * set an error slot a path command is not allowed to touch. */
-            oe_ret_text(ret, file_text(p));
+            kn_ret_text(ret, file_text(p));
             return;
         }
         need += strlen(cwd) + 1;
         parts[np++] = cwd;
     }
     parts[np++] = p;
-    char *o = (char *)oe_malloc((long)need);
-    if (!o) { oe_ret_text(ret, NULL); return; }
+    char *o = (char *)kn_malloc((long)need);
+    if (!o) { kn_ret_text(ret, NULL); return; }
 
     /* The root is copied verbatim from whichever part supplies it, so a drive
      * letter or a UNC share survives intact and ".." can never rewind past it.
@@ -1020,5 +1020,5 @@ void path_absolute(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         }
     }
     o[w] = '\0';                        /* w >= root: the root is always there */
-    oe_ret_text(ret, o);
+    kn_ret_text(ret, o);
 }

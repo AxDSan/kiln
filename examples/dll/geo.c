@@ -1,14 +1,14 @@
 /* A tiny C library for the c-struct record tests: a real C struct passed by
  * pointer across the `dll` boundary and mutated in place.
  *
- * `Point` is the C side of an OpenEPL `record Point is c (x: int, y: int)` —
+ * `Point` is the C side of an Kiln `record Point is c (x: int, y: int)` —
  * two `int`s, natural layout, `sizeof` 8. `move_point` takes a pointer to one
- * and shifts it, the plainest proof that OpenEPL handed C the address of a real
- * struct: C reads and writes the same bytes OpenEPL laid out.
+ * and shifts it, the plainest proof that Kiln handed C the address of a real
+ * struct: C reads and writes the same bytes Kiln laid out.
  *
  * `Mixed` matches `record Mixed is c (a: byte, b: int, c: byte, d: int64)`.
  * The reference helpers report what this C compiler computes for its size and
- * field offsets, so the test can hold OpenEPL's own layout to clang's. */
+ * field offsets, so the test can hold Kiln's own layout to clang's. */
 #include <stddef.h>
 #include <stdint.h>
 
@@ -38,7 +38,7 @@ typedef struct {
 
 void raise_flag(Flags *f) { f->on = 7; }
 
-/* The reference numbers the test compares OpenEPL's `size of` / offsets to. */
+/* The reference numbers the test compares Kiln's `size of` / offsets to. */
 long long geo_mixed_sizeof(void) { return (long long)sizeof(Mixed); }
 long long geo_mixed_offset_a(void) { return (long long)offsetof(Mixed, a); }
 long long geo_mixed_offset_b(void) { return (long long)offsetof(Mixed, b); }

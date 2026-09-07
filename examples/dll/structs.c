@@ -2,10 +2,10 @@
  * Win32 header is full of — a struct nested by value, 16-bit `WORD` fields, a
  * fixed byte array, a `float`.
  *
- * Each type here is the C spelling of a `record ... is c` in `cstruct2.oir`,
+ * Each type here is the C spelling of a `record ... is c` in `cstruct2.kiln`,
  * and each `*_sizeof` / `*_offset_*` helper reports what this C compiler
- * computes for it. The test compares those numbers to OpenEPL's own `size of`
- * and to what OpenEPL reads at its own offsets, so the layout is held to the C
+ * computes for it. The test compares those numbers to Kiln's own `size of`
+ * and to what Kiln reads at its own offsets, so the layout is held to the C
  * compiler's rather than to a table written by hand. */
 #include <stddef.h>
 #include <stdint.h>
@@ -46,8 +46,8 @@ typedef struct {
     float value;
 } SFloatBox;
 
-/* Fill every field of a `MSG` through the pointer OpenEPL hands over, so the
- * OpenEPL side reading `m.pt.x` back proves the nested offset agrees. */
+/* Fill every field of a `MSG` through the pointer Kiln hands over, so the
+ * Kiln side reading `m.pt.x` back proves the nested offset agrees. */
 void structs_fill_msg(SMsg *m) {
     m->hwnd = (void *)(intptr_t)0x1234;
     m->message = 15;
@@ -58,14 +58,14 @@ void structs_fill_msg(SMsg *m) {
     m->pt.y = 400;
 }
 
-/* memset the array member alone, leaving `n` untouched: the OpenEPL side reads
+/* memset the array member alone, leaving `n` untouched: the Kiln side reads
  * every element back and checks `n` survived, which a wrong offset or a wrong
  * stride would break. */
 void structs_paint_blob(SBlob *b, int value) {
     memset(b->bytes, value & 0xff, sizeof b->bytes);
 }
 
-/* Read the array member back the way C sees it, so a value OpenEPL wrote at
+/* Read the array member back the way C sees it, so a value Kiln wrote at
  * position `k` (counting from 1) is proved to land at C's index `k - 1`. */
 int structs_blob_byte(const SBlob *b, int index0) {
     return (int)b->bytes[index0];
@@ -82,7 +82,7 @@ void structs_move_point(SPoint *p, int dx, int dy) {
 void structs_set_float(SFloatBox *f, double value) { f->value = (float)value; }
 double structs_get_float(const SFloatBox *f) { return (double)f->value; }
 
-/* Fill the `WORD` fields, so OpenEPL reading them back unsigned is proved
+/* Fill the `WORD` fields, so Kiln reading them back unsigned is proved
  * against a C compiler that stored them as `uint16_t`. */
 void structs_fill_wndclass(SWndClass *w) {
     w->style = 3;

@@ -1,5 +1,5 @@
 //! The `win` kit's kernel32 process/thread/synchronisation half:
-//! `kits/win/kernel32_proc.oed`.
+//! `kits/win/kernel32_proc.kdecl`.
 //!
 //! Every assertion here is made against the real Windows API. The programs are
 //! cross-built for Windows through mingw's linker and run under wine, so the
@@ -10,7 +10,7 @@
 //! The kit under test is copied into a scratch directory of its own as
 //! `winproc`, and the programs say `use winproc`. That is deliberate: the `win`
 //! kit is written by several hands at once, and a fault in another subsystem's
-//! `.oed` must not be able to fail this file's proof of its own. The last test
+//! `.kdecl` must not be able to fail this file's proof of its own. The last test
 //! checks the merged `win` kit as it actually stands.
 
 use std::path::{Path, PathBuf};
@@ -33,12 +33,12 @@ fn on_path(tool: &str) -> bool {
 /// A scratch project per test, carrying a private copy of the declaration file
 /// as the one-file kit `winproc`.
 fn project(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_win_kernel32_proc_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_win_kernel32_proc_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     let kit = dir.join("kits").join("winproc");
     std::fs::create_dir_all(&kit).expect("create the scratch kit directory");
-    std::fs::copy(repo().join("kits/win/kernel32_proc.oed"), kit.join("winproc.oed"))
-        .expect("copy kernel32_proc.oed into the scratch kit");
+    std::fs::copy(repo().join("kits/win/kernel32_proc.kdecl"), kit.join("winproc.kdecl"))
+        .expect("copy kernel32_proc.kdecl into the scratch kit");
     std::fs::write(
         kit.join("lib.json"),
         "{ \"display\": \"Win kernel32 process\", \"section\": \"System\", \
@@ -51,15 +51,15 @@ fn project(tag: &str) -> PathBuf {
 /// Build `src` in `dir` for Windows. The working directory is the scratch
 /// project, so `use winproc` resolves against the copy beside it.
 fn build_for_windows(dir: &Path, src: &str, out: &str) -> PathBuf {
-    let srcpath = dir.join(format!("{out}.oir"));
+    let srcpath = dir.join(format!("{out}.kiln"));
     std::fs::write(&srcpath, src).expect("write the program source");
     let exe = dir.join(format!("{out}.exe"));
-    let output = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", srcpath.to_str().unwrap(), "--os", "windows", "-o", exe.to_str().unwrap()])
         .current_dir(dir)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(
         output.status.success(),
         "cross build failed:\n{}",
@@ -116,7 +116,7 @@ module winproc
 use winproc
 
 # The body CreateThread runs. It touches nothing but its own arithmetic: what
-# is under test is that Windows called an OpenEPL sub and kept its result as
+# is under test is that Windows called an Kiln sub and kept its result as
 # the thread's exit code.
 sub worker(parameter: ptr): int system
   return 4242
@@ -190,7 +190,7 @@ sub main
   end
   call DeleteCriticalSection(cs)
 
-  # A real Windows thread running OpenEPL code, waited on, its exit code read
+  # A real Windows thread running Kiln code, waited on, its exit code read
   # back out of a four-byte buffer.
   var tid: ptr = mem_alloc(4)
   var th: ptr = CreateThread(ptr_null(), 0, address of worker, ptr_null(), 0, tid)
@@ -499,12 +499,12 @@ fn assert_lists_the_subsystem(text: &str, what: &str) {
 #[test]
 fn commands_lists_the_kernel32_process_subsystem() {
     let dir = project("list");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["commands", "--use", "winproc"])
         .current_dir(&dir)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl commands");
+        .expect("run kiln commands");
     assert!(
         out.status.success(),
         "commands --use winproc failed: {}",
@@ -518,16 +518,16 @@ fn commands_lists_the_kernel32_process_subsystem() {
 /// once, so this test is about the merge as it stands rather than about one
 /// file: a name declared in two subsystems is reported and left to the
 /// integrator, who owns the reconciliation and has a test of its own for it.
-/// What this file will not let past is `kernel32_proc.oed` failing to parse or
+/// What this file will not let past is `kernel32_proc.kdecl` failing to parse or
 /// validate on its own account.
 #[test]
 fn the_win_kit_carries_the_kernel32_process_subsystem() {
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["commands", "--use", "win"])
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl commands");
+        .expect("run kiln commands");
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         eprintln!("the merged `win` kit does not list yet:\n{err}");
@@ -539,8 +539,8 @@ fn the_win_kit_carries_the_kernel32_process_subsystem() {
             "the merged `win` kit failed for something other than a name collision:\n{err}"
         );
         assert!(
-            !err.contains("kernel32_proc.oed:"),
-            "`kernel32_proc.oed` itself failed to parse or validate:\n{err}"
+            !err.contains("kernel32_proc.kdecl:"),
+            "`kernel32_proc.kdecl` itself failed to parse or validate:\n{err}"
         );
         return;
     }

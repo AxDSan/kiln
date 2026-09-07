@@ -33,30 +33,30 @@ fn on_path(tool: &str) -> bool {
 /// the working directory, so the library and the program share one place and
 /// two tests must not.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_indirect_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_indirect_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create the scratch directory");
     dir
 }
 
-/// Build the OpenEPL source at `src` into `dir/<name>`, returning the output.
+/// Build the Kiln source at `src` into `dir/<name>`, returning the output.
 /// The working directory is the repository, which is how `use win` finds
 /// `kits/win`.
 fn build(src: &Path, out: &Path, extra: &[&str]) -> std::process::Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_openepl"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_kiln"));
     cmd.args(["build", src.to_str().unwrap()])
         .args(extra)
         .args(["-o", out.to_str().unwrap()])
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"));
-    cmd.output().expect("run openepl build")
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"));
+    cmd.output().expect("run kiln build")
 }
 
 /// Build a one-off program written into the scratch directory, and answer
 /// whatever the compiler said. Used by the diagnostic tests, which care about
 /// the message rather than the binary.
 fn build_source(dir: &Path, body: &str) -> (bool, String) {
-    let src = dir.join("case.oir");
+    let src = dir.join("case.kiln");
     std::fs::write(&src, body).expect("write the case");
     let out = build(&src, &dir.join("case.bin"), &[]);
     let mut said = String::from_utf8_lossy(&out.stdout).into_owned();
@@ -66,7 +66,7 @@ fn build_source(dir: &Path, body: &str) -> (bool, String) {
 
 // --- the POSIX path: dlopen + dlsym + call through --------------------------
 
-/// The whole happy path on Linux. `examples/dll/plug.oir` opens `libplug.so`
+/// The whole happy path on Linux. `examples/dll/plug.kiln` opens `libplug.so`
 /// with `dlopen`, fetches four addresses with `dlsym`, and calls each one:
 ///
 /// * a value in and a value out (`add`),
@@ -87,10 +87,10 @@ fn dlopen_dlsym_and_call_through() {
     assert!(status.success(), "clang failed to build libplug.so");
 
     let bin = dir.join("plug");
-    let built = build(&repo().join("examples/dll/plug.oir"), &bin, &[]);
+    let built = build(&repo().join("examples/dll/plug.kiln"), &bin, &[]);
     assert!(
         built.status.success(),
-        "plug.oir did not build:\n{}",
+        "plug.kiln did not build:\n{}",
         String::from_utf8_lossy(&built.stderr)
     );
 
@@ -209,7 +209,7 @@ fn a_c_record_argument_crosses_by_pointer() {
         .expect("run clang for libgeo.so");
     assert!(status.success(), "clang failed to build libgeo.so");
 
-    let prog = dir.join("geo.oir");
+    let prog = dir.join("geo.kiln");
     std::fs::write(
         &prog,
         r#"module geo
@@ -230,13 +230,13 @@ sub main
 end
 "#,
     )
-    .expect("write geo.oir");
+    .expect("write geo.kiln");
 
     let bin = dir.join("geo");
     let built = build(&prog, &bin, &[]);
     assert!(
         built.status.success(),
-        "geo.oir did not build:\n{}",
+        "geo.kiln did not build:\n{}",
         String::from_utf8_lossy(&built.stderr)
     );
     let out = Command::new(&bin).current_dir(&dir).output().expect("run geo");
@@ -288,7 +288,7 @@ fn mingw_present() -> bool {
 
 /// The gap this stage closed, proved where it was found: `use win` gives a
 /// program `LoadLibraryA` and `GetProcAddress`, and until now the `ptr` they
-/// answered with was a dead end. `examples/dll/plugwin.oir` loads a DLL it does
+/// answered with was a dead end. `examples/dll/plugwin.kiln` loads a DLL it does
 /// not link against, fetches three exports by name, and calls all three —
 /// cross-built with mingw and run under wine, because a Win32 call cannot be
 /// proved by reading it.
@@ -307,10 +307,10 @@ fn loadlibrary_getprocaddress_and_call_through_under_wine() {
     assert!(status.success(), "mingw failed to build plug.dll");
 
     let out = dir.join("plugwin");
-    let built = build(&repo().join("examples/dll/plugwin.oir"), &out, &["--os", "windows"]);
+    let built = build(&repo().join("examples/dll/plugwin.kiln"), &out, &["--os", "windows"]);
     assert!(
         built.status.success(),
-        "plugwin.oir did not cross-build:\n{}",
+        "plugwin.kiln did not cross-build:\n{}",
         String::from_utf8_lossy(&built.stderr)
     );
     let image = dir.join("plugwin.exe");

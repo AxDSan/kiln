@@ -3,45 +3,45 @@
 # Command line
 
 ```text
-openepl — the OpenEPL toolchain
+kiln — the Kiln toolchain
 
 USAGE:
-  openepl build <in.oir> [-o <out>]   compile to a native binary
-  openepl run   <in.oir> [-o <out>]   compile and run
-  openepl build|run --release         …optimised, hardened and stripped
-  openepl build --emit-ir             …keeping the .ll it handed clang
-  openepl build --os windows          …for Windows x86-64 (needs mingw-w64)
-  openepl build --target sharedlib    …a library, with its C header beside it
+  kiln build <in.kiln> [-o <out>]   compile to a native binary
+  kiln run   <in.kiln> [-o <out>]   compile and run
+  kiln build|run --release         …optimised, hardened and stripped
+  kiln build --emit-ir             …keeping the .ll it handed clang
+  kiln build --os windows          …for Windows x86-64 (needs mingw-w64)
+  kiln build --target sharedlib    …a library, with its C header beside it
   [--header <path>]                 where the header goes (default <module>.h)
-  openepl emit  <in.oir>              print generated LLVM IR
-  openepl debug <program>             read a built program's debug information
-  openepl inspect <in.oir>            dump the form model (for the designer)
-  openepl lsp                         language server over stdio (see docs/editors.md)
-  openepl commands [--use <lib>]      list the commands and components available
-  openepl templates                   list the available project templates
-  openepl new <template> <dir>        create a project from a template
+  kiln emit  <in.kiln>              print generated LLVM IR
+  kiln debug <program>             read a built program's debug information
+  kiln inspect <in.kiln>            dump the form model (for the designer)
+  kiln lsp                         language server over stdio (see docs/editors.md)
+  kiln commands [--use <lib>]      list the commands and components available
+  kiln templates                   list the available project templates
+  kiln new <template> <dir>        create a project from a template
   [--name <module>] [--title <text>]  the caption defaults to "Untitled App"
-  openepl kits                        list the kits found, and from where
-  openepl kit add <path>              install a kit into ~/.openepl/kits
-  openepl project <file-or-dir>       dump a project file's resolved fields
-  openepl project <file-or-dir> set <key>=<value>...
+  kiln kits                        list the kits found, and from where
+  kiln kit add <path>              install a kit into ~/.kiln/kits
+  kiln project <file-or-dir>       dump a project file's resolved fields
+  kiln project <file-or-dir> set <key>=<value>...
   the only writer of a project file: name, main, target, kits, version
-  openepl version                     print the toolchain and ABI versions
+  kiln version                     print the toolchain and ABI versions
 
-Wherever <in.oir> is accepted, a project.oeproj or its directory is too.
+Wherever <in.kiln> is accepted, a project.kproj or its directory is too.
 
 ```
 
 ## Building
 
-`openepl build` compiles a module to a native artifact and `openepl run`
+`kiln build` compiles a module to a native artifact and `kiln run`
 builds it and runs it straight away.
 
 ```sh
-openepl build app.oir                      # ./app
-openepl build app.oir -o build/app         # somewhere else
-openepl build lib.oir --target sharedlib   # a different artifact
-openepl run app.oir
+kiln build app.kiln                      # ./app
+kiln build app.kiln -o build/app         # somewhere else
+kiln build lib.kiln --target sharedlib   # a different artifact
+kiln run app.kiln
 ```
 
 `--target` overrides whatever the module declares, so one source can be built
@@ -50,7 +50,7 @@ as a program or as a library without editing it. See
 
 A build writes the binary and nothing else. The LLVM IR it hands `clang` is an
 intermediate and is removed once the link is done — `--emit-ir` keeps it beside
-the binary as `<out>.ll`, and `openepl emit` prints it without building at all.
+the binary as `<out>.ll`, and `kiln emit` prints it without building at all.
 
 ## Debug information
 
@@ -60,13 +60,13 @@ and to say where it stopped. It is on by default and absent from a
 `--release` build, which strips it along with everything else a shipped
 program does not need.
 
-`openepl debug` reads it back:
+`kiln debug` reads it back:
 
 ```sh
-openepl debug --dump-lines app        # the line table, one row per line
-openepl debug --dump-subs app         # the subroutines and their extents
-openepl debug --resolve app app.oir:24  # where a breakpoint on line 24 goes
-openepl debug --at app 0x400557       # which line an address is in
+kiln debug --dump-lines app        # the line table, one row per line
+kiln debug --dump-subs app         # the subroutines and their extents
+kiln debug --resolve app app.kiln:24  # where a breakpoint on line 24 goes
+kiln debug --at app 0x400557       # which line an address is in
 ```
 
 A line that runs nothing — a blank line, a comment — resolves to the next
@@ -79,10 +79,10 @@ built on top of it.
 ## Starting a project
 
 ```sh
-openepl templates                # what you can create
-openepl new gui-app my-app       # create it
-openepl new gui-app my-app --name my_module
-openepl new gui-app my-app --title "Inventory"
+kiln templates                # what you can create
+kiln new gui-app my-app       # create it
+kiln new gui-app my-app --name my_module
+kiln new gui-app my-app --title "Inventory"
 ```
 
 The module is named after the directory unless `--name` says otherwise;
@@ -94,13 +94,13 @@ name a document, once it is something.
 ## Finding out what exists
 
 ```sh
-openepl commands                 # the core runtime
-openepl commands --use file      # and what a library adds
+kiln commands                 # the core runtime
+kiln commands --use file      # and what a library adds
 ```
 
 ## Reading a project from a tool
 
-`openepl inspect <file.oir>` is how OpenEPL Studio learns what a file holds;
+`kiln inspect <file.kiln>` is how Kiln Studio learns what a file holds;
 it is the only reader of a project file, so a tool that wants the same
 knowledge asks it rather than parsing the source. The output is one fact per
 line, `kind: rest`, in file order:
@@ -122,7 +122,7 @@ exactly those three. A `modcomponent:` without a `span=` is one the toolchain
 could not place, and a tool that splices the file should treat it as not yet
 written rather than guess.
 
-`openepl commands` is read the same way. Beside each `component: <type>` line
+`kiln commands` is read the same way. Beside each `component: <type>` line
 is `kind: <type> visual` or `kind: <type> nonvisual`, and a `property:` line
 whose editor is not the plain one its type implies is followed by
 `editor: <type> <property> <hint>` — `color`, `file`, `font` or `multiline`.
@@ -131,22 +131,22 @@ that skips what it does not know keeps working.
 
 ## Kits
 
-A kit is a support library plus what an IDE needs to present it. `openepl kits`
+A kit is a support library plus what an IDE needs to present it. `kiln kits`
 lists the ones resolution found, each with its version and where it came from —
 `project` for a `kits/` directory beside your source, `user` for
-`~/.openepl/kits/`, `bundled` for the ones shipped with the toolchain. The
+`~/.kiln/kits/`, `bundled` for the ones shipped with the toolchain. The
 first match of a name wins, in that order.
 
 ```sh
-openepl kits                     # what is installed, and from where
-openepl kit add ./mykit          # install a directory
-openepl kit add mykit.tar.gz     # or a tarball
+kiln kits                     # what is installed, and from where
+kiln kit add ./mykit          # install a directory
+kiln kit add mykit.tar.gz     # or a tarball
 ```
 
 See [Kits](./kits.md).
 
 ## Editor support
 
-`openepl lsp` speaks the Language Server Protocol over stdin and stdout. It is
+`kiln lsp` speaks the Language Server Protocol over stdin and stdout. It is
 not run by hand — an editor starts it. See
 [Editors and the language server](./editors.md).

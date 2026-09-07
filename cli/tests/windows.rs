@@ -1,4 +1,4 @@
-//! Cross-building for Windows: `openepl build --os windows` produces a PE32+
+//! Cross-building for Windows: `kiln build --os windows` produces a PE32+
 //! image through mingw-w64, and — where wine is installed — that image runs
 //! and says what the Linux build says.
 //!
@@ -39,7 +39,7 @@ fn mingw_present() -> bool {
 /// A scratch directory of its own per test, because the Windows program's
 /// working files land wherever it is run, and two tests must not share one.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_windows_{tag}_test"));
+    let dir = std::env::temp_dir().join(format!("kiln_windows_{tag}_test"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -48,14 +48,14 @@ fn scratch(tag: &str) -> PathBuf {
 /// Build `source` for Windows into `dir`, with `extra` on the command line.
 fn build_windows(source: &Path, out: &Path, extra: &[&str]) {
     let repo = repo();
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", source.to_str().unwrap(), "--os", "windows", "-o"])
         .arg(out)
         .args(extra)
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
-        .expect("run openepl");
-    assert!(status.success(), "openepl build --os windows failed for {}", source.display());
+        .expect("run kiln");
+    assert!(status.success(), "kiln build --os windows failed for {}", source.display());
 }
 
 /// Read the image's own headers, not `file`'s opinion of them: `MZ`, the
@@ -110,7 +110,7 @@ fn hello_cross_builds_to_pe32_plus_and_runs_under_wine() {
     let dir = scratch("hello");
     // `-o hello` on purpose: a Windows program named without an extension is
     // a file Windows will not run, so the build adds one.
-    build_windows(&repo().join("examples/hello.oir"), &dir.join("hello"), &[]);
+    build_windows(&repo().join("examples/hello.kiln"), &dir.join("hello"), &[]);
     let image = dir.join("hello.exe");
     assert!(image.is_file(), "expected {} to be written", image.display());
     assert_pe32_plus(&image);
@@ -118,7 +118,7 @@ fn hello_cross_builds_to_pe32_plus_and_runs_under_wine() {
     if let Some(lines) = wine_lines(&image, &dir) {
         assert_eq!(
             lines,
-            vec!["OpenEPL — arithmetic demo", "42", "14", "42", "42"],
+            vec!["Kiln — arithmetic demo", "42", "14", "42", "42"],
             "unexpected output under wine"
         );
     }
@@ -134,14 +134,14 @@ fn release_cross_build_is_a_pe_that_runs() {
     }
     let dir = scratch("release");
     build_windows(
-        &repo().join("examples/hello.oir"),
+        &repo().join("examples/hello.kiln"),
         &dir.join("hello.exe"),
         &["--release"],
     );
     let image = dir.join("hello.exe");
     assert_pe32_plus(&image);
     if let Some(lines) = wine_lines(&image, &dir) {
-        assert_eq!(lines[0], "OpenEPL — arithmetic demo");
+        assert_eq!(lines[0], "Kiln — arithmetic demo");
         assert_eq!(lines.len(), 5);
     }
 }
@@ -160,7 +160,7 @@ fn file_and_system_libraries_cross_build_and_run() {
         return;
     }
     let dir = scratch("libs");
-    let source = dir.join("winlibs.oir");
+    let source = dir.join("winlibs.kiln");
     std::fs::write(
         &source,
         "module winlibs\n\
@@ -179,8 +179,8 @@ fn file_and_system_libraries_cross_build_and_run() {
          \x20 if file_delete(note) and not file_exists(note)\n\
          \x20   call print_text(\"deleted\")\n\
          \x20 end\n\
-         \x20 if env_set(\"OPENEPL_WIN\", \"hello\")\n\
-         \x20   call print_text(concat(\"env: \", env_get(\"OPENEPL_WIN\")))\n\
+         \x20 if env_set(\"KILN_WIN\", \"hello\")\n\
+         \x20   call print_text(concat(\"env: \", env_get(\"KILN_WIN\")))\n\
          \x20 end\n\
          \x20 call print_int(sys_arg_count())\n\
          \x20 call print_int64(int_to_int64(2000000000) + int_to_int64(2000000000))\n\
@@ -203,7 +203,7 @@ fn file_and_system_libraries_cross_build_and_run() {
                 "env: hello",
                 "0",
                 // Past 32 bits: an int64 that came back truncated would say
-                // something else here, and nothing in hello.oir would notice.
+                // something else here, and nothing in hello.kiln would notice.
                 "4000000000",
                 "windows",
             ],
@@ -225,7 +225,7 @@ fn library_cross_builds_to_dll_and_archive() {
         return;
     }
     let dir = scratch("lib");
-    let source = repo().join("examples/hellolib.oir");
+    let source = repo().join("examples/hellolib.kiln");
     let dll = dir.join("hellolib.dll");
     build_windows(&source, &dll, &["--target", "sharedlib"]);
     assert_pe32_plus(&dll);
@@ -253,7 +253,7 @@ fn library_cross_builds_to_dll_and_archive() {
 
 /// The `ptr` type and the raw-memory commands must marshal identically on
 /// Windows: the slot layout is ABI, and a pointer travels in the slot's union
-/// exactly as it does on Linux. Building `examples/ptr.oir` for Windows and
+/// exactly as it does on Linux. Building `examples/ptr.kiln` for Windows and
 /// running it under wine proves the whole path — int64 offsets, the int<->ptr
 /// escape hatch, and pointer-width reads — behaves the same on LLP64.
 #[test]
@@ -262,7 +262,7 @@ fn ptr_cross_builds_and_runs_under_wine() {
         return;
     }
     let dir = scratch("ptr");
-    build_windows(&repo().join("examples/ptr.oir"), &dir.join("ptr.exe"), &[]);
+    build_windows(&repo().join("examples/ptr.kiln"), &dir.join("ptr.exe"), &[]);
     let image = dir.join("ptr.exe");
     assert!(image.is_file(), "expected {} to be written", image.display());
     assert_pe32_plus(&image);
@@ -272,7 +272,7 @@ fn ptr_cross_builds_and_runs_under_wine() {
             lines,
             vec![
                 "42", "9000000000", "255", "3.5", "hello, C", "", "7", "7",
-                "same", "null-ok", "123", "OpenEPL",
+                "same", "null-ok", "123", "Kiln",
             ],
             "unexpected ptr output under wine"
         );

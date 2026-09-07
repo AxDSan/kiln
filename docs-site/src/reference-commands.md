@@ -171,37 +171,523 @@ read. The [Language guide](./language.md#when-a-command-fails) has the rules.
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
-| `dir_create` | text | bool |
-| `dir_current` | — | text |
-| `dir_delete` | text | bool |
-| `dir_entry_count` | text | int |
-| `dir_entry` | text, int | text |
-| `dir_exists` | text | bool |
-| `dir_set_current` | text | bool |
-| `file_append_bytes` | text, bytes | bool |
-| `file_append_text` | text, text | bool |
-| `file_at_end` | int | bool |
-| `file_close_all` | — | int |
-| `file_close` | int | bool |
-| `file_copy` | text, text | bool |
-| `file_delete` | text | bool |
-| `file_exists` | text | bool |
-| `file_line_count` | text | int |
-| `file_modified` | text | int64 |
-| `file_move` | text, text | bool |
-| `file_open` | text, text | int |
-| `file_read_bytes` | text | bytes |
-| `file_read_line` | int | text |
-| `file_read_text` | text | text |
-| `file_size` | text | int64 |
-| `file_write_bytes` | text, bytes | bool |
-| `file_write_line` | int, text | bool |
-| `file_write_text` | text, text | bool |
-| `path_absolute` | text | text |
-| `path_extension` | text | text |
-| `path_join` | text, text | text |
-| `path_name` | text | text |
-| `path_parent` | text | text |
+| [`dir_create`](#dir_create) | text | bool |
+| [`dir_current`](#dir_current) | — | text |
+| [`dir_delete`](#dir_delete) | text | bool |
+| [`dir_entry_count`](#dir_entry_count) | text | int |
+| [`dir_entry`](#dir_entry) | text, int | text |
+| [`dir_exists`](#dir_exists) | text | bool |
+| [`dir_set_current`](#dir_set_current) | text | bool |
+| [`file_append_bytes`](#file_append_bytes) | text, bytes | bool |
+| [`file_append_text`](#file_append_text) | text, text | bool |
+| [`file_at_end`](#file_at_end) | int | bool |
+| [`file_close_all`](#file_close_all) | — | int |
+| [`file_close`](#file_close) | int | bool |
+| [`file_copy`](#file_copy) | text, text | bool |
+| [`file_delete`](#file_delete) | text | bool |
+| [`file_exists`](#file_exists) | text | bool |
+| [`file_line_count`](#file_line_count) | text | int |
+| [`file_modified`](#file_modified) | text | int64 |
+| [`file_move`](#file_move) | text, text | bool |
+| [`file_open`](#file_open) | text, text | int |
+| [`file_read_bytes`](#file_read_bytes) | text | bytes |
+| [`file_read_line`](#file_read_line) | int | text |
+| [`file_read_text`](#file_read_text) | text | text |
+| [`file_size`](#file_size) | text | int64 |
+| [`file_write_bytes`](#file_write_bytes) | text, bytes | bool |
+| [`file_write_line`](#file_write_line) | int, text | bool |
+| [`file_write_text`](#file_write_text) | text, text | bool |
+| [`path_absolute`](#path_absolute) | text | text |
+| [`path_extension`](#path_extension) | text | text |
+| [`path_join`](#path_join) | text, text | text |
+| [`path_name`](#path_name) | text | text |
+| [`path_parent`](#path_parent) | text | text |
+
+### `dir_create`
+
+`dir_create(text) -> bool`
+
+Create a directory and any parent it needs; false on failure.
+
+```kiln
+module example
+use file
+
+sub main
+  call dir_create("reports/2026")
+end
+```
+
+### `dir_current`
+
+`dir_current() -> text`
+
+The directory the program is running in.
+
+```kiln
+module example
+use file
+
+sub main
+  call print_text(dir_current())
+end
+```
+
+### `dir_delete`
+
+`dir_delete(text) -> bool`
+
+Remove an empty directory; false if it was not empty or not there.
+
+```kiln
+module example
+use file
+
+sub main
+  call dir_delete("reports/2026")
+end
+```
+
+### `dir_entry`
+
+`dir_entry(text, int) -> text`
+
+One entry from the snapshot dir_entry_count took, counting from 1.
+
+```kiln
+module example
+use file
+
+sub main
+  let n: int = dir_entry_count("reports")
+  for i in 1..n
+    call print_text(dir_entry("reports", i))
+  end
+end
+```
+
+### `dir_entry_count`
+
+`dir_entry_count(text) -> int`
+
+How many entries a directory holds, or -1 on failure. It re-reads the directory and snapshots it, which is what makes a loop over dir_entry stable.
+
+```kiln
+module example
+use file
+
+sub main
+  call print_int(dir_entry_count("reports"))
+end
+```
+
+### `dir_exists`
+
+`dir_exists(text) -> bool`
+
+Whether a directory exists.
+
+```kiln
+module example
+use file
+
+sub main
+  if dir_exists("reports")
+    call print_text("ready")
+  end
+end
+```
+
+### `dir_set_current`
+
+`dir_set_current(text) -> bool`
+
+Change the directory the program is running in; false on failure.
+
+```kiln
+module example
+use file
+
+sub main
+  call dir_set_current("reports")
+end
+```
+
+### `file_append_bytes`
+
+`file_append_bytes(text, bytes) -> bool`
+
+Add raw bytes to the end of a file; false on failure.
+
+```kiln
+module example
+use file
+
+sub main
+  call file_append_bytes("out.bin", bytes_from_text("tail"))
+end
+```
+
+### `file_append_text`
+
+`file_append_text(text, text) -> bool`
+
+Add text to the end of a file, creating it if absent; false on failure.
+
+```kiln
+module example
+use file
+
+sub main
+  call file_append_text("log.txt", "started")
+end
+```
+
+### `file_at_end`
+
+`file_at_end(int) -> bool`
+
+Whether an open file has no more lines, which is the predicate a blank line needs.
+
+```kiln
+module example
+use file
+
+sub main
+  let h: int = file_open("big.txt", "read")
+  while file_at_end(h) = false
+    call print_text(file_read_line(h))
+  end
+  call file_close(h)
+end
+```
+
+### `file_close`
+
+`file_close(int) -> bool`
+
+Close an open file; false if the handle was already closed or never valid.
+
+```kiln
+module example
+use file
+
+sub main
+  let h: int = file_open("out.txt", "write")
+  call file_close(h)
+end
+```
+
+### `file_close_all`
+
+`file_close_all() -> int`
+
+Close every file this program still has open, and say how many that was.
+
+```kiln
+module example
+use file
+
+sub main
+  call print_int(file_close_all())
+end
+```
+
+### `file_copy`
+
+`file_copy(text, text) -> bool`
+
+Copy a file, replacing the destination; false on failure.
+
+```kiln
+module example
+use file
+
+sub main
+  call file_copy("notes.txt", "notes.bak")
+end
+```
+
+### `file_delete`
+
+`file_delete(text) -> bool`
+
+Remove a file; false if it was not there or could not be removed.
+
+```kiln
+module example
+use file
+
+sub main
+  call file_delete("scratch.txt")
+end
+```
+
+### `file_exists`
+
+`file_exists(text) -> bool`
+
+Whether a file exists and can be read.
+
+```kiln
+module example
+use file
+
+sub main
+  if file_exists("notes.txt")
+    call print_text("found it")
+  end
+end
+```
+
+### `file_line_count`
+
+`file_line_count(text) -> int`
+
+How many lines a text file holds, or -1 on failure.
+
+```kiln
+module example
+use file
+
+sub main
+  call print_int(file_line_count("notes.txt"))
+end
+```
+
+### `file_modified`
+
+`file_modified(text) -> int64`
+
+When a file was last written, in Unix seconds, or -1 on failure.
+
+```kiln
+module example
+use file
+
+sub main
+  call print_int64(file_modified("notes.txt"))
+end
+```
+
+### `file_move`
+
+`file_move(text, text) -> bool`
+
+Move or rename a file; false on failure.
+
+```kiln
+module example
+use file
+
+sub main
+  call file_move("notes.txt", "archive/notes.txt")
+end
+```
+
+### `file_open`
+
+`file_open(text, text) -> int`
+
+Open a file for streaming in mode "read", "write" or "append"; 0 on failure.
+
+```kiln
+module example
+use file
+
+sub main
+  let h: int = file_open("big.txt", "read")
+  call file_close(h)
+end
+```
+
+### `file_read_bytes`
+
+`file_read_bytes(text) -> bytes`
+
+Read a whole file as raw bytes, which is what a picture or an archive needs.
+
+```kiln
+module example
+use file
+
+sub main
+  let raw: bytes = file_read_bytes("logo.png")
+  call print_int(bytes_count(raw))
+end
+```
+
+### `file_read_line`
+
+`file_read_line(int) -> text`
+
+Read the next line from an open file, without its newline.
+
+```kiln
+module example
+use file
+
+sub main
+  let h: int = file_open("big.txt", "read")
+  call print_text(file_read_line(h))
+  call file_close(h)
+end
+```
+
+### `file_read_text`
+
+`file_read_text(text) -> text`
+
+Read a whole text file, or "" if it could not be read.
+
+```kiln
+module example
+use file
+
+sub main
+  let notes: text = file_read_text("notes.txt")
+  call print_text(notes)
+end
+```
+
+### `file_size`
+
+`file_size(text) -> int64`
+
+How many bytes a file holds, or -1 if it could not be measured.
+
+```kiln
+module example
+use file
+
+sub main
+  call print_int64(file_size("notes.txt"))
+end
+```
+
+### `file_write_bytes`
+
+`file_write_bytes(text, bytes) -> bool`
+
+Write raw bytes to a file, replacing what was there; false on failure.
+
+```kiln
+module example
+use file
+
+sub main
+  call file_write_bytes("copy.png", file_read_bytes("logo.png"))
+end
+```
+
+### `file_write_line`
+
+`file_write_line(int, text) -> bool`
+
+Write one line to an open file, adding the newline; false on failure.
+
+```kiln
+module example
+use file
+
+sub main
+  let h: int = file_open("out.txt", "write")
+  call file_write_line(h, "first")
+  call file_close(h)
+end
+```
+
+### `file_write_text`
+
+`file_write_text(text, text) -> bool`
+
+Write text to a file, replacing what was there; false on failure.
+
+```kiln
+module example
+use file
+
+sub main
+  if file_write_text("notes.txt", "hello") = false
+    call print_text(last_error_text())
+  end
+end
+```
+
+### `path_absolute`
+
+`path_absolute(text) -> text`
+
+A path resolved against the current directory.
+
+```kiln
+module example
+use file
+
+sub main
+  call print_text(path_absolute("june.txt"))
+end
+```
+
+### `path_extension`
+
+`path_extension(text) -> text`
+
+A file name's extension, without the dot, or "" if it has none.
+
+```kiln
+module example
+use file
+
+sub main
+  call print_text(path_extension("reports/june.txt"))
+end
+```
+
+### `path_join`
+
+`path_join(text, text) -> text`
+
+Join two path pieces with the separator this platform uses.
+
+```kiln
+module example
+use file
+
+sub main
+  call print_text(path_join("reports", "june.txt"))
+end
+```
+
+### `path_name`
+
+`path_name(text) -> text`
+
+The last piece of a path, which is the file name.
+
+```kiln
+module example
+use file
+
+sub main
+  call print_text(path_name("reports/june.txt"))
+end
+```
+
+### `path_parent`
+
+`path_parent(text) -> text`
+
+Everything before the last piece of a path.
+
+```kiln
+module example
+use file
+
+sub main
+  call print_text(path_parent("reports/june.txt"))
+end
+```
 
 ## hash
 

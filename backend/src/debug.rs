@@ -7,7 +7,7 @@
 //! written.
 //!
 //! Two things are described. A *line table* — which machine address
-//! corresponds to which line of which `.oir` file — is what stepping and
+//! corresponds to which line of which `.kiln` file — is what stepping and
 //! breakpoints need. A *type graph* — a node per type, a `!DILocalVariable`
 //! per named local and per module variable, and a `#dbg_declare` record
 //! binding each to the slot holding it — is what reading a value needs, and it
@@ -19,7 +19,7 @@
 //! that *has* debug information must give every call inside it a location, and
 //! there is no line in anyone's source to give.
 
-use openepl_ir::{c_field_size_align, Registry, Ty};
+use kiln_ir::{c_field_size_align, Registry, Ty};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
@@ -34,8 +34,8 @@ const SUB_TYPE_LIST: usize = 5;
 /// The first node number free for subprograms and locations.
 const FIRST_FREE: usize = 6;
 
-/// A heap record is one runtime allocation: an 8-byte header (`OpenEPL_Record`
-/// in `runtime/openepl_core.h`) and then one 8-byte cell per field, which is
+/// A heap record is one runtime allocation: an 8-byte header (`Kiln_Record`
+/// in `runtime/kiln_core.h`) and then one 8-byte cell per field, which is
 /// what `fields(r)` — `(int64_t *)(r + 1)` — walks. Every offset a debugger is
 /// given has to start past that header, in bits.
 const RECORD_HEADER_BITS: u64 = 64;
@@ -129,7 +129,7 @@ impl DebugInfo {
 
     /// Declare a subroutine and return the node to name on its `define` line.
     ///
-    /// `line` is where the `sub` keyword is. `scopeLine` is the same: OpenEPL
+    /// `line` is where the `sub` keyword is. `scopeLine` is the same: Kiln
     /// has no separate opening brace for a debugger to step to.
     pub(crate) fn subprogram(&mut self, name: &str, symbol: &str, line: usize) -> usize {
         let line = line.max(1);
@@ -210,7 +210,7 @@ impl DebugInfo {
             Ty::Ptr => self.pointer(Some("ptr"), None),
             // An array and a dictionary are runtime-owned objects whose layout
             // is the runtime's business, not DWARF's. The pointer carries the
-            // OpenEPL spelling as its name, which is what tells a reader that
+            // Kiln spelling as its name, which is what tells a reader that
             // `xs` holds text rather than ints.
             Ty::Array(e) => {
                 let name = format!("{}[]", e.as_str());
@@ -411,7 +411,7 @@ impl DebugInfo {
             }
         } else {
             // A heap record is the header and then one eight-byte cell per
-            // field, whatever the field's own width: `oe_rec_set` widens every
+            // field, whatever the field's own width: `kn_rec_set` widens every
             // value to 64 bits, and a little-endian read of the low half is the
             // narrower value back.
             let offsets = (0..def.fields.len())
@@ -506,7 +506,7 @@ impl DebugInfo {
         )
         .unwrap();
         // DW_LANG_C99 is a deliberate lie of convenience: DWARF has no
-        // language code for OpenEPL, and every debugger knows what to do with
+        // language code for Kiln, and every debugger knows what to do with
         // C99's basic types and scoping. Nothing here depends on it.
         let globals = match self.globals {
             Some(n) => format!(", globals: !{n}"),
@@ -586,7 +586,7 @@ fn escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openepl_ir::parse;
+    use kiln_ir::parse;
 
     /// A registry holding the records `src` declares, which is what the
     /// lowerer hands the type builder.
@@ -598,7 +598,7 @@ mod tests {
     }
 
     fn info() -> DebugInfo {
-        DebugInfo::new("examples/demo.oir", "OpenEPL test")
+        DebugInfo::new("examples/demo.kiln", "Kiln test")
     }
 
     /// A unit that describes nothing but lines must say so. Claiming
@@ -676,7 +676,7 @@ mod tests {
              record rect is c\n  left: int\n  top: int\nend\n",
         );
         let mut d = info();
-        let heap = d.value_type(Ty::Record(openepl_ir::intern("point")), &reg);
+        let heap = d.value_type(Ty::Record(kiln_ir::intern("point")), &reg);
         let flat = d.c_storage_type("rect", &reg);
         let out = d.render();
         let heap_line = out
@@ -691,13 +691,13 @@ mod tests {
         assert!(flat_line.contains("DW_TAG_structure_type"), "{flat_line}");
     }
 
-    /// The header `oe_rec_new` allocates is eight bytes, so field one begins at
+    /// The header `kn_rec_new` allocates is eight bytes, so field one begins at
     /// bit 64. Starting at zero shows the field count where `x` should be.
     #[test]
     fn heap_record_fields_sit_past_the_runtime_header() {
         let reg = registry("module m\nrecord point\n  x: int\n  y: text\nend\n");
         let mut d = info();
-        d.value_type(Ty::Record(openepl_ir::intern("point")), &reg);
+        d.value_type(Ty::Record(kiln_ir::intern("point")), &reg);
         let out = d.render();
         assert!(
             out.contains(r#"tag: DW_TAG_member, name: "x""#) && out.contains("offset: 64"),
@@ -730,7 +730,7 @@ mod tests {
     fn a_self_referential_record_terminates() {
         let reg = registry("module m\nrecord node\n  next: node\n  value: int\nend\n");
         let mut d = info();
-        d.value_type(Ty::Record(openepl_ir::intern("node")), &reg);
+        d.value_type(Ty::Record(kiln_ir::intern("node")), &reg);
         let out = d.render();
         assert_eq!(out.matches(r#"DW_TAG_structure_type, name: "node""#).count(), 1);
     }
@@ -739,7 +739,7 @@ mod tests {
     fn a_parameter_is_marked_as_one_and_a_local_is_not() {
         let reg = Registry::core();
         let mut d = info();
-        let sp = d.subprogram("greet", "oe_user_greet", 2);
+        let sp = d.subprogram("greet", "kn_user_greet", 2);
         let int = d.value_type(Ty::Int, &reg);
         let arg = d.local(sp, "n", int, 2, Some(1)).unwrap();
         let var = d.local(sp, "total", int, 3, None).unwrap();
@@ -758,7 +758,7 @@ mod tests {
     fn a_subprogram_retains_its_variables() {
         let reg = Registry::core();
         let mut d = info();
-        let sp = d.subprogram("main", "oe_user_main", 2);
+        let sp = d.subprogram("main", "kn_user_main", 2);
         let int = d.value_type(Ty::Int, &reg);
         let a = d.local(sp, "a", int, 3, None).unwrap();
         let b = d.local(sp, "b", int, 4, None).unwrap();
@@ -776,7 +776,7 @@ mod tests {
     fn a_compiler_invented_name_is_not_a_variable() {
         let reg = Registry::core();
         let mut d = info();
-        let sp = d.subprogram("main", "oe_user_main", 2);
+        let sp = d.subprogram("main", "kn_user_main", 2);
         let int = d.value_type(Ty::Int, &reg);
         assert!(d.local(sp, "$each$i$0", int, 3, None).is_none());
         assert!(d.local(sp, "$t7", int, 3, None).is_none());
@@ -793,7 +793,7 @@ mod tests {
     fn an_optionals_companion_is_described_so_it_can_be_read() {
         let reg = Registry::core();
         let mut d = info();
-        let sp = d.subprogram("main", "oe_user_main", 2);
+        let sp = d.subprogram("main", "kn_user_main", 2);
         let truth = d.value_type(Ty::Bool, &reg);
         assert!(d.local(sp, "v$has", truth, 3, None).is_some());
         assert!(d.render().contains(r#"name: "v$has""#), "{}", d.render());
@@ -843,7 +843,7 @@ mod tests {
     #[test]
     fn declaring_types_does_not_move_the_first_subprogram() {
         let mut d = info();
-        assert_eq!(d.subprogram("main", "oe_user_main", 2), FIRST_FREE);
+        assert_eq!(d.subprogram("main", "kn_user_main", 2), FIRST_FREE);
     }
 }
 

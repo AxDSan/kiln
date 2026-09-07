@@ -86,7 +86,7 @@ pub fn validate_with(m: &Module, reg: &Registry, hints: &Hints) -> Result<(), Ve
     validate_impl(m, reg, hints, false)
 }
 
-/// Validate a kit's declaration bundle (`.oed`): the same record, `dll` and
+/// Validate a kit's declaration bundle (`.kdecl`): the same record, `dll` and
 /// `const` checks a program gets, but without the entry-point and export rules
 /// — a bundle declares, it does not run or export, so "a library needs a
 /// subroutine" is not its contract to meet. This is what lets the loader catch
@@ -294,7 +294,7 @@ fn validate_impl(
     // local, a `dll` pointer parameter, or the operand of `address of` / `size
     // of`, and nowhere the language treats a record as a heap reference. Reject
     // the heap positions here so a c-record can never reach a path that would
-    // call `oe_rec_*` on a struct that is not one.
+    // call `kn_rec_*` on a struct that is not one.
     //
     // A `dll` parameter typed as a record is the one place a record name is
     // *wanted*: it says the C prototype takes a pointer to that struct. Require

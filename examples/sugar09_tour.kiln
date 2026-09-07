@@ -1,0 +1,147 @@
+# The 0.9.0 shorthands in one program: block and raw text, collection
+# literals, slicing, the dot call, `let` inference, the value `if`, `enum`,
+# `match`, `repeat`, `assert`, parameter defaults, named arguments, record
+# literals and updates, optionals with `otherwise` and `if some`, a list built
+# by a loop, `check`, and `defer`. Every one desugars to something the language
+# already had, so this transcript is exactly what the longhand would print.
+module sugar09_tour
+
+# An enum names a run of ints, counting from 1 in declaration order.
+enum severity
+  info, warning
+  error
+end
+
+record point
+  x: int
+  y: int
+  label: text
+end
+
+# Where `defer` proves itself: the trail records the order things happened in.
+var trail: text = ""
+
+## Add a word to the trail that the tour prints at the end.
+sub note(what: text)
+  trail = trail + what + " "
+end
+
+## Name a severity. `match` tests one value against several, written once.
+sub label(s: severity): text
+  match s
+  when severity.info: return "info"
+  when severity.warning: return "warning"
+  else: return "error"
+  end
+end
+
+## Describe a connection. The last parameters carry defaults, so a call may
+## leave them out — and name the ones it gives.
+sub connect(host: text, port: int = 80, timeout: int = 5000): text
+  return "{host}:{port}, giving up after {timeout}ms"
+end
+
+## Look a name up. `check` returns early when the lookup failed, handing the
+## caller the same 0 the failing command would have.
+sub age_of(book: int{}, who: text): int
+  let years: int = check dict_get(book, who)
+  return years
+end
+
+## Open, work, and close — with the closing written beside the opening.
+sub attempt(n: int): int
+  call note("open")
+  defer call note("close")
+  if n = 1
+    return 10
+  end
+  call note("work")
+  return 20
+end
+
+sub main
+  # Three quotes open a block whose newlines are its own; holes still fire.
+  let who: text = "Kiln"
+  let banner: text = """
+{who} 0.9.0
+the shorthands, in one program
+"""
+  call print_text(trim(banner))         # two lines, written as two lines
+
+  # An `r` before the quote makes a raw literal: no escapes, no holes.
+  call print_text(r"C:\logs\{today}.txt")
+
+  # A list is written out, and `a..b` takes a run of it — both ends included.
+  let names: text[] = ["Ada", "Grace", "Alan", "Edsger"]
+  call print_text(join(names[2..3], ", "))        # Grace, Alan
+
+  # `x.f(a)` is `f(x, a)`: the same call, read in the order it happens.
+  let messy: text = "  ada lovelace  "
+  call print_text(messy.trim().uppercase())       # ADA LOVELACE
+
+  # `let` without a type takes it from the value; `if c then a else b` is the
+  # choice above written where a value goes.
+  let n = count(names)
+  assert n = 4, "the tour lists four names"
+  let word: text = if n = 1 then "name" else "names"
+  call print_text("{n} {word}")                   # 4 names
+
+  # An enum member is reached through the enum's name, and is an int.
+  call print_int(severity.error)                  # 3
+  call print_text(label(severity.warning))        # warning
+
+  # `repeat N times` is the counting loop with its counter hidden.
+  repeat 3 times
+    call note("tick")
+  end
+  call print_int(attempt(1))                      # 10 — the defer still runs
+  call print_int(attempt(2))                      # 20
+
+  # A default fills what the call leaves out; a named argument says which slot
+  # it is filling, whatever order it comes in.
+  call print_text(connect("example.com"))
+  call print_text(connect("example.com", port: 8080))
+  call print_text(connect(timeout: 250, host: "localhost"))
+
+  # A record can be written with braces, and copied with `...`.
+  let origin = point{x: 0, y: 0, label: "origin"}
+  let moved = point{...origin, x: 3, label: "moved"}
+  call print_text("{origin.label} at {origin.x},{origin.y}")
+  call print_text("{moved.label} at {moved.x},{moved.y}")
+
+  # A dictionary lookup may find nothing, so its answer is a `T?` the checker
+  # will not let you read until you have said what a missing one means.
+  let ages: int{} = {"ada": 36, "grace": 45}
+  let ada: int? = dict_get(ages, "ada")
+  let zed: int? = dict_get(ages, "zed")
+  call print_int(ada otherwise 0)                 # 36
+  call print_int(zed otherwise 0)                 # 0 — nothing was there
+  if some ada as years
+    call print_text("ada is {years}")
+  else
+    call print_text("ada is not in the book")
+  end
+
+  # `none` is the optional that holds nothing until something fills it.
+  var newest: text? = none
+  for each name in names
+    newest = name
+  end
+  call print_text(newest otherwise "(nobody)")    # Edsger
+
+  # `check` inside `age_of` hands back the sentinel when the key is missing.
+  call print_int(age_of(ages, "grace"))           # 45
+  call print_int(age_of(ages, "zed"))             # 0
+
+  # A list built by a loop, written where the list is wanted.
+  let doubled: int[] = [v * 2 for each v in [1, 2, 3]]
+  call print_text(join([int_to_text(d) for each d in doubled], ", "))   # 2, 4, 6
+  # The keys come out in the order they went in; the sort keeps the line
+  # stable whatever the filter picks — the filter is what it is showing.
+  var grown: text[] = [k for each k, v in ages where v >= 40]
+  call sort(grown)
+  call print_text(join(grown, ", "))              # grace
+
+  # And the trail, which is `defer` seen from outside.
+  call print_text(trim(trail))
+end

@@ -1,13 +1,13 @@
 // A C++ host for the library. Build the library first — the header lands
 // beside it — then compile this against that header and link the library:
 //
-//   openepl build main.oir -o lib__MODULE__.so
+//   kiln build main.kiln -o lib__MODULE__.so
 //   clang++ consumer.cpp -I. -L. -l__MODULE__ -Wl,-rpath,. -o consumer && ./consumer
 //
 // For Windows, cross-built from Linux (the build writes __MODULE__.dll,
 // __MODULE__.h and the import library __MODULE__.lib beside each other):
 //
-//   openepl build main.oir --os windows -o __MODULE__.dll
+//   kiln build main.kiln --os windows -o __MODULE__.dll
 //   cl /EHsc consumer.cpp __MODULE__.lib                        (MSVC, x64)
 //   x86_64-w64-mingw32-g++ consumer.cpp -L. -l__MODULE__ -o consumer.exe   (MinGW)
 //

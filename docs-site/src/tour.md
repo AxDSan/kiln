@@ -2,7 +2,7 @@
 
 One program, grown a step at a time, meeting each part of the language where a
 newcomer meets it. Every listing here is a whole module: copy one into a file
-and `openepl run` it. The [Language guide](./language.md) is the same material
+and `kiln run` it. The [Language guide](./language.md) is the same material
 arranged as a reference.
 
 ## A value, and a line of output

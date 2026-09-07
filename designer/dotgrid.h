@@ -4,15 +4,15 @@
  * dot gives the spec's dot grid at any canvas size. Written as uncompressed TGA
  * because that needs no image library and SDL_image loads it.
  */
-#ifndef OPENEPL_DESIGNER_DOTGRID_H
-#define OPENEPL_DESIGNER_DOTGRID_H
+#ifndef KILN_DESIGNER_DOTGRID_H
+#define KILN_DESIGNER_DOTGRID_H
 
 #include <cstdio>
 #include <cstdlib>
 #include <sys/stat.h>
 #include <string>
 
-namespace openepl::designer {
+namespace kiln::designer {
 
 /// Write a `spacing`x`spacing` BGRA tile with one dot; returns the path.
 ///
@@ -60,5 +60,5 @@ inline std::string write_dot_tile(const std::string& path, int spacing = 10,
     return path;
 }
 
-} // namespace openepl::designer
+} // namespace kiln::designer
 #endif

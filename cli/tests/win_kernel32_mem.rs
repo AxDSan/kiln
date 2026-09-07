@@ -1,4 +1,4 @@
-//! `kits/win/kernel32_mem.oed` — the memory, module and file third of the
+//! `kits/win/kernel32_mem.kdecl` — the memory, module and file third of the
 //! `win` declaration kit — held to what Windows actually does.
 //!
 //! The programs here are cross-built for Windows with mingw and run under
@@ -20,7 +20,7 @@
 //!   call site is what makes the compiler check the line. It exists to build,
 //!   not to run.
 //!
-//! Both build against a scratch copy of the kit holding this one `.oed`, plus
+//! Both build against a scratch copy of the kit holding this one `.kdecl`, plus
 //! a stand-in for the handful of names the sibling files own (`CloseHandle`,
 //! `GetCurrentProcess`, `SECURITY_ATTRIBUTES`, `INVALID_HANDLE_VALUE` and
 //! three `ERROR_*`). That keeps this test about this file: the whole `kits/win`
@@ -56,7 +56,7 @@ fn mingw_present() -> bool {
 }
 
 /// The names the process and registry halves of the kit own. This file uses
-/// them and deliberately does not declare them — a name belongs to one `.oed`
+/// them and deliberately does not declare them — a name belongs to one `.kdecl`
 /// per kit — so the scratch kit supplies them the way `kits/win` does.
 const SIBLING_STANDINS: &str = r#"dll CloseHandle(hObject: ptr): bool from "kernel32" system
 dll GetCurrentProcess(): ptr from "kernel32" system
@@ -71,18 +71,18 @@ const ERROR_FILE_NOT_FOUND = 2
 const ERROR_ACCESS_DENIED = 5
 "#;
 
-/// A scratch project with `kits/win/` holding the real `kernel32_mem.oed`, the
+/// A scratch project with `kits/win/` holding the real `kernel32_mem.kdecl`, the
 /// stand-ins, and a `lib.json` that gates the kit to Windows. The build runs
 /// with this directory as the working directory, so `use win` resolves it as a
 /// project kit exactly as it would beside a person's own program.
 fn project(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_win_kernel32_mem_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_win_kernel32_mem_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     let kit = dir.join("kits").join("win");
     std::fs::create_dir_all(&kit).expect("create the scratch kit directory");
-    std::fs::copy(repo().join("kits/win/kernel32_mem.oed"), kit.join("kernel32_mem.oed"))
-        .expect("copy kernel32_mem.oed into the scratch kit");
-    std::fs::write(kit.join("siblings.oed"), SIBLING_STANDINS).unwrap();
+    std::fs::copy(repo().join("kits/win/kernel32_mem.kdecl"), kit.join("kernel32_mem.kdecl"))
+        .expect("copy kernel32_mem.kdecl into the scratch kit");
+    std::fs::write(kit.join("siblings.kdecl"), SIBLING_STANDINS).unwrap();
     std::fs::write(
         kit.join("lib.json"),
         "{ \"display\": \"Windows API\", \"section\": \"System\", \"version\": \"0.1.0\", \
@@ -94,15 +94,15 @@ fn project(tag: &str) -> PathBuf {
 
 /// Build `source` for Windows inside `dir`; the error text on failure.
 fn build_for_windows(dir: &Path, name: &str, source: &str) -> Result<PathBuf, String> {
-    let src = dir.join(format!("{name}.oir"));
+    let src = dir.join(format!("{name}.kiln"));
     std::fs::write(&src, source).expect("write the program source");
     let out = dir.join(name);
-    let done = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let done = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "--os", "windows", "-o", out.to_str().unwrap()])
         .current_dir(dir)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     if !done.status.success() {
         return Err(String::from_utf8_lossy(&done.stderr).into_owned());
     }
@@ -320,7 +320,7 @@ end
 const TOUCH: &str = r#"module kernel32_mem_touch
 use win
 
-# Every declaration in kernel32_mem.oed that the running test cannot exercise
+# Every declaration in kernel32_mem.kdecl that the running test cannot exercise
 # without a second process, a second machine or a GUI. A `dll` nobody calls
 # proves nothing — loading is lazy and the signature is never looked at — so
 # each one is called here, from a subroutine guarded by a condition that is
@@ -378,8 +378,8 @@ sub touch_all
 
   var h: ptr = CreateFileA("b.bin", GENERIC_WRITE, FILE_SHARE_READ_WRITE + FILE_SHARE_DELETE, ptr_null(), OPEN_ALWAYS, FILE_FLAG_SEQUENTIAL_SCAN + FILE_FLAG_RANDOM_ACCESS, ptr_null())
   call show(SetEndOfFile(h))
-  var mapping: ptr = CreateFileMappingA(h, ptr_null(), PAGE_READWRITE + SEC_COMMIT, 0, 4096, ptr_of_text("Local\\openepl_touch"))
-  var opened: ptr = OpenFileMappingA(FILE_MAP_ALL_ACCESS, false, "Local\\openepl_touch")
+  var mapping: ptr = CreateFileMappingA(h, ptr_null(), PAGE_READWRITE + SEC_COMMIT, 0, 4096, ptr_of_text("Local\\kiln_touch"))
+  var opened: ptr = OpenFileMappingA(FILE_MAP_ALL_ACCESS, false, "Local\\kiln_touch")
   var view: ptr = MapViewOfFile(opened, FILE_MAP_WRITE + FILE_MAP_COPY + FILE_MAP_EXECUTE, 0, 0, 4096)
   call show(FlushViewOfFile(view, 4096))
   call show(UnmapViewOfFile(view))
@@ -580,18 +580,18 @@ fn every_declaration_builds_for_windows() {
     build_for_windows(&dir, "touch", TOUCH).expect("every declaration should build");
 }
 
-/// `openepl commands --use win` reports the bundle, so Studio's completion,
+/// `kiln commands --use win` reports the bundle, so Studio's completion,
 /// the language server and the generated reference see it. The listing works
 /// on Linux even though the kit itself is Windows-only.
 #[test]
 fn commands_lists_the_bundle() {
     let dir = project("commands");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["commands", "--use", "win"])
         .current_dir(&dir)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl commands");
+        .expect("run kiln commands");
     assert!(
         out.status.success(),
         "commands --use win failed: {}",
@@ -657,7 +657,7 @@ cAlternateFileName: byte[14]",
 
 /// The same seven `sizeof`s, asked of `windows.h` itself.
 ///
-/// The running program prints what OpenEPL computes from the `.oed`; this
+/// The running program prints what Kiln computes from the `.kdecl`; this
 /// prints what mingw's headers say. Two independent sources agreeing is what
 /// makes the layouts a fact rather than a transcription that looked right.
 const SIZEOF_C: &str = r#"#include <windows.h>
@@ -726,19 +726,19 @@ fn the_layouts_are_the_ones_windows_h_gives() {
 }
 
 /// The names this file deliberately does not declare, and the sibling that
-/// owns each. `kernel32_mem.oed` uses all of them, so if a sibling renames or
+/// owns each. `kernel32_mem.kdecl` uses all of them, so if a sibling renames or
 /// drops one the merged kit stops building — and the hermetic tests above,
 /// which supply their own stand-ins, would not notice. This is the check that
 /// does, and it reads the sibling files as text so it holds even while another
 /// file in the kit is mid-edit and does not parse.
 const BORROWED: &[(&str, &str)] = &[
-    ("CloseHandle", "kernel32_proc.oed"),
-    ("GetCurrentProcess", "kernel32_proc.oed"),
-    ("SECURITY_ATTRIBUTES", "kernel32_proc.oed"),
-    ("INVALID_HANDLE_VALUE", "kernel32_proc.oed"),
-    ("ERROR_SUCCESS", "advapi32.oed"),
-    ("ERROR_FILE_NOT_FOUND", "advapi32.oed"),
-    ("ERROR_ACCESS_DENIED", "advapi32.oed"),
+    ("CloseHandle", "kernel32_proc.kdecl"),
+    ("GetCurrentProcess", "kernel32_proc.kdecl"),
+    ("SECURITY_ATTRIBUTES", "kernel32_proc.kdecl"),
+    ("INVALID_HANDLE_VALUE", "kernel32_proc.kdecl"),
+    ("ERROR_SUCCESS", "advapi32.kdecl"),
+    ("ERROR_FILE_NOT_FOUND", "advapi32.kdecl"),
+    ("ERROR_ACCESS_DENIED", "advapi32.kdecl"),
 ];
 
 #[test]
@@ -747,13 +747,13 @@ fn the_borrowed_names_are_still_declared_by_a_sibling() {
     let mut declared: Vec<String> = Vec::new();
     for entry in std::fs::read_dir(&kit).expect("read kits/win") {
         let path = entry.expect("a directory entry").path();
-        if path.extension().and_then(|e| e.to_str()) != Some("oed") {
+        if path.extension().and_then(|e| e.to_str()) != Some("kdecl") {
             continue;
         }
-        if path.file_name().and_then(|f| f.to_str()) == Some("kernel32_mem.oed") {
+        if path.file_name().and_then(|f| f.to_str()) == Some("kernel32_mem.kdecl") {
             continue;
         }
-        let text = std::fs::read_to_string(&path).expect("read a sibling .oed");
+        let text = std::fs::read_to_string(&path).expect("read a sibling .kdecl");
         for line in text.lines() {
             for lead in ["dll ", "record ", "const "] {
                 if let Some(rest) = line.strip_prefix(lead) {
@@ -769,20 +769,20 @@ fn the_borrowed_names_are_still_declared_by_a_sibling() {
     for (name, owner) in BORROWED {
         assert!(
             declared.iter().any(|d| d == name),
-            "`{name}` is used by kernel32_mem.oed and was expected from {owner}, but no \
-             sibling .oed in kits/win declares it any more — either that sibling moved it \
-             or kernel32_mem.oed must declare it itself"
+            "`{name}` is used by kernel32_mem.kdecl and was expected from {owner}, but no \
+             sibling .kdecl in kits/win declares it any more — either that sibling moved it \
+             or kernel32_mem.kdecl must declare it itself"
         );
     }
 
     // And the other half of the bargain: this file must not declare them, or
     // the merged kit is a name-collision error.
-    let mine = std::fs::read_to_string(kit.join("kernel32_mem.oed")).expect("read the file");
+    let mine = std::fs::read_to_string(kit.join("kernel32_mem.kdecl")).expect("read the file");
     for (name, _) in BORROWED {
         for lead in ["dll ", "record ", "const "] {
             assert!(
                 !mine.lines().any(|l| l.starts_with(&format!("{lead}{name}"))),
-                "kernel32_mem.oed declares `{name}`, which a sibling owns — one name, one file"
+                "kernel32_mem.kdecl declares `{name}`, which a sibling owns — one name, one file"
             );
         }
     }
@@ -793,18 +793,18 @@ fn the_borrowed_names_are_still_declared_by_a_sibling() {
 #[test]
 fn the_kit_is_refused_on_linux() {
     let dir = project("gate");
-    let src = dir.join("app.oir");
+    let src = dir.join("app.kiln");
     std::fs::write(
         &src,
         "module app\nuse win\nsub main\n  call print_int(MEM_COMMIT)\nend\n",
     )
     .unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "--os", "linux", "-o", dir.join("app").to_str().unwrap()])
         .current_dir(&dir)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(!out.status.success(), "a windows-only kit must not build for linux");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(

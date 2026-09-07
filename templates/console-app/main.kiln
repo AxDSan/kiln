@@ -1,0 +1,10 @@
+# A console program. Execution starts at `main`.
+module __MODULE__
+target console
+
+sub main
+  call print_text("Hello from Kiln.")
+
+  let answer = 6 * 7
+  call print_text("six times seven is {answer}")
+end

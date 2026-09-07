@@ -1,13 +1,13 @@
-//! The ADVAPI32 portion of the `win` kit: `kits/win/advapi32.oed`. It declares
+//! The ADVAPI32 portion of the `win` kit: `kits/win/advapi32.kdecl`. It declares
 //! the registry calls (RegOpenKeyExA and friends) and the access-token /
 //! privilege calls (OpenProcessToken, LookupPrivilegeValueA,
 //! AdjustTokenPrivileges) a program uses to raise SeDebugPrivilege, plus the
 //! HKEY/KEY/REG/TOKEN/SE constant families and the LUID / LUID_AND_ATTRIBUTES /
 //! TOKEN_PRIVILEGES structs those calls read and write.
 //!
-//! These tests copy *only* advapi32.oed into a throwaway project of their own,
+//! These tests copy *only* advapi32.kdecl into a throwaway project of their own,
 //! under `kits/win/`, so they exercise this one file regardless of the other
-//! `.oed` files a sibling stage drops into the real `kits/win/`. The kit is
+//! `.kdecl` files a sibling stage drops into the real `kits/win/`. The kit is
 //! marked windows-only, so the program is cross-built for Windows through mingw
 //! and run under wine; where either is missing the test says so and stops.
 //!
@@ -15,7 +15,7 @@
 //! see without a GUI or a second process: RegOpenKeyExA opening HKCU\Software
 //! returns ERROR_SUCCESS, and LookupPrivilegeValueA(NULL, "SeDebugPrivilege")
 //! returns TRUE and fills a LUID. The rest of the surface is proved by building
-//! for Windows and by `openepl commands --use win` listing it.
+//! for Windows and by `kiln commands --use win` listing it.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -34,15 +34,15 @@ fn on_path(tool: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// A throwaway project whose `kits/win/` holds *only* advapi32.oed and a
+/// A throwaway project whose `kits/win/` holds *only* advapi32.kdecl and a
 /// windows-only lib.json, so what these tests see is this stage's file alone.
 fn isolated_project(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_win_advapi32_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_win_advapi32_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     let kit = dir.join("kits").join("win");
     std::fs::create_dir_all(&kit).expect("create kit dir");
-    std::fs::copy(repo().join("kits/win/advapi32.oed"), kit.join("advapi32.oed"))
-        .expect("copy advapi32.oed into the isolated kit");
+    std::fs::copy(repo().join("kits/win/advapi32.kdecl"), kit.join("advapi32.kdecl"))
+        .expect("copy advapi32.kdecl into the isolated kit");
     std::fs::write(
         kit.join("lib.json"),
         "{ \"display\": \"Windows API\", \"section\": \"System\", \"version\": \"0.1.0\", \"platforms\": [\"windows\"] }\n",
@@ -80,19 +80,19 @@ sub main
 end
 ";
 
-/// `openepl commands --use win` lists advapi32's dlls, its c-records and its
+/// `kiln commands --use win` lists advapi32's dlls, its c-records and its
 /// constants — the listing works on Linux even though a build cannot, so
 /// Studio completion and the generated reference see the Win32 surface. This
 /// runs everywhere; it needs no cross toolchain.
 #[test]
 fn commands_lists_the_advapi32_surface() {
     let dir = isolated_project("list");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["commands", "--use", "win"])
         .current_dir(&dir) // so kits/win resolves as the project kit
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl commands");
+        .expect("run kiln commands");
     assert!(out.status.success(), "commands --use win failed: {}", String::from_utf8_lossy(&out.stderr));
     let text = String::from_utf8_lossy(&out.stdout);
     let has = |needle: &str| text.lines().any(|l| l.contains(needle));
@@ -133,16 +133,16 @@ fn commands_lists_the_advapi32_surface() {
 fn advapi32_is_refused_on_linux() {
     let dir = isolated_project("gate");
     std::fs::write(
-        dir.join("app.oir"),
+        dir.join("app.kiln"),
         "module app\nuse win\nsub main\n  call print_int(REG_SZ)\nend\n",
     )
     .unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
-        .args(["build", dir.join("app.oir").to_str().unwrap(), "--os", "linux", "-o", dir.join("app").to_str().unwrap()])
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["build", dir.join("app.kiln").to_str().unwrap(), "--os", "linux", "-o", dir.join("app").to_str().unwrap()])
         .current_dir(&dir)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(!out.status.success(), "a windows-only kit must not build for linux");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("win") && err.contains("linux"), "the error must name the kit and the OS, got:\n{err}");
@@ -159,15 +159,15 @@ fn advapi32_builds_and_runs_on_windows() {
         return;
     }
     let dir = isolated_project("run");
-    let src = dir.join("prog.oir");
+    let src = dir.join("prog.kiln");
     std::fs::write(&src, PROGRAM).expect("write program source");
     let exe = dir.join("prog.exe");
-    let build = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let build = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "--os", "windows", "-o", exe.to_str().unwrap()])
         .current_dir(&dir)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(
         build.status.success(),
         "cross build failed:\n{}",

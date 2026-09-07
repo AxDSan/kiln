@@ -22,7 +22,7 @@ fn repo() -> PathBuf {
 }
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_optional_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_optional_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch");
     dir
@@ -44,16 +44,16 @@ fn write(path: &Path, text: &str) {
 fn write_kit(dir: &Path, manifest: &str) {
     write(
         &dir.join("opt_libinfo.c"),
-        r#"#include "openepl_abi.h"
-void opt_answer(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv);
-static const OpenEPL_CommandDesc C[] = {
-    { "opt_answer", "opt_answer", OE_SDT_INT, 0, 0 },
+        r#"#include "kiln_abi.h"
+void opt_answer(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
+static const Kiln_CommandDesc C[] = {
+    { "opt_answer", "opt_answer", KN_SDT_INT, 0, 0 },
 };
-static const OpenEPL_LibInfo I = {
-    OPENEPL_ABI_VERSION, "opt", "openepl-test-opt-0000-0000-6f707401", 1, 0, 0,
+static const Kiln_LibInfo I = {
+    KILN_ABI_VERSION, "opt", "kiln-test-opt-0000-0000-6f707401", 1, 0, 0,
     (int32_t)(sizeof(C) / sizeof(C[0])), C, 0, 0,
 };
-const OpenEPL_LibInfo *openepl_get_lib_info(void) { return &I; }
+const Kiln_LibInfo *kiln_get_lib_info(void) { return &I; }
 "#,
     );
     // The `#ifdef` is the whole point: with the dependency absent this file
@@ -61,7 +61,7 @@ const OpenEPL_LibInfo *openepl_get_lib_info(void) { return &I; }
     // archive, all three of which only exist under the macro.
     write(
         &dir.join("opt_cmds.c"),
-        r#"#include "openepl_abi.h"
+        r#"#include "kiln_abi.h"
 #ifdef OPT_HAVE_DEP
 #include "opt_dep.h"
 /* A define that arrives with the dependency has no value to return, so it is
@@ -70,12 +70,12 @@ const OpenEPL_LibInfo *openepl_get_lib_info(void) { return &I; }
 #error "optional_defines did not reach the compiler"
 #endif
 #endif
-void opt_answer(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void opt_answer(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
 #ifdef OPT_HAVE_DEP
-    oe_ret_int(ret, opt_dep_archive() + opt_dep_source());
+    kn_ret_int(ret, opt_dep_archive() + opt_dep_source());
 #else
-    oe_ret_int(ret, 0);
+    kn_ret_int(ret, 0);
 #endif
 }
 "#,
@@ -136,7 +136,7 @@ fn manifest(dep: &Path, marker: &Path) -> String {
 }
 
 fn program(dir: &Path) -> PathBuf {
-    let path = dir.join("prog.oir");
+    let path = dir.join("prog.kiln");
     write(
         &path,
         "module prog\nuse opt\nsub main\n  call print_int(opt_answer())\nend\n",
@@ -144,14 +144,14 @@ fn program(dir: &Path) -> PathBuf {
     path
 }
 
-fn openepl(cwd: &Path, home: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_openepl"))
+fn kiln(cwd: &Path, home: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(args)
         .current_dir(cwd)
         .env("HOME", home)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl")
+        .expect("run kiln")
 }
 
 /// Build and run, returning stdout.
@@ -160,7 +160,7 @@ fn build_and_run(root: &Path, tag: &str) -> String {
     std::fs::create_dir_all(&home).expect("create home");
     let src = program(root);
     let bin = root.join(tag);
-    let out = openepl(
+    let out = kiln(
         root,
         &home,
         &["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()],
@@ -231,7 +231,7 @@ fn the_command_surface_is_the_same_in_both_states() {
     let home = absent.join("home");
     std::fs::create_dir_all(&home).expect("create home");
     let listing = |cwd: &Path| {
-        let out = openepl(cwd, &home, &["commands", "--use", "opt"]);
+        let out = kiln(cwd, &home, &["commands", "--use", "opt"]);
         assert!(
             out.status.success(),
             "commands failed: {}",
@@ -266,7 +266,7 @@ fn a_missing_hard_requirement_still_fails_loudly() {
     let home = root.join("home");
     std::fs::create_dir_all(&home).expect("create home");
     let src = program(&root);
-    let out = openepl(
+    let out = kiln(
         &root,
         &home,
         &["build", src.to_str().unwrap(), "-o", root.join("hard").to_str().unwrap()],
@@ -306,7 +306,7 @@ fn https_is_served_or_refused_and_never_downgraded() {
     let root = scratch("net_tls");
     let home = root.join("home");
     std::fs::create_dir_all(&home).expect("create home");
-    let src = root.join("tls.oir");
+    let src = root.join("tls.kiln");
     write(
         &src,
         "module tls\nuse net\nsub main\n  \
@@ -315,7 +315,7 @@ fn https_is_served_or_refused_and_never_downgraded() {
          call print_int(length(body))\nend\n",
     );
     let bin = root.join("tls");
-    let out = openepl(
+    let out = kiln(
         &root,
         &home,
         &["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()],
@@ -340,7 +340,7 @@ fn https_is_served_or_refused_and_never_downgraded() {
         assert_ne!(code, 10006, "https must work when mbedTLS is vendored");
         assert_ne!(code, 0, "nothing listens on port 1, so this cannot succeed");
     } else {
-        // OE_ERR_UNSUPPORTED, and an empty body: refused before a socket, not
+        // KN_ERR_UNSUPPORTED, and an empty body: refused before a socket, not
         // fetched over http.
         assert_eq!(code, 10006, "https must be refused when there is no TLS");
         assert!(
@@ -362,7 +362,7 @@ fn https_is_served_or_refused_and_never_downgraded() {
 ///
 /// What it asserts is the rule that must never bend: no TLS means the request
 /// is REFUSED. Not fetched over http, not returned empty and successful —
-/// refused, with OE_ERR_UNSUPPORTED and a message naming the fetch script.
+/// refused, with KN_ERR_UNSUPPORTED and a message naming the fetch script.
 #[test]
 fn without_tls_an_https_url_is_refused_on_any_machine() {
     let root = scratch("net_notls");
@@ -381,15 +381,15 @@ fn without_tls_an_https_url_is_refused_on_any_machine() {
         &kit.join("lib.json"),
         r#"{
   "name": "net",
-  "optional_requires": ["vendor/openepl-test-no-tls-here/libmbedtls.a"],
-  "optional_feature": "OPENEPL_NET_TLS",
-  "optional_include_dirs": ["vendor/openepl-test-no-tls-here/include"],
-  "optional_link_args": ["-Lvendor/openepl-test-no-tls-here", "-lmbedtls"]
+  "optional_requires": ["vendor/kiln-test-no-tls-here/libmbedtls.a"],
+  "optional_feature": "KILN_NET_TLS",
+  "optional_include_dirs": ["vendor/kiln-test-no-tls-here/include"],
+  "optional_link_args": ["-Lvendor/kiln-test-no-tls-here", "-lmbedtls"]
 }
 "#,
     );
 
-    let src = root.join("notls.oir");
+    let src = root.join("notls.kiln");
     write(
         &src,
         "module notls\nuse net\nsub main\n  \
@@ -399,7 +399,7 @@ fn without_tls_an_https_url_is_refused_on_any_machine() {
          call print_text(last_error_text())\nend\n",
     );
     let bin = root.join("notls");
-    let out = openepl(
+    let out = kiln(
         &root,
         &home,
         &["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()],
@@ -419,7 +419,7 @@ fn without_tls_an_https_url_is_refused_on_any_machine() {
     assert_eq!(
         lines.next().map(str::trim),
         Some("10006"),
-        "https without TLS must fail with OE_ERR_UNSUPPORTED: {printed}"
+        "https without TLS must fail with KN_ERR_UNSUPPORTED: {printed}"
     );
     // Nothing came back, and nothing could have: a body here would mean the
     // request went out in the clear.

@@ -1,0 +1,108 @@
+# Reading and writing the Windows registry, with nothing but `use win`.
+#
+#   kiln build examples/win/registry.kiln --os windows -o registry.exe
+#
+# The registry is the third of the kit that has nothing to do with windows or
+# with memory, and it is the one whose declarations are easiest to get subtly
+# wrong: an HKEY is pointer-width but the predefined roots are numbers, a
+# value's size is an in-out cell rather than an argument, and every one of the
+# twelve entry points answers a LONG status rather than a BOOL.
+#
+# Everything below happens under HKEY_CURRENT_USER\Software\Kiln\KitProof,
+# which this program creates and deletes again. RegCreateKeyExA makes the
+# whole path, so `Software\Kiln` is created too and deleted on the way out;
+# RegDeleteKeyA refuses a key that still has subkeys, so the order matters and
+# the parent goes second.
+#
+# Every line prints `<label> ok` or `<label> FAILED`.
+module registry
+use win
+
+const PARENT = "Software\\Kiln"
+const SUBKEY = "Software\\Kiln\\KitProof"
+
+sub say(label: text, ok: bool)
+  if ok
+    call print_text(label + " ok")
+  else
+    call print_text(label + " FAILED")
+  end
+end
+
+sub main
+  let root: ptr = ptr_from_int(HKEY_CURRENT_USER)
+
+  # --- create the key ---------------------------------------------------
+  # `out_key` is a PHKEY: a cell the API writes a handle into. `disposition`
+  # is another out cell, saying whether the key was made or already existed.
+  let key_cell: ptr = mem_alloc(8)
+  let disp_cell: ptr = mem_alloc(4)
+  call mem_zero(key_cell, 8)
+  call mem_zero(disp_cell, 4)
+
+  let made: int = RegCreateKeyExA(root, SUBKEY, 0, ptr_null(), REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, ptr_null(), key_cell, disp_cell)
+  call say("create", made = ERROR_SUCCESS)
+  if made <> ERROR_SUCCESS
+    return
+  end
+  let key: ptr = ptr_read_ptr(key_cell, 0)
+  call say("handle", not ptr_is_null(key))
+
+  # --- write a DWORD ----------------------------------------------------
+  # RegSetValueExA takes a pointer to the bytes and their count, so a DWORD is
+  # four bytes at a cell this program owns.
+  let dword: ptr = mem_alloc(4)
+  call ptr_write_int(dword, 0, 1979)
+  let set_num: int = RegSetValueExA(key, "Build", 0, REG_DWORD, dword, 4)
+  call say("set dword", set_num = ERROR_SUCCESS)
+
+  # --- write a string ---------------------------------------------------
+  # A REG_SZ's byte count includes the terminating NUL, which is the classic
+  # off-by-one of the registry API.
+  let name: text = "Kiln"
+  let set_text: int = RegSetValueExA(key, "Product", 0, REG_SZ, ptr_of_text(name), 8)
+  call say("set text", set_text = ERROR_SUCCESS)
+
+  # --- read them back ---------------------------------------------------
+  # `lpcbdata` is in-out: on the way in it is the buffer's size, on the way
+  # out the number of bytes written. It has to be reset before each call.
+  let type_cell: ptr = mem_alloc(4)
+  let size_cell: ptr = mem_alloc(4)
+  let buffer: ptr = mem_alloc(64)
+
+  call ptr_write_int(size_cell, 0, 4)
+  call mem_zero(buffer, 64)
+  let got_num: int = RegQueryValueExA(key, "Build", ptr_null(), type_cell, buffer, size_cell)
+  call say("query dword", got_num = ERROR_SUCCESS)
+  call say("dword type", ptr_read_int(type_cell, 0) = REG_DWORD)
+  call say("dword value", ptr_read_int(buffer, 0) = 1979)
+
+  call ptr_write_int(size_cell, 0, 64)
+  call mem_zero(buffer, 64)
+  let got_text: int = RegQueryValueExA(key, "Product", ptr_null(), type_cell, buffer, size_cell)
+  call say("query text", got_text = ERROR_SUCCESS)
+  call say("text type", ptr_read_int(type_cell, 0) = REG_SZ)
+  call say("text value", ptr_read_text(buffer) = "Kiln")
+  call print_text("product " + ptr_read_text(buffer))
+
+  # --- and put the machine back -----------------------------------------
+  call say("delete value", RegDeleteValueA(key, "Build") = ERROR_SUCCESS)
+  call say("close", RegCloseKey(key) = ERROR_SUCCESS)
+  call say("delete key", RegDeleteKeyA(root, SUBKEY) = ERROR_SUCCESS)
+  call say("delete parent", RegDeleteKeyA(root, PARENT) = ERROR_SUCCESS)
+
+  # A key that is gone answers ERROR_FILE_NOT_FOUND rather than success, which
+  # is how the delete above is checked rather than assumed.
+  let reopen: ptr = mem_alloc(8)
+  call mem_zero(reopen, 8)
+  call say("gone", RegOpenKeyExA(root, SUBKEY, 0, KEY_READ, reopen) <> ERROR_SUCCESS)
+
+  call mem_free(key_cell)
+  call mem_free(disp_cell)
+  call mem_free(dword)
+  call mem_free(type_cell)
+  call mem_free(size_cell)
+  call mem_free(buffer)
+  call mem_free(reopen)
+  call print_text("done")
+end

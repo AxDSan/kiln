@@ -1,9 +1,9 @@
 /* Bridge between the substrate-free a11y model and the platform adapter.
  * Kept separate so ui_rmlui.cpp never includes AccessKit headers. */
-#ifndef OPENEPL_A11Y_BRIDGE_H
-#define OPENEPL_A11Y_BRIDGE_H
+#ifndef KILN_A11Y_BRIDGE_H
+#define KILN_A11Y_BRIDGE_H
 
-namespace openepl::a11y {
+namespace kiln::a11y {
 
 void bridge_init();       /* create the platform adapter (no-op if unavailable) */
 
@@ -19,5 +19,5 @@ void bridge_publish();    /* push the current model; cheap when no AT is attache
 bool bridge_active();     /* has an assistive technology connected? */
 void bridge_shutdown();
 
-} // namespace openepl::a11y
+} // namespace kiln::a11y
 #endif

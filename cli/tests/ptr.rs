@@ -1,5 +1,5 @@
 //! End-to-end tests for the `ptr` type and the raw-memory commands: build
-//! `examples/ptr.oir` to a native binary, run it, and check that every
+//! `examples/ptr.kiln` to a native binary, run it, and check that every
 //! pointer operation round-trips the value it was handed.
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -11,23 +11,23 @@ fn repo() -> PathBuf {
         .to_path_buf()
 }
 
-/// Build `<repo>/examples/<name>.oir` to a temp binary; `tag` must be unique
+/// Build `<repo>/examples/<name>.kiln` to a temp binary; `tag` must be unique
 /// per test so parallel tests do not race on the output path (see build.rs).
 fn build_as(name: &str, tag: &str) -> PathBuf {
     let repo = repo();
-    let example = repo.join("examples").join(format!("{name}.oir"));
-    let out_bin = std::env::temp_dir().join(format!("openepl_{name}_{tag}_test"));
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let example = repo.join("examples").join(format!("{name}.kiln"));
+    let out_bin = std::env::temp_dir().join(format!("kiln_{name}_{tag}_test"));
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
             example.to_str().unwrap(),
             "-o",
             out_bin.to_str().unwrap(),
         ])
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
-        .expect("run openepl");
-    assert!(status.success(), "openepl build {name} failed");
+        .expect("run kiln");
+    assert!(status.success(), "kiln build {name} failed");
     out_bin
 }
 
@@ -58,7 +58,7 @@ fn ptr_example_builds_and_runs() {
             "same",         // two names for one address compare equal
             "null-ok",      // ptr_is_null(ptr_null())
             "123",          // a write through ptr_offset is visible from the base
-            "OpenEPL",      // ptr_write_text copies a text (with its NUL)
+            "Kiln",      // ptr_write_text copies a text (with its NUL)
         ],
         "unexpected ptr output:\n{stdout}"
     );

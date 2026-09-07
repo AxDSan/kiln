@@ -29,7 +29,7 @@ end
 
 `main` prints one line and returns, and the program keeps running. A server is
 a live event source, exactly like a timer, and the runtime's loop stays in it
-until something calls `quit`. `examples/webserver.oir` starts you here.
+until something calls `quit`. `examples/webserver.kiln` starts you here.
 
 ## The request is a parameter, not a place
 
@@ -133,8 +133,8 @@ components, `tcpserver` and `tcpclient`, the pair a Delphi programmer knows as
 `TIdTCPServer` and `TIdTCPClient`. Drop one from Studio's toolbox or declare it
 at module level, set a port, wire the events, switch it on with `active`.
 
-Here is a whole echo server. It is `examples/tcpecho.oir`, and it runs as
-`openepl run examples/tcpecho.oir 7000` with `nc localhost 7000` in another
+Here is a whole echo server. It is `examples/tcpecho.kiln`, and it runs as
+`kiln run examples/tcpecho.kiln 7000` with `nc localhost 7000` in another
 terminal:
 
 ```
@@ -313,7 +313,7 @@ the client gives up.
 | `tcpclient_disconnect(client)` | `bool` — false with code 0 when there was nothing to close |
 | `tcpclient_connected(client)` | `bool` |
 
-`examples/tcpchat.oir` is a form with one of these on it: a memo for the
+`examples/tcpchat.kiln` is a form with one of these on it: a memo for the
 conversation, an editbox, and Send and Connect buttons. Run it against the echo
 server above.
 
@@ -349,7 +349,7 @@ zero byte.
 
 ## https is optional, and never assumed
 
-TLS is a dependency you opt into. OpenEPL links a program's libraries in, so a
+TLS is a dependency you opt into. Kiln links a program's libraries in, so a
 TLS stack is vendored into every binary that uses one — megabytes of code and a
 security-critical dependency to patch on someone else's schedule. Nobody who
 only speaks `http://` should pay that, and nobody who wants `https://` should
@@ -360,7 +360,7 @@ tools/fetch-mbedtls.sh     # once; everything else builds without it
 ```
 
 With mbedTLS vendored, `net_http_get("https://...")` works and the default port
-becomes 443. Without it, the same call **fails** with `OE_ERR_UNSUPPORTED`
+becomes 443. Without it, the same call **fails** with `KN_ERR_UNSUPPORTED`
 (`10006`) and a message naming the script. Every other command, and every other
 library, builds and behaves identically either way.
 
@@ -368,7 +368,7 @@ library, builds and behaves identically either way.
 
 **No downgrade.** An `https://` URL is never rewritten to `http://` — not when
 TLS is missing, and not when a server answers a redirect with an `http://`
-`Location:`. That redirect is refused with `OE_ERR_UNSUPPORTED`. A silent
+`Location:`. That redirect is refused with `KN_ERR_UNSUPPORTED`. A silent
 downgrade would put a password on the wire in the clear and the program that
 "worked" would be the vulnerability.
 
@@ -382,9 +382,9 @@ request and says why — expired, wrong name, unknown issuer.
 
 The store is found at one of the usual locations
 (`/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt`, and
-the rest). `OPENEPL_CA_BUNDLE` overrides it with a file or a directory, which is
+the rest). `KILN_CA_BUNDLE` overrides it with a file or a directory, which is
 what a container, a corporate proxy or a test with its own certificate needs. If
-no store can be found the request fails with `OE_ERR_UNSUPPORTED` rather than
+no store can be found the request fails with `KN_ERR_UNSUPPORTED` rather than
 falling back to trusting everything — that fallback is the same hole arriving
 through a different door.
 

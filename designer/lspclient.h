@@ -1,14 +1,14 @@
 // A Language Server Protocol client for Studio's code editor.
 //
-// Studio speaks to the same `openepl lsp` that VS Code and Neovim use, rather
+// Studio speaks to the same `kiln lsp` that VS Code and Neovim use, rather
 // than growing a second, private analysis path. Whatever the server learns to
 // do, every editor gets — including this one.
 //
 // The transport is the fork + non-blocking pipe pattern used for the build and
 // for running programs: the frame loop drains it, so a slow or silent server
 // can never stall the UI.
-#ifndef OPENEPL_DESIGNER_LSPCLIENT_H
-#define OPENEPL_DESIGNER_LSPCLIENT_H
+#ifndef KILN_DESIGNER_LSPCLIENT_H
+#define KILN_DESIGNER_LSPCLIENT_H
 
 #include <fcntl.h>
 #include <map>
@@ -23,7 +23,7 @@
 #include "json.h"
 #include "portable.h"
 
-namespace openepl::lsp {
+namespace kiln::lsp {
 
 /// A span of the document, 0-based as the protocol reports it. Columns are
 /// UTF-16 units on the wire; the editor treats them as character columns,
@@ -59,7 +59,7 @@ inline bool read_range(const json::Value& r, Range& out) {
 
 /// A definition answer is one Location, a references answer is a list, and
 /// either is null when the server has nothing — a command's definition lives
-/// in C, not in any `.oir`. All three shapes come back as a list.
+/// in C, not in any `.kiln`. All three shapes come back as a list.
 inline std::vector<Location> read_locations(const json::Value& v) {
     std::vector<Location> out;
     auto one = [&](const json::Value& l) {
@@ -127,12 +127,12 @@ public:
 
     const std::string& uri() const { return uri_; }
 
-    /// Launch `<openepl_bin> lsp` and complete the handshake.
-    bool start(const std::string& openepl_bin, const std::string& root_dir) {
+    /// Launch `<kiln_bin> lsp` and complete the handshake.
+    bool start(const std::string& kiln_bin, const std::string& root_dir) {
 #ifdef _WIN32
         // CreateProcess with both pipes; the server's stderr goes to the null
         // device, since a GUI program has no terminal to let it reach.
-        if (!openepl::sys::spawn(child_, openepl::sys::quote_arg(openepl_bin) + " lsp", false, true))
+        if (!kiln::sys::spawn(child_, kiln::sys::quote_arg(kiln_bin) + " lsp", false, true))
             return false;
 #else
         int to_child[2], from_child[2];
@@ -152,7 +152,7 @@ public:
             ::close(from_child[1]);
             // The server's own logging goes to stderr; let it reach the
             // terminal rather than mixing into the protocol stream.
-            ::execlp(openepl_bin.c_str(), openepl_bin.c_str(), "lsp", (char*)nullptr);
+            ::execlp(kiln_bin.c_str(), kiln_bin.c_str(), "lsp", (char*)nullptr);
             _exit(127);
         }
         ::close(to_child[0]);
@@ -170,17 +170,17 @@ public:
 
         send("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{"
              "\"processId\":null,\"capabilities\":{},\"rootUri\":\"" +
-             json::escape(openepl::sys::file_uri(root_dir)) + "\"}}");
+             json::escape(kiln::sys::file_uri(root_dir)) + "\"}}");
         send("{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}");
         return true;
     }
 
     void did_open(const std::string& path, const std::string& text) {
         if (!running()) return;
-        uri_ = openepl::sys::file_uri(path);
+        uri_ = kiln::sys::file_uri(path);
         send("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{"
              "\"textDocument\":{\"uri\":\"" + json::escape(uri_) +
-             "\",\"languageId\":\"openepl\",\"version\":1,\"text\":\"" + json::escape(text) +
+             "\",\"languageId\":\"kiln\",\"version\":1,\"text\":\"" + json::escape(text) +
              "\"}}}");
     }
 
@@ -265,9 +265,9 @@ public:
         char buf[4096];
 #ifdef _WIN32
         int n;
-        while ((n = openepl::sys::read_nonblocking(child_.out, buf, sizeof buf)) > 0)
+        while ((n = kiln::sys::read_nonblocking(child_.out, buf, sizeof buf)) > 0)
             inbuf_.append(buf, (size_t)n);
-        if (n == 0) openepl::sys::close_output(child_);   // the server closed its end
+        if (n == 0) kiln::sys::close_output(child_);   // the server closed its end
 #else
         ssize_t n;
         while ((n = ::read(out_, buf, sizeof buf)) > 0) inbuf_.append(buf, (size_t)n);
@@ -301,14 +301,14 @@ public:
         send("{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":null}");
         send("{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}");
 #ifdef _WIN32
-        openepl::sys::close_stdin(child_);
+        kiln::sys::close_stdin(child_);
         int code = 0;
-        for (int i = 0; i < 100 && !openepl::sys::try_wait(child_, code); i++) Sleep(10);
-        if (!openepl::sys::try_wait(child_, code)) {
-            openepl::sys::terminate(child_);
+        for (int i = 0; i < 100 && !kiln::sys::try_wait(child_, code); i++) Sleep(10);
+        if (!kiln::sys::try_wait(child_, code)) {
+            kiln::sys::terminate(child_);
             WaitForSingleObject(child_.process, INFINITE);
         }
-        openepl::sys::release(child_);
+        kiln::sys::release(child_);
         return;
 #else
         if (in_ >= 0) { ::close(in_); in_ = -1; }
@@ -337,8 +337,8 @@ private:
             "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
 #ifdef _WIN32
         if (!child_.in) return;
-        if (!openepl::sys::write_all(child_.in, frame.data(), frame.size()))
-            openepl::sys::close_stdin(child_);   // the server died; drop the pipe
+        if (!kiln::sys::write_all(child_.in, frame.data(), frame.size()))
+            kiln::sys::close_stdin(child_);   // the server died; drop the pipe
         return;
 #else
         if (in_ < 0) return;
@@ -388,7 +388,7 @@ private:
     static constexpr int FIRST_ID = 100;
 
 #ifdef _WIN32
-    openepl::sys::Child child_;
+    kiln::sys::Child child_;
 #else
     pid_t pid_ = 0;
     int in_ = -1;
@@ -403,6 +403,6 @@ private:
     std::map<int, json::Value> responses_;
 };
 
-} // namespace openepl::lsp
+} // namespace kiln::lsp
 
 #endif

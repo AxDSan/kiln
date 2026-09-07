@@ -1,0 +1,269 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Kiln",
+  "scopeName": "source.kiln",
+  "patterns": [
+    {
+      "include": "#comment"
+    },
+    {
+      "include": "#raw-block-string"
+    },
+    {
+      "include": "#block-string"
+    },
+    {
+      "include": "#raw-string"
+    },
+    {
+      "include": "#string"
+    },
+    {
+      "include": "#number"
+    },
+    {
+      "include": "#buildtarget"
+    },
+    {
+      "include": "#indirect"
+    },
+    {
+      "include": "#declaration"
+    },
+    {
+      "include": "#dot-call"
+    },
+    {
+      "include": "#member"
+    },
+    {
+      "include": "#assignment"
+    },
+    {
+      "include": "#keyword"
+    },
+    {
+      "include": "#statement-word"
+    },
+    {
+      "include": "#expression-word"
+    },
+    {
+      "include": "#type"
+    },
+    {
+      "include": "#constant"
+    },
+    {
+      "include": "#call"
+    },
+    {
+      "include": "#bitwise"
+    },
+    {
+      "include": "#operator"
+    }
+  ],
+  "repository": {
+    "comment": {
+      "match": "#.*$",
+      "name": "comment.line.number-sign.kiln"
+    },
+    "string": {
+      "name": "string.quoted.double.kiln",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "include": "#interpolation"
+        },
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.kiln"
+        }
+      ]
+    },
+    "block-string": {
+      "comment": "A block literal. Its escapes still escape, so it is the ordinary string rule with a longer delimiter; it is listed before `string` so the opening `\"\"\"` is not claimed as an empty literal followed by a quote.",
+      "name": "string.quoted.triple.kiln",
+      "begin": "\"\"\"",
+      "end": "\"\"\"",
+      "patterns": [
+        {
+          "include": "#interpolation"
+        },
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.kiln"
+        }
+      ]
+    },
+    "raw-block-string": {
+      "comment": "Raw: nothing inside is interpreted, so the body has no patterns at all — which is exactly the difference the highlighting should show.",
+      "name": "string.quoted.triple.raw.kiln",
+      "begin": "r\"\"\"",
+      "end": "\"\"\""
+    },
+    "raw-string": {
+      "name": "string.quoted.double.raw.kiln",
+      "begin": "r\"",
+      "end": "\""
+    },
+    "interpolation": {
+      "comment": "A text literal carries `{expr}` holes — `\"n is {f(a)}\"` — and a hole holds a whole expression, so the language highlights inside it. `{{` and `}}` are the escaped single braces and are claimed first, before either can open a hole. The hole includes itself so the braces of a dict literal inside one balance rather than closing it. The raw literals above have no holes at all, which is the difference they exist to show.",
+      "patterns": [
+        {
+          "match": "\\{\\{|\\}\\}",
+          "name": "constant.character.escape.kiln"
+        },
+        {
+          "begin": "\\{",
+          "end": "\\}",
+          "name": "meta.embedded.expression.kiln",
+          "patterns": [
+            {
+              "include": "#interpolation"
+            },
+            {
+              "include": "$self"
+            }
+          ]
+        }
+      ]
+    },
+    "number": {
+      "comment": "Hex and binary bit patterns first, so `0xFF` is one number rather than `0` followed by a name. `_` groups digits.",
+      "patterns": [
+        {
+          "match": "\\b0[xX][0-9a-fA-F_]+\\b",
+          "name": "constant.numeric.hex.kiln"
+        },
+        {
+          "match": "\\b0[bB][01_]+\\b",
+          "name": "constant.numeric.binary.kiln"
+        },
+        {
+          "match": "\\b\\d[0-9_]*(\\.[0-9_]+)?\\b",
+          "name": "constant.numeric.kiln"
+        }
+      ]
+    },
+    "declaration": {
+      "patterns": [
+        {
+          "comment": "The name being declared is highlighted as an entity, not as a plain identifier — it is what the outline and go-to-definition target.",
+          "match": "\\b(module|sub|form)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.kiln"
+            },
+            "2": {
+              "name": "entity.name.function.kiln"
+            }
+          }
+        },
+        {
+          "match": "\\b(let|var)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.kiln"
+            },
+            "2": {
+              "name": "variable.other.kiln"
+            }
+          }
+        },
+        {
+          "comment": "`on click: handler` binds an event to a subroutine.",
+          "match": "\\b(on)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.kiln"
+            },
+            "2": {
+              "name": "entity.name.tag.kiln"
+            }
+          }
+        }
+      ]
+    },
+    "keyword": {
+      "match": "\\b(module|use|target|sub|end|let|var|call|if|else|while|for|break|continue|return|form|on|and|or|not)\\b",
+      "name": "keyword.control.kiln"
+    },
+    "statement-word": {
+      "comment": "The statement words that lead a block or a check. Like the bitwise operators they are soft keywords in the language — a variable may still be named for one — which a grammar this size cannot tell apart, so a name that collides is highlighted as the keyword.",
+      "match": "\\b(match|when|repeat|times|assert|enum|defer|some|where|const|record|is|increment|decrement)\\b",
+      "name": "keyword.control.kiln"
+    },
+    "expression-word": {
+      "comment": "The words that join or guard a value: `then` for the `if` written as a value, `otherwise` for what a failure or an absent optional falls back to, `check` for the call that returns early, `as` for the name `if some` binds, `in`/`to`/`step` for a range and the `for` that walks one, and `each`/`of`/`from` for `for each` and a list comprehension. Soft keywords too, with the same caveat as above.",
+      "match": "\\b(then|otherwise|check|as|in|to|step|at|each|of|from)\\b",
+      "name": "keyword.control.kiln"
+    },
+    "type": {
+      "match": "\\b(int|int64|double|bool|text|bytes|ptr)\\b",
+      "name": "support.type.kiln"
+    },
+    "constant": {
+      "match": "\\b(true|false|none)\\b",
+      "name": "constant.language.kiln"
+    },
+    "call": {
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+      "name": "entity.name.function.call.kiln"
+    },
+    "dot-call": {
+      "comment": "`raw.trim().uppercase()` — the dot-call sugar puts a command after `.`, so a called name there is a call, not a property. Listed before `member`, which would otherwise claim it.",
+      "match": "(?<=\\.)([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+      "name": "entity.name.function.call.kiln"
+    },
+    "member": {
+      "comment": "A name after `.` that is not called is a component property or event; `#dot-call` above claims the called ones.",
+      "match": "(?<=\\.)([A-Za-z_][A-Za-z0-9_]*)",
+      "name": "variable.other.property.kiln"
+    },
+    "indirect": {
+      "comment": "`call through fp(...)` calls a function pointer. `through` means that only straight after `call` — it is a soft keyword and a variable may still be named for it — so the pair is matched together rather than the word alone.",
+      "match": "\\b(call)\\s+(through)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.control.kiln"
+        },
+        "2": {
+          "name": "keyword.control.kiln"
+        }
+      }
+    },
+    "bitwise": {
+      "comment": "The word operators — the bitwise ones, and `mod`. They are soft keywords in the language — a variable may be named for one — which a grammar this size cannot tell apart, so a name that collides is highlighted as the operator.",
+      "match": "\\b(band|bor|bxor|bnot|shl|shr|ushr|mod)\\b",
+      "name": "keyword.operator.word.kiln"
+    },
+    "operator": {
+      "match": "(\\.\\.|[-+*/&]=|<=|>=|<>|[-+*/=<>?&])",
+      "name": "keyword.operator.kiln"
+    },
+    "assignment": {
+      "comment": "A name on the left of `=` or of a compound `+=`/`-=`/`*=`/`/=`/`&=` is an assignment target or a form property, never a type — `text = \"hi\"` must not highlight as the `text` type.",
+      "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(?=[-+*/&]?=[^=])",
+      "captures": {
+        "1": {
+          "name": "variable.other.kiln"
+        }
+      }
+    },
+    "buildtarget": {
+      "comment": "Build-target kinds, meaningful only after `target`.",
+      "match": "\\b(target)\\s+(console|gui|sharedlib|staticlib|shared|static|dll|so)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.control.kiln"
+        },
+        "2": {
+          "name": "support.constant.kiln"
+        }
+      }
+    }
+  }
+}

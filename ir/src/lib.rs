@@ -1,4 +1,4 @@
-//! OpenEPL e-code IR — v0.1 (Phase 1).
+//! Kiln e-code IR — v0.1 (Phase 1).
 //!
 //! The keystone artifact: a typed, tree-structured IR.  Phase 1 grows
 //! the v0 slice with `int64`/`double` slot types, **command return types** and
@@ -178,7 +178,7 @@ pub enum Ty {
     /// `WORD` field is unsigned far more often than it is a `SHORT`.
     Int16,
     /// A 32-bit IEEE float — a C-layout `record` field type only, spelled
-    /// `float`. OpenEPL has one floating type, `double`, so a `float` field is
+    /// `float`. Kiln has one floating type, `double`, so a `float` field is
     /// *read and written as `double`* (`Ty::surface` maps it) and the narrowing
     /// happens at the store: the value in the struct is a real 4-byte `float`,
     /// which is what a C API that declares one expects.
@@ -256,7 +256,7 @@ impl Ty {
             Ty::Array(Elem::Double) => "double[]",
             Ty::Array(Elem::Text) => "text[]",
             Ty::Array(Elem::Bool) => "bool[]",
-            // Read in a signature, not in a sentence: `openepl commands` shows
+            // Read in a signature, not in a sentence: `kiln commands` shows
             // `append(array, element) -> array`. The diagnostics that need a
             // phrase spell it out themselves.
             Ty::AnyArray => "array",
@@ -302,7 +302,7 @@ impl Ty {
     }
 
     /// This field type's size and alignment in a C struct, on every 64-bit
-    /// target OpenEPL emits (x86-64 SysV and Windows x64 agree for scalars).
+    /// target Kiln emits (x86-64 SysV and Windows x64 agree for scalars).
     /// `None` for a type that has no by-value C layout — the aggregates and the
     /// signature-only tags — so the caller can reject it with a real message.
     pub fn c_size_align(self) -> Option<(i64, i64)> {
@@ -310,7 +310,7 @@ impl Ty {
             Ty::Byte => (1, 1),
             // A `WORD`/`uint16_t` member: two bytes, aligned to two.
             Ty::Int16 => (2, 2),
-            // A C `float` is four bytes aligned to four, whatever OpenEPL
+            // A C `float` is four bytes aligned to four, whatever Kiln
             // reads it as.
             Ty::Float => (4, 4),
             Ty::Int => (4, 4),
@@ -363,29 +363,29 @@ impl Ty {
         )
     }
 
-    /// The ABI `SDT_*` numeric tag (must match `abi/openepl_abi.h`).
+    /// The ABI `SDT_*` numeric tag (must match `abi/kiln_abi.h`).
     ///
     /// Array-ness is a flag bit above the element tag rather than a block of
     /// new numbers, because every `SDT_*` value is frozen: `int[]` has to be
     /// expressible without moving `int`.
     pub fn sdt_tag(self) -> i32 {
-        const ARRAY: i32 = 0x100; // OE_SDT_ARRAY_FLAG
-        const DICT: i32 = 0x200; // OE_SDT_DICT_FLAG
-        const RECORD: i32 = 13; // OE_SDT_RECORD
-        const ALL: i32 = 255; // OE_SDT_ALL
+        const ARRAY: i32 = 0x100; // KN_SDT_ARRAY_FLAG
+        const DICT: i32 = 0x200; // KN_SDT_DICT_FLAG
+        const RECORD: i32 = 13; // KN_SDT_RECORD
+        const ALL: i32 = 255; // KN_SDT_ALL
         match self {
-            Ty::Int => 3,    // OE_SDT_INT
-            Ty::Int64 => 4,  // OE_SDT_INT64
-            Ty::Double => 6, // OE_SDT_DOUBLE
-            Ty::Text => 9,   // OE_SDT_TEXT
-            Ty::Bool => 8,   // OE_SDT_BOOL
-            Ty::Bytes => 10, // OE_SDT_BIN
-            Ty::Ptr => 14,   // OE_SDT_PTR
+            Ty::Int => 3,    // KN_SDT_INT
+            Ty::Int64 => 4,  // KN_SDT_INT64
+            Ty::Double => 6, // KN_SDT_DOUBLE
+            Ty::Text => 9,   // KN_SDT_TEXT
+            Ty::Bool => 8,   // KN_SDT_BOOL
+            Ty::Bytes => 10, // KN_SDT_BIN
+            Ty::Ptr => 14,   // KN_SDT_PTR
             // A byte is a c-record layout type; it never crosses the slot ABI
             // (a byte field surfaces as `int`), so this arm exists only to keep
             // the match exhaustive and is never reached in marshaling.
-            Ty::Byte | Ty::Int16 => 3, // read as OE_SDT_INT
-            Ty::Float => 6,            // reads as OE_SDT_DOUBLE
+            Ty::Byte | Ty::Int16 => 3, // read as KN_SDT_INT
+            Ty::Float => 6,            // reads as KN_SDT_DOUBLE
             // An inline array is a c-record field type and nothing else: it
             // never becomes a value that crosses the slot ABI (indexing one
             // yields the element's surface type), so this arm only keeps the
@@ -409,7 +409,7 @@ impl Ty {
     }
 
     /// Map an ABI `SDT_*` tag back to an IR type; `None` for tags not modeled in
-    /// this phase (or `OE_SDT_NULL`, used for void returns).
+    /// this phase (or `KN_SDT_NULL`, used for void returns).
     pub fn from_sdt_tag(tag: i32) -> Option<Ty> {
         const ARRAY: i32 = 0x100;
         const DICT: i32 = 0x200;
@@ -1141,7 +1141,7 @@ pub struct Sub {
     /// The calling convention marker on the sub header (`sub wndproc(...): int64
     /// system`). It documents the convention C will invoke this sub with when
     /// its `address of` is handed across, and — like a `dll`'s — is a no-op on
-    /// every 64-bit target OpenEPL emits, carried for a future 32-bit backend.
+    /// every 64-bit target Kiln emits, carried for a future 32-bit backend.
     /// It lives only on this AST node: `Signature` (what the registry keeps for
     /// argument checking) deliberately does not carry it, so a future backend
     /// reads it via `module.subs()`, not `reg.sub()`.
@@ -1250,7 +1250,7 @@ pub enum Item {
 
 /// The C calling convention a foreign call — or a sub whose address is handed to
 /// C — is made with. It is a documentation-and-forward-compat marker only:
-/// every target OpenEPL emits today is 64-bit (x86-64 Linux, x64 Windows, 64-bit
+/// every target Kiln emits today is 64-bit (x86-64 Linux, x64 Windows, 64-bit
 /// macOS), and each of those has a *single* C convention, so `cdecl`, `stdcall`
 /// and `system` all name the same one and the backend emits identical code for
 /// each. The marker is carried so a future 32-bit backend — where the three
@@ -1305,7 +1305,7 @@ pub struct DllDecl {
     /// Declared parameters, in order. Only the C-representable types are
     /// allowed here (`int`, `int64`, `double`, `bool`, `text`, `ptr`); the
     /// parser rejects the rest, because there is no honest way to hand an
-    /// OpenEPL array or record to a C function by value in this stage.
+    /// Kiln array or record to a C function by value in this stage.
     pub params: Vec<(String, Ty)>,
     /// Declared return type; `None` is a call-only foreign function (C `void`).
     pub ret: Option<Ty>,
@@ -1318,7 +1318,7 @@ pub struct DllDecl {
     pub symbol: Option<String>,
     /// The calling convention marker, from the optional word after `from`/`as`
     /// (`... from "user32" system`). `None` when the declaration names none.
-    /// A no-op on every target OpenEPL emits — see `CallConv` — carried for a
+    /// A no-op on every target Kiln emits — see `CallConv` — carried for a
     /// future 32-bit backend.
     pub conv: Option<CallConv>,
     /// 1-based source line of the `dll` keyword; 0 when unknown.
@@ -1337,7 +1337,7 @@ impl DllDecl {
             // A foreign function has parameter names, so `MessageBoxA(text: "hi")`
             // works — but no defaults: the C function on the other side has no
             // opinion about a missing argument, and inventing one here would be
-            // OpenEPL guessing at someone else's contract.
+            // Kiln guessing at someone else's contract.
             names: self.params.iter().map(|(n, _)| n.clone()).collect(),
             defaults: vec![None; self.params.len()],
         }

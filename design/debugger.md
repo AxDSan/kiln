@@ -1,13 +1,13 @@
-# The OpenEPL debugger
+# The Kiln debugger
 
-**Status:** Done. Phases 0–7 are implemented and shipped: an OpenEPL program
+**Status:** Done. Phases 0–7 are implemented and shipped: an Kiln program
 can be built, stopped on a line, stepped through, paused while running, and
 read — its call stack, its variables, and what a name holds when you hover it —
 from the command line, from VS Code, and from Studio. Phase 8 (component state
 at a breakpoint, break-on-click) is the RAD tier beyond this and is not
 started.
 
-OpenEPL ships its own debugger. Not a wrapper around gdb or lldb, and not a
+Kiln ships its own debugger. Not a wrapper around gdb or lldb, and not a
 dependency on either being installed — the bundle's promise is "unpack and
 run, nothing to install", and a debugger that needs a system debugger breaks
 it. Every layer below is ours.
@@ -29,11 +29,11 @@ Three layers, and the middle one is where "ours" lives.
    `!DILocation` on every instruction from `Stmt.line`, `!DILocalVariable` +
    `#dbg_declare` on the alloca slots. This layer is needed whatever sits on
    top of it.
-2. **`openepl debug`** — a Rust binary speaking **DAP over stdio**, backed by
-   a new `openepl-debug` crate: ptrace for process control, `gimli` for DWARF
+2. **`kiln debug`** — a Rust binary speaking **DAP over stdio**, backed by
+   a new `kiln-debug` crate: ptrace for process control, `gimli` for DWARF
    and CFI, `object` for ELF. This is the house shape (the CLI does the work,
    Studio drives it as a subprocess) and it is `lspclient.h` again. It owns
-   the *OpenEPL* model: arrays shown 1-based, `text` rendered as characters,
+   the *Kiln* model: arrays shown 1-based, `text` rendered as characters,
    records with real field names, runtime frames filtered out of a backtrace,
    step-over that does not descend into `print_text`. DAP also means the VS
    Code extension gets debugging for free — one server, many editors.
@@ -44,7 +44,7 @@ Three layers, and the middle one is where "ours" lives.
 
 Owning the engine is what buys the RAD tier, and the RAD tier is the point:
 breaking inside an `on_click` handler and seeing both your variables *and*
-the form's component state. A `.debug_openepl` sidecar section carries the
+the form's component state. A `.debug_kiln` sidecar section carries the
 component → handle map, so Studio can show a Components scope beside Locals
 and offer "break when this button is clicked". Classic 易语言 never reached
 that tier — its own community's defect list records only single-step, watch,
@@ -57,12 +57,12 @@ Each ships alone and names the command that proves it.
 | # | What | Proven by |
 |---|---|---|
 | 0 | **Hoist the inline allocas** — done, 0.10.1 | a million command calls in a loop exits 0 |
-| 1 | **A line table — done** | `objdump --dwarf=decodedline` lists a row per statement, and gdb breaks on `loops.oir:24`, shows the source, and backtraces |
-| 2 | **The symbol layer — done.** `openepl-debug`, a 4th workspace member | the engine's line table is identical to objdump's, row for row |
-| 3 | **Unwinding via gimli's CFI — done** | `cargo test -p openepl-debug`; a frame-pointer walk was measured to fail at *every* address, not just at `low_pc` |
+| 1 | **A line table — done** | `objdump --dwarf=decodedline` lists a row per statement, and gdb breaks on `loops.kiln:24`, shows the source, and backtraces |
+| 2 | **The symbol layer — done.** `kiln-debug`, a 4th workspace member | the engine's line table is identical to objdump's, row for row |
+| 3 | **Unwinding via gimli's CFI — done** | `cargo test -p kiln-debug`; a frame-pointer walk was measured to fail at *every* address, not just at `low_pc` |
 | 4 | **Launch, breakpoints, stepping, backtrace — done** | `cli/tests/debug.rs` drives a session that stops on line 6, steps to 7, follows the back edge to 5, and returns to 6 |
 | 5 | **Locals — done.** Records, text, optionals | `p` reads as `point { x: 3, y: 4 }` and `name` as `"ada"` |
-| 6 | **DAP — done.** `openepl dap` over stdio | the end-to-end test drives the whole handshake over pipes |
+| 6 | **DAP — done.** `kiln dap` over stdio | the end-to-end test drives the whole handshake over pipes |
 | 7 | **Studio — done.** Gutter, stopped line, transport, panes, hover | a scripted session of nine checks, plus a rendered frame that was looked at |
 | 8 | The RAD wins: component state at a breakpoint, break-on-click | a click drives a stop with the button's caption shown |
 
@@ -92,9 +92,9 @@ Stock gdb is used as an *oracle*, never as a dependency: if gdb cannot see our
 lines, nothing we write will either.
 
 ```
-Breakpoint 1, oe_user_main () at examples/loops.oir:24
+Breakpoint 1, kn_user_main () at examples/loops.kiln:24
 24	  call print_text("-- fizzbuzz, counted --")
-#0  oe_user_main () at examples/loops.oir:24
+#0  kn_user_main () at examples/loops.kiln:24
 #1  0x0000000000400c36 in ECodeStart ()
 #2  0x000000000040168c in main ()
 ```
@@ -104,12 +104,12 @@ symbol layer can read both from the start.
 
 ## What Phase 2 actually did
 
-`debug/` is a new workspace member, `openepl-debug`. It loads a built program
+`debug/` is a new workspace member, `kiln-debug`. It loads a built program
 with `object`, reads the line program with `gimli`, and indexes it both ways:
 address → line, and line → the address a breakpoint goes at. It runs nothing;
 there is no `ptrace` in it. Seven transitive dependencies, all MIT-compatible.
 
-`openepl debug --dump-lines / --dump-subs / --resolve / --at` exercises it.
+`kiln debug --dump-lines / --dump-subs / --resolve / --at` exercises it.
 
 Two things the first attempt got wrong, both found by comparing against an
 oracle rather than by reading the code:
@@ -121,17 +121,17 @@ oracle rather than by reading the code:
   explicit, as the critique demanded, rather than a side effect of where
   unwinding happens to stop.
 - **`LineTablesOnly` emits no `DW_TAG_subprogram` DIEs.** Function extents
-  come from the ELF symbol table instead, keyed on the `oe_user_` prefix. That
+  come from the ELF symbol table instead, keyed on the `kn_user_` prefix. That
   is enough for "which function is this address in", and it is stripped by
   `--release` on exactly the same terms as the line table.
 
-`--resolve loops.oir:24` returns `0x400557` — the same address gdb picks for
-`break loops.oir:24`, arrived at independently.
+`--resolve loops.kiln:24` returns `0x400557` — the same address gdb picks for
+`break loops.kiln:24`, arrived at independently.
 
 ## How Studio wires up (Phases 7 and 8)
 
-Studio talks to `openepl debug` the same way it already talks to
-`openepl lsp`: a subprocess on a pipe, speaking a JSON protocol with
+Studio talks to `kiln debug` the same way it already talks to
+`kiln lsp`: a subprocess on a pipe, speaking a JSON protocol with
 `Content-Length` framing. `designer/dbgclient.h` is `lspclient.h` again —
 same spawn, same non-blocking read loop, same `updated_`/`has_update()`
 pattern for replies that land between frames.
@@ -179,11 +179,11 @@ do, and the distinction is nearly free once a line table exists.
 **New panes** join the existing bottom dock beside PROBLEMS and OUTPUT:
 Variables, Call Stack, Watch — and Components, only when the program has a
 form. Tables rather than a command prompt, which is what this product family's
-users expect. The call stack shows OpenEPL frames by default with a "show
+users expect. The call stack shows Kiln frames by default with a "show
 internal frames" toggle: a click handler's real stack is `main → ECodeStart →
-oe_ui_run → oe_loop_run → ui_pump → Backend::ProcessEvents → [SDL] → [RmlUi
-dispatch] → HandlerBridge::ProcessEvent → oe_evt_on_click_i32 →
-oe_user_on_click`, and showing all twelve makes the pane useless. **Filtering
+kn_ui_run → kn_loop_run → ui_pump → Backend::ProcessEvents → [SDL] → [RmlUi
+dispatch] → HandlerBridge::ProcessEvent → kn_evt_on_click_i32 →
+kn_user_on_click`, and showing all twelve makes the pane useless. **Filtering
 is by DWARF producer, not by symbol prefix** — the runtime's C is compiled in
 the same build, so a prefix test would misclassify it.
 
@@ -221,8 +221,8 @@ has plain Run on the toolbar. The menu bar gains a Debug menu carrying the
 same actions with their shortcuts shown, because a control that exists only as
 a key nobody has been told about does not exist.
 
-**Breakpoints live on `.oir` lines, and the file is the source of truth.**
-Studio's Code view shows the whole module, so gutter row *N* is `.oir` line
+**Breakpoints live on `.kiln` lines, and the file is the source of truth.**
+Studio's Code view shows the whole module, so gutter row *N* is `.kiln` line
 *N* is the line the DWARF names — there is no mapping layer and nothing to
 drift. Two consequences that have to be handled or the feature lies:
 
@@ -237,7 +237,7 @@ drift. Two consequences that have to be handled or the feature lies:
   there is one place to do it — and a breakpoint whose line is deleted
   outright is removed rather than left pointing at someone else's code.
 
-**Where breakpoints are stored.** In the session, not in the `.oir`: a
+**Where breakpoints are stored.** In the session, not in the `.kiln`: a
 breakpoint is a thing about *debugging this program now*, not a fact about the
 program, and writing them into the source would put them in the user's next
 commit. They persist across a rebuild within a session and are gone when
@@ -253,9 +253,9 @@ Fixtures are **console** programs, so the debuggee never opens a window.
 The proof is a rendered frame, not a passing assertion:
 
 ```sh
-OPENEPL_DESIGNER_DUMP=/tmp/stop.ppm \
-OPENEPL_DESIGNER_SCRIPT='view:code;bp:12;dbgrun;waitstop;locals;dbgnext;waitstop' \
-  designer/openepl-designer /tmp/fixture.oir target/release/openepl
+KILN_DESIGNER_DUMP=/tmp/stop.ppm \
+KILN_DESIGNER_SCRIPT='view:code;bp:12;dbgrun;waitstop;locals;dbgnext;waitstop' \
+  designer/kiln-designer /tmp/fixture.kiln target/release/kiln
 ```
 
 — and then looking at the frame for the solid dot on 12, the tint on 13, and a
@@ -302,7 +302,7 @@ Each is a silent-failure class — wrong without an error message.
   handler sits under 8–12 non-user frames across three languages. RmlUi is
   built `Release` with no `-g`, so a return-address breakpoint there has
   nothing to map to; the runtime *will* have a line table, so a user pressing
-  `next` would start stepping OpenEPL's own event loop.
+  `next` would start stepping Kiln's own event loop.
 - **`.eh_frame` per mapped module.** SDL2 links shared (`-lSDL2`; there is no
   `libSDL2.a`), so pausing an idle form app stops inside `libSDL2.so` and a
   single-module unwinder yields a one-frame stack.

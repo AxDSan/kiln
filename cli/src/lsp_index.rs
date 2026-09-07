@@ -5,7 +5,7 @@
 //! completion and hover have to keep working in exactly that state. An
 //! AST-derived index would go dark at the moment it is most needed.
 //!
-//! This is sound for OpenEPL v0.3 because the validator already enforces a
+//! This is sound for Kiln v0.3 because the validator already enforces a
 //! single module-level namespace: a name cannot be both a subroutine and a
 //! module variable and a component id. The one genuine ambiguity is **local
 //! shadowing** — a `let x` inside a subroutine must not resolve to a module
@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use openepl_ir::lexer::{lex, Spanned, Tok};
+use kiln_ir::lexer::{lex, Spanned, Tok};
 
 /// What kind of thing a name refers to. Drives both the icon a client shows in
 /// completion and whether go-to-definition has anywhere to go.

@@ -1,5 +1,5 @@
-//! OpenEPL backend (Phase 2): typed IR -> textual LLVM IR (`.ll`), emitting the
-//! real **slot ABI** calling convention (abi/openepl_abi.h).
+//! Kiln backend (Phase 2): typed IR -> textual LLVM IR (`.ll`), emitting the
+//! real **slot ABI** calling convention (abi/kiln_abi.h).
 //!
 //! Every command is invoked as `void cmd(Slot* ret, i32 argc, Slot* argv)`
 //!.  For each call the backend allocates an argv array of `%Slot`s and
@@ -8,10 +8,10 @@
 //! — G8), then reads the return slot back.  `clang` assembles + links this
 //! against the static-linked command implementations (BlackMoon model, D1).
 //!
-//! `%Slot = { i32 tag, i32 pad, i64 value }` mirrors `OpenEPL_Slot` (16 bytes,
+//! `%Slot = { i32 tag, i32 pad, i64 value }` mirrors `Kiln_Slot` (16 bytes,
 //! value at offset 8), enforced by `_Static_assert` on the C side.
 //!
-//! Assumes the module passed `openepl_ir::validate`.  Entry is `ECodeStart`.
+//! Assumes the module passed `kiln_ir::validate`.  Entry is `ECodeStart`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
@@ -82,13 +82,13 @@ impl std::fmt::Display for Body {
 }
 
 
-use openepl_ir::sema::resolve_ret;
-use openepl_ir::registry::{ComponentKind, DllSig};
-use openepl_ir::{
+use kiln_ir::sema::resolve_ret;
+use kiln_ir::registry::{ComponentKind, DllSig};
+use kiln_ir::{
     BinOp, BitOp, CmpOp, Component, Elem, Expr, LogicalOp, Module, Registry, Signature, Ty,
 };
 
-/// Accessibility role for a form root (`OE_ROLE_WINDOW`, abi/openepl_abi.h).
+/// Accessibility role for a form root (`KN_ROLE_WINDOW`, abi/kiln_abi.h).
 fn form_role() -> i32 {
     1
 }
@@ -185,7 +185,7 @@ fn llvm_ty(t: Ty) -> &'static str {
 ///    exported wrapper under its plain name so a host can call it through the
 ///    C ABI. Internal calls keep the mangled name, so the two never collide.
 ///
-/// User subroutines each lower to their own `@oe_user_<name>` function so an
+/// User subroutines each lower to their own `@kn_user_<name>` function so an
 /// event handler can be bound by pointer. Handler names never appear as data —
 /// there is no name-based dispatch at runtime (G8).
 pub fn lower_module(m: &Module, reg: &Registry) -> Result<String, LowerError> {
@@ -217,7 +217,7 @@ pub fn lower_module_from(
     // one, a record update into the literal it stands for. Running it here as
     // well is what keeps the two from ever disagreeing about what a call means
     // — there is one implementation, and both call it.
-    let (desugared, sugar_errs) = openepl_ir::desugar::desugar(m, reg);
+    let (desugared, sugar_errs) = kiln_ir::desugar::desugar(m, reg);
     if let Some(first) = sugar_errs.first() {
         return err(first.msg.clone());
     }
@@ -237,7 +237,7 @@ pub fn lower_module_from(
         reg,
         strings: Vec::new(),
         body: Body::default(),
-        debug: source.map(|p| debug::DebugInfo::new(p, concat!("OpenEPL ", env!("CARGO_PKG_VERSION")))),
+        debug: source.map(|p| debug::DebugInfo::new(p, concat!("Kiln ", env!("CARGO_PKG_VERSION")))),
         scope: None,
         stmt_line: 0,
         vars: HashMap::new(),
@@ -276,7 +276,7 @@ pub fn lower_module_from(
     // Each subroutine becomes its own function, with its declared parameters
     // and return type as a plain native signature — so a call is a call, and
     // recursion needs nothing special. A sub with neither (an entry point, an
-    // event handler) still lowers to exactly `void @oe_user_x()`.
+    // event handler) still lowers to exactly `void @kn_user_x()`.
     let mut functions = String::new();
     for sub in &subs {
         lo.body.clear();
@@ -309,7 +309,7 @@ pub fn lower_module_from(
         // `defer` is copied to the block exits here, where the sub's return
         // type is known: a deferred cleanup must not run before the value the
         // `return` is carrying has been computed.
-        let body = openepl_ir::expand_defer(&sub.body, sub.ret);
+        let body = kiln_ir::expand_defer(&sub.body, sub.ret);
         for stmt in &body {
             lo.stmt(stmt)?;
         }
@@ -417,7 +417,7 @@ pub fn lower_module_from(
         writeln!(lo.body, "  call void @{}()", user_symbol("main")).unwrap();
     }
     // The event loop runs last, after start-up code has had its say. A module
-    // with a form enters the same loop through `oe_ui_run`, which registers the
+    // with a form enters the same loop through `kn_ui_run`, which registers the
     // window as one source among whatever else is live.
     if !forms.is_empty() {
         lo.form_run();
@@ -431,14 +431,14 @@ pub fn lower_module_from(
 /// Symbol for a user subroutine. Prefixed so user names can never collide with
 /// runtime symbols.
 fn user_symbol(name: &str) -> String {
-    format!("oe_user_{name}")
+    format!("kn_user_{name}")
 }
 
 /// The module-level global that caches a foreign function's resolved address.
 /// One per `dll` declaration, so the symbol is looked up once however many
 /// times it is called.
 fn dll_cache_symbol(name: &str) -> String {
-    format!("oe_dllp_{name}")
+    format!("kn_dllp_{name}")
 }
 
 /// `i32 %p0, ptr %p1` — a parameter list for a `define`.
@@ -460,7 +460,7 @@ fn param_args(params: &[(String, Ty)], prefix: &str) -> String {
 /// Symbol for a module variable. `internal` linkage, so it is not exported and
 /// the name is dropped by `strip` in release builds (G8).
 fn global_symbol(name: &str) -> String {
-    format!("oe_g_{name}")
+    format!("kn_g_{name}")
 }
 
 /// A lowered value: its slot type plus its LLVM operand (a literal or `%tN`).
@@ -507,7 +507,7 @@ struct Lowerer<'a> {
     /// a fixed set of `&'static str`.
     component_libs: BTreeSet<String>,
     /// Whether the entry point runs the event loop itself (a module with a form
-    /// enters it through `oe_ui_run`).
+    /// enters it through `kn_ui_run`).
     loop_used: bool,
     /// Handler thunks, keyed by the symbol they define so two bindings of one
     /// subroutine emit one function. See `handler_symbol`.
@@ -539,7 +539,7 @@ struct Lowerer<'a> {
     /// The return type of the subroutine being lowered, so `return []` knows
     /// what an empty list should hold.
     ret_ty: Option<Ty>,
-    /// Whether any lowered code aborts through `oe_notify`, which is declared
+    /// Whether any lowered code aborts through `kn_notify`, which is declared
     /// only when it is actually called.
     needs_notify: bool,
     /// Whether the error slot is cleared anywhere — an optional's initializer
@@ -550,7 +550,7 @@ struct Lowerer<'a> {
     /// calls, so the symbol is looked up once no matter how many call sites
     /// there are. Deduped by name here; emitted in `finish_with`.
     dll_cached: BTreeSet<String>,
-    /// Whether any `dll` call was lowered, which declares `oe_dll_get`.
+    /// Whether any `dll` call was lowered, which declares `kn_dll_get`.
     needs_dll_get: bool,
     /// Whether any `dll` returns text, which declares the copy helper.
     needs_dll_text: bool,
@@ -587,14 +587,14 @@ impl Lowerer<'_> {
     }
 
     /// Render a property value literal as the text the UI layer expects.
-    /// Values are textual at the D10 boundary in v0 (see abi/openepl_ui.h).
+    /// Values are textual at the D10 boundary in v0 (see abi/kiln_ui.h).
     fn property_text(&self, e: &Expr) -> Result<String, LowerError> {
         Ok(match e {
             Expr::TextLit(s) => s.clone(),
             Expr::IntLit(v) => v.to_string(),
             // A property written as a bit pattern (`width = 0x1E0`) is a
             // literal like any other; the UI layer wants the number.
-            Expr::BitsLit(v) => openepl_ir::sema::bits_value(*v).to_string(),
+            Expr::BitsLit(v) => kiln_ir::sema::bits_value(*v).to_string(),
             Expr::DoubleLit(v) => format!("{v}"),
             Expr::BoolLit(b) => b.to_string(),
             _ => return err("component property values must be literals in v0.2"),
@@ -603,13 +603,13 @@ impl Lowerer<'_> {
 
     /// Assign each component its compile-time handle constant.
     ///
-    /// Handles count from 1 in creation order, per library (abi/openepl_abi.h),
+    /// Handles count from 1 in creation order, per library (abi/kiln_abi.h),
     /// which is exactly the order the create calls below are emitted in. The
     /// form root is the `ui` library's handle 1, so its children start at 2;
     /// every other library starts at 1. Two libraries' counters never meet,
     /// because a handle is only ever passed back to the entry points of the
     /// library that issued it.
-    fn map_components(&mut self, form: Option<&openepl_ir::Form>, module_components: &[&Component]) {
+    fn map_components(&mut self, form: Option<&kiln_ir::Form>, module_components: &[&Component]) {
         let mut next: HashMap<String, u64> = HashMap::new();
         if form.is_some() {
             next.insert("ui".to_string(), 2);
@@ -643,7 +643,7 @@ impl Lowerer<'_> {
     /// Create a non-visual component and apply its properties and bindings.
     ///
     /// Every step has a visual counterpart in `form_build` doing the same job
-    /// through `oe_ui_*`: that symmetry is the point of the `kind` field, and
+    /// through `kn_ui_*`: that symmetry is the point of the `kind` field, and
     /// is why the inspector, the checker and the code preview need no new
     /// concepts to show a timer.
     fn build_component(&mut self, c: &Component) -> Result<(), LowerError> {
@@ -655,7 +655,7 @@ impl Lowerer<'_> {
         let handle = self.fresh();
         writeln!(
             self.body,
-            "  {handle} = call i64 @oe_{lib}_component_create(ptr {type_op})"
+            "  {handle} = call i64 @kn_{lib}_component_create(ptr {type_op})"
         )
         .unwrap();
         for (name, value) in &c.properties {
@@ -666,9 +666,9 @@ impl Lowerer<'_> {
         Ok(())
     }
 
-    fn form_build(&mut self, form: &openepl_ir::Form) -> Result<(), LowerError> {
+    fn form_build(&mut self, form: &kiln_ir::Form) -> Result<(), LowerError> {
         // Window geometry/title come from the form's own properties.
-        let mut title = "OpenEPL Application".to_string();
+        let mut title = "Kiln Application".to_string();
         let (mut width, mut height) = (800i64, 600i64);
         for (name, value) in &form.properties {
             match name.as_str() {
@@ -680,17 +680,17 @@ impl Lowerer<'_> {
         }
 
         let title_op = self.cstr(&title);
-        self.ui_used.insert("oe_ui_init");
+        self.ui_used.insert("kn_ui_init");
         writeln!(
             self.body,
-            "  call i32 @oe_ui_init(ptr {title_op}, i32 {width}, i32 {height})"
+            "  call i32 @kn_ui_init(ptr {title_op}, i32 {width}, i32 {height})"
         )
         .unwrap();
 
         // The root is always handle 1; children follow in creation order.
-        self.ui_used.insert("oe_ui_root");
+        self.ui_used.insert("kn_ui_root");
         let root_tmp = self.fresh();
-        writeln!(self.body, "  {root_tmp} = call i64 @oe_ui_root()").unwrap();
+        writeln!(self.body, "  {root_tmp} = call i64 @kn_ui_root()").unwrap();
         let root = "1".to_string();
 
         // Root properties (skip the window-level ones already consumed).
@@ -715,11 +715,11 @@ impl Lowerer<'_> {
                 })?;
             let role = desc.a11y_role;
             let type_op = self.cstr(&child.type_name);
-            self.ui_used.insert("oe_ui_create");
+            self.ui_used.insert("kn_ui_create");
             let handle = self.fresh();
             writeln!(
                 self.body,
-                "  {handle} = call i64 @oe_ui_create(i64 {root}, ptr {type_op})"
+                "  {handle} = call i64 @kn_ui_create(i64 {root}, ptr {type_op})"
             )
             .unwrap();
 
@@ -752,18 +752,18 @@ impl Lowerer<'_> {
     fn loop_run(&mut self) {
         self.loop_used = true;
         let rc = self.fresh();
-        writeln!(self.body, "  {rc} = call i32 @oe_loop_run()").unwrap();
+        writeln!(self.body, "  {rc} = call i32 @kn_loop_run()").unwrap();
         self.exit_code = Some(rc);
     }
 
     /// Start the event loop and tear down. Emitted after start-up code.
     fn form_run(&mut self) {
-        self.ui_used.insert("oe_ui_run");
+        self.ui_used.insert("kn_ui_run");
         let rc = self.fresh();
-        writeln!(self.body, "  {rc} = call i32 @oe_ui_run()").unwrap();
+        writeln!(self.body, "  {rc} = call i32 @kn_ui_run()").unwrap();
         self.exit_code = Some(rc);
-        self.ui_used.insert("oe_ui_shutdown");
-        writeln!(self.body, "  call void @oe_ui_shutdown()").unwrap();
+        self.ui_used.insert("kn_ui_shutdown");
+        writeln!(self.body, "  call void @kn_ui_shutdown()").unwrap();
     }
 
     fn set_property(&mut self, lib: Option<&str>, handle: &str, name: &str, value: &str) {
@@ -778,32 +778,32 @@ impl Lowerer<'_> {
     fn setter(&mut self, lib: Option<&str>) -> String {
         match lib {
             None => {
-                self.ui_used.insert("oe_ui_set");
-                "oe_ui_set".to_string()
+                self.ui_used.insert("kn_ui_set");
+                "kn_ui_set".to_string()
             }
             Some(lib) => {
                 self.component_libs.insert(lib.to_string());
-                format!("oe_{lib}_component_set")
+                format!("kn_{lib}_component_set")
             }
         }
     }
 
     /// Record the a11y role with no accessible name (see the G8 note above).
     fn a11y_role_only(&mut self, handle: &str, role: i32) {
-        self.ui_used.insert("oe_ui_set_a11y");
+        self.ui_used.insert("kn_ui_set_a11y");
         writeln!(
             self.body,
-            "  call i32 @oe_ui_set_a11y(i64 {handle}, i32 {role}, ptr null)"
+            "  call i32 @kn_ui_set_a11y(i64 {handle}, i32 {role}, ptr null)"
         )
         .unwrap();
     }
 
     fn a11y(&mut self, handle: &str, role: i32, name: &str) {
         let n = self.cstr(name);
-        self.ui_used.insert("oe_ui_set_a11y");
+        self.ui_used.insert("kn_ui_set_a11y");
         writeln!(
             self.body,
-            "  call i32 @oe_ui_set_a11y(i64 {handle}, i32 {role}, ptr {n})"
+            "  call i32 @kn_ui_set_a11y(i64 {handle}, i32 {role}, ptr {n})"
         )
         .unwrap();
     }
@@ -820,12 +820,12 @@ impl Lowerer<'_> {
             let ev = self.cstr(event);
             let f = match lib {
                 None => {
-                    self.ui_used.insert("oe_ui_on");
-                    "oe_ui_on".to_string()
+                    self.ui_used.insert("kn_ui_on");
+                    "kn_ui_on".to_string()
                 }
                 Some(lib) => {
                     self.component_libs.insert(lib.to_string());
-                    format!("oe_{lib}_component_on")
+                    format!("kn_{lib}_component_on")
                 }
             };
             let target = self.handler_symbol(type_name, event, sub);
@@ -862,7 +862,7 @@ impl Lowerer<'_> {
             .map(|t| llvm_ty(*t))
             .collect::<Vec<_>>()
             .join("_");
-        let name = format!("oe_evt_{sub}_{shape}");
+        let name = format!("kn_evt_{sub}_{shape}");
         if !self.thunks.contains_key(&name) {
             let decls = params
                 .iter()
@@ -905,7 +905,7 @@ impl Lowerer<'_> {
         Ok(())
     }
 
-    fn block(&mut self, stmts: &[openepl_ir::Stmt]) -> Result<(), LowerError> {
+    fn block(&mut self, stmts: &[kiln_ir::Stmt]) -> Result<(), LowerError> {
         for s in stmts {
             self.stmt(s)?;
         }
@@ -1076,7 +1076,7 @@ impl Lowerer<'_> {
     /// statement's own trailing instructions — a loop's increment, its branch
     /// back — belong to the statement that owns them rather than to the last
     /// statement of its body.
-    fn stmt(&mut self, s: &openepl_ir::Stmt) -> Result<(), LowerError> {
+    fn stmt(&mut self, s: &kiln_ir::Stmt) -> Result<(), LowerError> {
         let enclosing = self.body.loc;
         let enclosing_line = self.stmt_line;
         if s.line > 0 {
@@ -1092,8 +1092,8 @@ impl Lowerer<'_> {
         result
     }
 
-    fn stmt_at(&mut self, s: &openepl_ir::Stmt) -> Result<(), LowerError> {
-        use openepl_ir::StmtKind;
+    fn stmt_at(&mut self, s: &kiln_ir::Stmt) -> Result<(), LowerError> {
+        use kiln_ir::StmtKind;
         match &s.kind {
             // Erased by the desugar; reaching one means the module was lowered
             // without it.
@@ -1224,10 +1224,10 @@ impl Lowerer<'_> {
                             ));
                         }
                         let raw = self.emit_arg_i64(&v);
-                        self.aggr_used.insert("oe_dict_put");
+                        self.aggr_used.insert("kn_dict_put");
                         writeln!(
                             self.body,
-                            "  call void @oe_dict_put(ptr {}, ptr {}, i64 {raw})",
+                            "  call void @kn_dict_put(ptr {}, ptr {}, i64 {raw})",
                             target.operand, i.operand
                         )
                         .unwrap();
@@ -1241,10 +1241,10 @@ impl Lowerer<'_> {
                                 v.ty.as_str()
                             ));
                         }
-                        self.aggr_used.insert("oe_bin_set");
+                        self.aggr_used.insert("kn_bin_set");
                         writeln!(
                             self.body,
-                            "  call void @oe_bin_set(ptr {}, i32 {}, i32 {})",
+                            "  call void @kn_bin_set(ptr {}, i32 {}, i32 {})",
                             target.operand, i.operand, v.operand
                         )
                         .unwrap();
@@ -1260,10 +1260,10 @@ impl Lowerer<'_> {
                             ));
                         }
                         let raw = self.emit_arg_i64(&v);
-                        self.aggr_used.insert("oe_ary_set");
+                        self.aggr_used.insert("kn_ary_set");
                         writeln!(
                             self.body,
-                            "  call void @oe_ary_set(ptr {}, i32 {}, i64 {raw})",
+                            "  call void @kn_ary_set(ptr {}, i32 {}, i64 {raw})",
                             target.operand, i.operand
                         )
                         .unwrap();
@@ -1312,7 +1312,7 @@ impl Lowerer<'_> {
                 arms,
                 otherwise,
             } => {
-                use openepl_ir::Stmt;
+                use kiln_ir::Stmt;
                 let line = s.line;
                 let v = self.eval(scrutinee)?;
                 let ty = v.ty;
@@ -1432,7 +1432,7 @@ impl Lowerer<'_> {
             // handing it back to `self.stmt` keeps every loop — counter,
             // once-only bounds, break/continue — lowered in exactly one place.
             StmtKind::ForEach { elem, value, index, coll, body } => {
-                use openepl_ir::Stmt;
+                use kiln_ir::Stmt;
                 let line = s.line;
                 // Read the collection once and pin it to a hidden slot: the loop
                 // runs over one snapshot, so a body that grows it cannot make it
@@ -1440,7 +1440,7 @@ impl Lowerer<'_> {
                 let cv = self.eval(coll)?;
                 let cty = cv.ty;
                 let (elem_ty, value_ty) =
-                    openepl_ir::foreach_elem_types(cty).ok_or_else(|| LowerError {
+                    kiln_ir::foreach_elem_types(cty).ok_or_else(|| LowerError {
                         msg: format!("`for each` cannot iterate {}", cty.as_str()),
                     })?;
                 let coll_slot = self.alloca(cty);
@@ -1635,7 +1635,7 @@ impl Lowerer<'_> {
             } => {
                 if let Some(Ty::Record(rec)) = self.var_ty(component) {
                     // A c-record's field is a store into flat storage; the plain
-                    // record's stays the heap `oe_rec_set` below.
+                    // record's stays the heap `kn_rec_set` below.
                     if self.reg.record(rec).map(|d| d.is_c).unwrap_or(false) {
                         let base = self.eval(&Expr::Var(component.clone()))?;
                         return self.emit_c_field_write(rec, &base.operand, property, value);
@@ -1656,10 +1656,10 @@ impl Lowerer<'_> {
                         ));
                     }
                     let raw = self.emit_arg_i64(&v);
-                    self.aggr_used.insert("oe_rec_set");
+                    self.aggr_used.insert("kn_rec_set");
                     writeln!(
                         self.body,
-                        "  call void @oe_rec_set(ptr {}, i32 {pos}, i64 {raw})",
+                        "  call void @kn_rec_set(ptr {}, i32 {pos}, i64 {raw})",
                         base.operand
                     )
                     .unwrap();
@@ -1707,9 +1707,9 @@ impl Lowerer<'_> {
             )),
             _ => {
                 let sym = match v.ty {
-                    Ty::Int => "oe_int_to_text",
-                    Ty::Int64 => "oe_int64_to_text",
-                    _ => "oe_double_to_text",
+                    Ty::Int => "kn_int_to_text",
+                    Ty::Int64 => "kn_int64_to_text",
+                    _ => "kn_double_to_text",
                 };
                 let converted = self.call_symbol_1(sym, v)?;
                 Ok(converted)
@@ -1719,15 +1719,15 @@ impl Lowerer<'_> {
 
     /// Compare two text values by content via the runtime, yielding i32 0/1.
     fn call_text_eq(&mut self, a: &Val, b: &Val) -> Result<String, LowerError> {
-        self.call_symbol_2("oe_text_eq", a, b, Ty::Bool)
+        self.call_symbol_2("kn_text_eq", a, b, Ty::Bool)
     }
 
-    /// Abort with a runtime error message. `oe_notify(OE_NRS_RUNTIME_ERR, ...)`
+    /// Abort with a runtime error message. `kn_notify(KN_NRS_RUNTIME_ERR, ...)`
     /// prints and exits, so the block ends `unreachable`.
     fn runtime_error(&mut self, message: &str) {
         let m = self.cstr(message);
         self.needs_notify = true;
-        writeln!(self.body, "  call ptr @oe_notify(i32 5, ptr {m}, ptr null)").unwrap();
+        writeln!(self.body, "  call ptr @kn_notify(i32 5, ptr {m}, ptr null)").unwrap();
         writeln!(self.body, "  unreachable").unwrap();
     }
 
@@ -1953,7 +1953,7 @@ impl Lowerer<'_> {
             if hint == Some(Ty::Int64) {
                 return Ok(Val {
                     ty: Ty::Int64,
-                    operand: openepl_ir::sema::bits_value_int64(*v).to_string(),
+                    operand: kiln_ir::sema::bits_value_int64(*v).to_string(),
                 });
             }
         }
@@ -1986,11 +1986,11 @@ impl Lowerer<'_> {
         value: Elem,
         pairs: &[(Expr, Expr)],
     ) -> Result<Val, LowerError> {
-        self.aggr_used.insert("oe_dict_new");
+        self.aggr_used.insert("kn_dict_new");
         let d = self.fresh();
         writeln!(
             self.body,
-            "  {d} = call ptr @oe_dict_new(i32 {})",
+            "  {d} = call ptr @kn_dict_new(i32 {})",
             value.ty().sdt_tag()
         )
         .unwrap();
@@ -2011,10 +2011,10 @@ impl Lowerer<'_> {
                 ));
             }
             let raw = self.emit_arg_i64(&v);
-            self.aggr_used.insert("oe_dict_put");
+            self.aggr_used.insert("kn_dict_put");
             writeln!(
                 self.body,
-                "  call void @oe_dict_put(ptr {d}, ptr {}, i64 {raw})",
+                "  call void @kn_dict_put(ptr {d}, ptr {}, i64 {raw})",
                 k.operand
             )
             .unwrap();
@@ -2036,11 +2036,11 @@ impl Lowerer<'_> {
         let def = self.reg.record(name).cloned().ok_or_else(|| LowerError {
             msg: format!("unknown record `{name}`"),
         })?;
-        self.aggr_used.insert("oe_rec_new");
+        self.aggr_used.insert("kn_rec_new");
         let r = self.fresh();
         writeln!(
             self.body,
-            "  {r} = call ptr @oe_rec_new(i32 {})",
+            "  {r} = call ptr @kn_rec_new(i32 {})",
             def.fields.len()
         )
         .unwrap();
@@ -2057,15 +2057,15 @@ impl Lowerer<'_> {
                 ));
             }
             let raw = self.emit_arg_i64(&v);
-            self.aggr_used.insert("oe_rec_set");
+            self.aggr_used.insert("kn_rec_set");
             writeln!(
                 self.body,
-                "  call void @oe_rec_set(ptr {r}, i32 {pos}, i64 {raw})"
+                "  call void @kn_rec_set(ptr {r}, i32 {pos}, i64 {raw})"
             )
             .unwrap();
         }
         Ok(Val {
-            ty: Ty::Record(openepl_ir::intern(name)),
+            ty: Ty::Record(kiln_ir::intern(name)),
             operand: r,
         })
     }
@@ -2083,11 +2083,11 @@ impl Lowerer<'_> {
         let (pos, ty) = def.field(field).ok_or_else(|| LowerError {
             msg: format!("record `{rec}` has no field `{field}`"),
         })?;
-        self.aggr_used.insert("oe_rec_get");
+        self.aggr_used.insert("kn_rec_get");
         let raw = self.fresh();
         writeln!(
             self.body,
-            "  {raw} = call i64 @oe_rec_get(ptr {}, i32 {pos})",
+            "  {raw} = call i64 @kn_rec_get(ptr {}, i32 {pos})",
             base.operand
         )
         .unwrap();
@@ -2164,14 +2164,14 @@ impl Lowerer<'_> {
             }
             // A `char*` a C API wrote into the struct is borrowed and outlives
             // nothing in particular, so copy it into a managed text exactly as a
-            // `dll` that returns text does — `oe_dll_text` also turns a NULL
+            // `dll` that returns text does — `kn_dll_text` also turns a NULL
             // field into the empty text.
             Ty::Text => {
                 self.needs_dll_text = true;
                 let raw = self.fresh();
                 writeln!(self.body, "  {raw} = load ptr, ptr {fp}").unwrap();
                 let t = self.fresh();
-                writeln!(self.body, "  {t} = call ptr @oe_dll_text(ptr {raw})").unwrap();
+                writeln!(self.body, "  {t} = call ptr @kn_dll_text(ptr {raw})").unwrap();
                 Val { ty: Ty::Text, operand: t }
             }
             _ => {
@@ -2190,7 +2190,7 @@ impl Lowerer<'_> {
         rec: &str,
         base: &str,
         field: &str,
-        value: &openepl_ir::Expr,
+        value: &kiln_ir::Expr,
     ) -> Result<(), LowerError> {
         let (offset, fty) = self.c_field(rec, field)?;
         let fp = self.c_field_ptr(base, offset);
@@ -2203,7 +2203,7 @@ impl Lowerer<'_> {
         &mut self,
         fp: &str,
         fty: Ty,
-        value: &openepl_ir::Expr,
+        value: &kiln_ir::Expr,
         what: &str,
     ) -> Result<(), LowerError> {
         if matches!(fty, Ty::Record(_) | Ty::CArray(_)) {
@@ -2302,7 +2302,7 @@ impl Lowerer<'_> {
                         bty.as_str()
                     ));
                 };
-                let (esize, _) = openepl_ir::c_field_size_align(a.elem, self.reg)
+                let (esize, _) = kiln_ir::c_field_size_align(a.elem, self.reg)
                     .ok_or_else(|| LowerError {
                         msg: format!("`{}` has no C layout", a.elem.as_str()),
                     })?;
@@ -2396,14 +2396,14 @@ impl Lowerer<'_> {
     }
 
     /// `[a, b, c]` — one allocation of the right length, then one store per
-    /// element. Building it through `oe_ary_set` rather than a constant
+    /// element. Building it through `kn_ary_set` rather than a constant
     /// initializer is what lets an element be any expression.
     fn eval_array_lit(&mut self, elem: Elem, items: &[Expr]) -> Result<Val, LowerError> {
-        self.aggr_used.insert("oe_ary_new");
+        self.aggr_used.insert("kn_ary_new");
         let arr = self.fresh();
         writeln!(
             self.body,
-            "  {arr} = call ptr @oe_ary_new(i32 {}, i32 {})",
+            "  {arr} = call ptr @kn_ary_new(i32 {}, i32 {})",
             elem.ty().sdt_tag(),
             items.len()
         )
@@ -2418,7 +2418,7 @@ impl Lowerer<'_> {
                 ));
             }
             let raw = self.emit_arg_i64(&v);
-            self.aggr_used.insert("oe_ary_set");
+            self.aggr_used.insert("kn_ary_set");
             // `enumerate` counts from 0 and the store counts from 1. Getting
             // this wrong writes every element one place low and drops the
             // first, which looks like a broken literal rather than an
@@ -2426,7 +2426,7 @@ impl Lowerer<'_> {
             let pos = i + 1;
             writeln!(
                 self.body,
-                "  call void @oe_ary_set(ptr {arr}, i32 {pos}, i64 {raw})"
+                "  call void @kn_ary_set(ptr {arr}, i32 {pos}, i64 {raw})"
             )
             .unwrap();
         }
@@ -2452,11 +2452,11 @@ impl Lowerer<'_> {
                     i.ty.as_str()
                 ));
             }
-            self.aggr_used.insert("oe_dict_at");
+            self.aggr_used.insert("kn_dict_at");
             let raw = self.fresh();
             writeln!(
                 self.body,
-                "  {raw} = call i64 @oe_dict_at(ptr {}, ptr {})",
+                "  {raw} = call i64 @kn_dict_at(ptr {}, ptr {})",
                 b.operand, i.operand
             )
             .unwrap();
@@ -2474,11 +2474,11 @@ impl Lowerer<'_> {
         }
         match b.ty {
             Ty::Bytes => {
-                self.aggr_used.insert("oe_bin_at");
+                self.aggr_used.insert("kn_bin_at");
                 let t = self.fresh();
                 writeln!(
                     self.body,
-                    "  {t} = call i32 @oe_bin_at(ptr {}, i32 {})",
+                    "  {t} = call i32 @kn_bin_at(ptr {}, i32 {})",
                     b.operand, i.operand
                 )
                 .unwrap();
@@ -2488,11 +2488,11 @@ impl Lowerer<'_> {
                 })
             }
             Ty::Array(elem) => {
-                self.aggr_used.insert("oe_ary_get");
+                self.aggr_used.insert("kn_ary_get");
                 let raw = self.fresh();
                 writeln!(
                     self.body,
-                    "  {raw} = call i64 @oe_ary_get(ptr {}, i32 {})",
+                    "  {raw} = call i64 @kn_ary_get(ptr {}, i32 {})",
                     b.operand, i.operand
                 )
                 .unwrap();
@@ -2711,7 +2711,7 @@ impl Lowerer<'_> {
             }
             Expr::Call { .. } | Expr::CallThrough { .. } => {
                 self.needs_error_clear = true;
-                writeln!(self.body, "  call void @oe_error_clear()").unwrap();
+                writeln!(self.body, "  call void @kn_error_clear()").unwrap();
                 let v = self.eval_hinted(value, Some(elem.ty()))?;
                 if v.ty != elem.ty() {
                     return err(format!(
@@ -2757,7 +2757,7 @@ impl Lowerer<'_> {
     /// the append is the same `append` (which copies, so the hidden name is
     /// reassigned each turn, exactly as a hand-written accumulator would be).
     fn eval_comprehension(&mut self, e: &Expr) -> Result<Val, LowerError> {
-        use openepl_ir::{Stmt, StmtKind};
+        use kiln_ir::{Stmt, StmtKind};
         let Expr::Comprehension {
             body,
             elem,
@@ -3187,10 +3187,10 @@ impl Lowerer<'_> {
                 }
             }
             Expr::BitsLit(v) => {
-                let ty = openepl_ir::sema::bits_bare_type(*v);
+                let ty = kiln_ir::sema::bits_bare_type(*v);
                 Ok(Val {
                     ty,
-                    operand: openepl_ir::sema::bits_value(*v).to_string(),
+                    operand: kiln_ir::sema::bits_value(*v).to_string(),
                 })
             }
             Expr::DoubleLit(v) => Ok(Val {
@@ -3257,7 +3257,7 @@ impl Lowerer<'_> {
                 // `+` on text is concatenation, not arithmetic: it forwards to
                 // the same `concat` command an author could call by name.
                 if lv.ty == Ty::Text && rv.ty == Ty::Text && *op == BinOp::Add {
-                    let t = self.call_symbol_2("oe_concat", &lv, &rv, Ty::Text)?;
+                    let t = self.call_symbol_2("kn_concat", &lv, &rv, Ty::Text)?;
                     return Ok(Val {
                         ty: Ty::Text,
                         operand: t,
@@ -3268,7 +3268,7 @@ impl Lowerer<'_> {
                 // checker has already required the text on the left and an `int`
                 // count on the right.
                 if lv.ty == Ty::Text && rv.ty == Ty::Int && *op == BinOp::Mul {
-                    let t = self.call_symbol_2("oe_repeat", &lv, &rv, Ty::Text)?;
+                    let t = self.call_symbol_2("kn_repeat", &lv, &rv, Ty::Text)?;
                     return Ok(Val {
                         ty: Ty::Text,
                         operand: t,
@@ -3349,7 +3349,7 @@ impl Lowerer<'_> {
             // `ptr`. Under opaque pointers a function is already a `ptr`-typed
             // constant, so there is no bitcast to emit (the C mental model of
             // "cast the function pointer to void*" is a no-op here); the bare
-            // `@oe_user_<name>` constant is a valid operand in every position a
+            // `@kn_user_<name>` constant is a valid operand in every position a
             // `Val` is spliced into. The checker has proven `NAME` is a sub with
             // a C-representable signature, so the symbol both exists (all subs
             // are emitted) and is callable across the C ABI. The reference is a
@@ -3527,12 +3527,12 @@ impl Lowerer<'_> {
                     Ty::Int => {
                         let f = match &lib {
                             None => {
-                                self.ui_used.insert("oe_ui_get_int");
-                                "oe_ui_get_int".to_string()
+                                self.ui_used.insert("kn_ui_get_int");
+                                "kn_ui_get_int".to_string()
                             }
                             Some(lib) => {
                                 self.component_libs.insert(lib.clone());
-                                format!("oe_{lib}_component_get_int")
+                                format!("kn_{lib}_component_get_int")
                             }
                         };
                         let t = self.fresh();
@@ -3551,12 +3551,12 @@ impl Lowerer<'_> {
                     Ty::Bool => {
                         let f = match &lib {
                             None => {
-                                self.ui_used.insert("oe_ui_get");
-                                "oe_ui_get".to_string()
+                                self.ui_used.insert("kn_ui_get");
+                                "kn_ui_get".to_string()
                             }
                             Some(lib) => {
                                 self.component_libs.insert(lib.clone());
-                                format!("oe_{lib}_component_get")
+                                format!("kn_{lib}_component_get")
                             }
                         };
                         let t = self.fresh();
@@ -3575,12 +3575,12 @@ impl Lowerer<'_> {
                     _ => {
                         let f = match &lib {
                             None => {
-                                self.ui_used.insert("oe_ui_get");
-                                "oe_ui_get".to_string()
+                                self.ui_used.insert("kn_ui_get");
+                                "kn_ui_get".to_string()
                             }
                             Some(lib) => {
                                 self.component_libs.insert(lib.clone());
-                                format!("oe_{lib}_component_get")
+                                format!("kn_{lib}_component_get")
                             }
                         };
                         let t = self.fresh();
@@ -3748,9 +3748,9 @@ impl Lowerer<'_> {
         }
 
         // Resolve once, cache in a per-declaration global: a call in a loop
-        // pays the load-and-lookup cost a single time. `oe_dll_get` reads the
+        // pays the load-and-lookup cost a single time. `kn_dll_get` reads the
         // cache, resolves and stores it if empty, and returns the address —
-        // aborting through `oe_runtime_error` if the library or symbol is
+        // aborting through `kn_runtime_error` if the library or symbol is
         // missing, so a bad call is a named failure, never a silent 0.
         self.needs_dll_get = true;
         self.dll_cached.insert(name.to_string());
@@ -3760,12 +3760,12 @@ impl Lowerer<'_> {
         let fp = self.fresh();
         writeln!(
             self.body,
-            "  {fp} = call ptr @oe_dll_get(ptr @{cache}, ptr {lib}, ptr {sym})"
+            "  {fp} = call ptr @kn_dll_get(ptr @{cache}, ptr {lib}, ptr {sym})"
         )
         .unwrap();
 
         // `dll.conv` (stdcall/cdecl/system) is intentionally NOT emitted onto
-        // the `call`: every target OpenEPL builds is 64-bit with a single C
+        // the `call`: every target Kiln builds is 64-bit with a single C
         // convention, so the three markers name the same one and a textual
         // callconv here would only risk perturbing the proven `--os windows`
         // path for no behavioural gain. The marker is carried on the `DllSig`
@@ -3803,10 +3803,10 @@ impl Lowerer<'_> {
     }
 
     /// Emit the `call` itself, given a callee operand and marshalled arguments,
-    /// and bring the C result back into an OpenEPL value.
+    /// and bring the C result back into an Kiln value.
     ///
     /// `fp` is a `ptr`-typed operand however it was obtained — the address
-    /// `oe_dll_get` resolved for a `dll`, or the run-time pointer a
+    /// `kn_dll_get` resolved for a `dll`, or the run-time pointer a
     /// `call through` was handed. Under opaque pointers those are the same
     /// thing to LLVM, which is why one emitter serves both and a returned
     /// `char*` or C truth is converted in exactly one place.
@@ -3830,7 +3830,7 @@ impl Lowerer<'_> {
                 let raw = self.fresh();
                 writeln!(self.body, "  {raw} = call ptr {fp}({arglist})").unwrap();
                 let out = self.fresh();
-                writeln!(self.body, "  {out} = call ptr @oe_dll_text(ptr {raw})").unwrap();
+                writeln!(self.body, "  {out} = call ptr @kn_dll_text(ptr {raw})").unwrap();
                 Ok(Some(Val {
                     ty: Ty::Text,
                     operand: out,
@@ -3862,7 +3862,7 @@ impl Lowerer<'_> {
     /// rather than a symbol.
     ///
     /// The only difference from a `dll` call is where the address comes from.
-    /// There is no `oe_dll_get`, no cache and no library to open: the program
+    /// There is no `kn_dll_get`, no cache and no library to open: the program
     /// already holds the pointer. Under opaque pointers the `ptr` IS the callee
     /// operand — there is no bitcast to a function type to emit — so the same
     /// `call <ret> %fp(args)` a `dll` produces is what comes out here, which is
@@ -4067,12 +4067,12 @@ impl Lowerer<'_> {
         let mut out = String::new();
         writeln!(
             out,
-            "; OpenEPL-generated LLVM IR — module `{module_name}` (Phase 2, slot ABI)"
+            "; Kiln-generated LLVM IR — module `{module_name}` (Phase 2, slot ABI)"
         )
         .unwrap();
-        writeln!(out, "; Do not edit; regenerate from the .oir source.\n").unwrap();
+        writeln!(out, "; Do not edit; regenerate from the .kiln source.\n").unwrap();
 
-        // The slot type mirrors OpenEPL_Slot (abi/openepl_abi.h): {tag, pad, value}.
+        // The slot type mirrors Kiln_Slot (abi/kiln_abi.h): {tag, pad, value}.
         writeln!(out, "%Slot = type {{ i32, i32, i64 }}\n").unwrap();
 
         // Module variables. Zero-initialised here; their declared initializers
@@ -4098,7 +4098,7 @@ impl Lowerer<'_> {
         }
 
         // One address cache per foreign function called. `null` means "not yet
-        // resolved"; `oe_dll_get` fills it on the first call.
+        // resolved"; `kn_dll_get` fills it on the first call.
         for name in &self.dll_cached {
             writeln!(out, "@{} = internal global ptr null", dll_cache_symbol(name)).unwrap();
         }
@@ -4127,19 +4127,19 @@ impl Lowerer<'_> {
             out.push('\n');
         }
 
-        // UI interface declarations (abi/openepl_ui.h), only when referenced.
+        // UI interface declarations (abi/kiln_ui.h), only when referenced.
         for sym in &self.ui_used {
             let decl = match *sym {
-                "oe_ui_init" => "declare i32 @oe_ui_init(ptr, i32, i32)",
-                "oe_ui_shutdown" => "declare void @oe_ui_shutdown()",
-                "oe_ui_root" => "declare i64 @oe_ui_root()",
-                "oe_ui_create" => "declare i64 @oe_ui_create(i64, ptr)",
-                "oe_ui_set" => "declare i32 @oe_ui_set(i64, ptr, ptr)",
-                "oe_ui_get" => "declare ptr @oe_ui_get(i64, ptr)",
-                "oe_ui_get_int" => "declare i32 @oe_ui_get_int(i64, ptr)",
-                "oe_ui_on" => "declare i32 @oe_ui_on(i64, ptr, ptr)",
-                "oe_ui_set_a11y" => "declare i32 @oe_ui_set_a11y(i64, i32, ptr)",
-                "oe_ui_run" => "declare i32 @oe_ui_run()",
+                "kn_ui_init" => "declare i32 @kn_ui_init(ptr, i32, i32)",
+                "kn_ui_shutdown" => "declare void @kn_ui_shutdown()",
+                "kn_ui_root" => "declare i64 @kn_ui_root()",
+                "kn_ui_create" => "declare i64 @kn_ui_create(i64, ptr)",
+                "kn_ui_set" => "declare i32 @kn_ui_set(i64, ptr, ptr)",
+                "kn_ui_get" => "declare ptr @kn_ui_get(i64, ptr)",
+                "kn_ui_get_int" => "declare i32 @kn_ui_get_int(i64, ptr)",
+                "kn_ui_on" => "declare i32 @kn_ui_on(i64, ptr, ptr)",
+                "kn_ui_set_a11y" => "declare i32 @kn_ui_set_a11y(i64, i32, ptr)",
+                "kn_ui_run" => "declare i32 @kn_ui_run()",
                 other => panic!("undeclared UI symbol {other}"),
             };
             writeln!(out, "{decl}").unwrap();
@@ -4148,38 +4148,38 @@ impl Lowerer<'_> {
             out.push('\n');
         }
 
-        // A library's own component entry points (abi/openepl_abi.h). All five
+        // A library's own component entry points (abi/kiln_abi.h). All five
         // are declared together rather than tracked one at a time: a `declare`
         // that nothing calls costs nothing, and the five are the whole of what
         // addressing a component means.
         for lib in &self.component_libs {
-            writeln!(out, "declare i64 @oe_{lib}_component_create(ptr)").unwrap();
-            writeln!(out, "declare i32 @oe_{lib}_component_set(i64, ptr, ptr)").unwrap();
-            writeln!(out, "declare ptr @oe_{lib}_component_get(i64, ptr)").unwrap();
-            writeln!(out, "declare i32 @oe_{lib}_component_get_int(i64, ptr)").unwrap();
-            writeln!(out, "declare i32 @oe_{lib}_component_on(i64, ptr, ptr)").unwrap();
+            writeln!(out, "declare i64 @kn_{lib}_component_create(ptr)").unwrap();
+            writeln!(out, "declare i32 @kn_{lib}_component_set(i64, ptr, ptr)").unwrap();
+            writeln!(out, "declare ptr @kn_{lib}_component_get(i64, ptr)").unwrap();
+            writeln!(out, "declare i32 @kn_{lib}_component_get_int(i64, ptr)").unwrap();
+            writeln!(out, "declare i32 @kn_{lib}_component_on(i64, ptr, ptr)").unwrap();
         }
         if !self.component_libs.is_empty() {
             out.push('\n');
         }
 
         if self.loop_used {
-            writeln!(out, "declare i32 @oe_loop_run()\n").unwrap();
+            writeln!(out, "declare i32 @kn_loop_run()\n").unwrap();
         }
 
         for sym in &self.aggr_used {
             let decl = match *sym {
-                "oe_ary_new" => "declare ptr @oe_ary_new(i32, i32)",
-                "oe_ary_get" => "declare i64 @oe_ary_get(ptr, i32)",
-                "oe_ary_set" => "declare void @oe_ary_set(ptr, i32, i64)",
-                "oe_bin_at" => "declare i32 @oe_bin_at(ptr, i32)",
-                "oe_bin_set" => "declare void @oe_bin_set(ptr, i32, i32)",
-                "oe_rec_new" => "declare ptr @oe_rec_new(i32)",
-                "oe_rec_get" => "declare i64 @oe_rec_get(ptr, i32)",
-                "oe_rec_set" => "declare void @oe_rec_set(ptr, i32, i64)",
-                "oe_dict_new" => "declare ptr @oe_dict_new(i32)",
-                "oe_dict_at" => "declare i64 @oe_dict_at(ptr, ptr)",
-                "oe_dict_put" => "declare void @oe_dict_put(ptr, ptr, i64)",
+                "kn_ary_new" => "declare ptr @kn_ary_new(i32, i32)",
+                "kn_ary_get" => "declare i64 @kn_ary_get(ptr, i32)",
+                "kn_ary_set" => "declare void @kn_ary_set(ptr, i32, i64)",
+                "kn_bin_at" => "declare i32 @kn_bin_at(ptr, i32)",
+                "kn_bin_set" => "declare void @kn_bin_set(ptr, i32, i32)",
+                "kn_rec_new" => "declare ptr @kn_rec_new(i32)",
+                "kn_rec_get" => "declare i64 @kn_rec_get(ptr, i32)",
+                "kn_rec_set" => "declare void @kn_rec_set(ptr, i32, i64)",
+                "kn_dict_new" => "declare ptr @kn_dict_new(i32)",
+                "kn_dict_at" => "declare i64 @kn_dict_at(ptr, ptr)",
+                "kn_dict_put" => "declare void @kn_dict_put(ptr, ptr, i64)",
                 other => panic!("undeclared aggregate symbol {other}"),
             };
             writeln!(out, "{decl}").unwrap();
@@ -4188,26 +4188,26 @@ impl Lowerer<'_> {
             out.push('\n');
         }
 
-        // The runtime notification channel (abi/openepl_abi.h), used to abort
+        // The runtime notification channel (abi/kiln_abi.h), used to abort
         // with a message. Declared only when something actually aborts.
         if self.needs_notify {
-            writeln!(out, "declare ptr @oe_notify(i32, ptr, ptr)\n").unwrap();
+            writeln!(out, "declare ptr @kn_notify(i32, ptr, ptr)\n").unwrap();
         }
 
-        // The error slot's reset (runtime/oe_error.c). An optional's initializer
+        // The error slot's reset (runtime/kn_error.c). An optional's initializer
         // clears it before the call it is reading, so that what it reads back is
         // that call's verdict and not an older failure's.
         if self.needs_error_clear {
-            writeln!(out, "declare void @oe_error_clear()\n").unwrap();
+            writeln!(out, "declare void @kn_error_clear()\n").unwrap();
         }
 
-        // The foreign-function loader (runtime/oe_dll.c): resolve-and-cache a
+        // The foreign-function loader (runtime/kn_dll.c): resolve-and-cache a
         // symbol, and copy a returned C string into a runtime-owned text.
         if self.needs_dll_get {
-            writeln!(out, "declare ptr @oe_dll_get(ptr, ptr, ptr)").unwrap();
+            writeln!(out, "declare ptr @kn_dll_get(ptr, ptr, ptr)").unwrap();
         }
         if self.needs_dll_text {
-            writeln!(out, "declare ptr @oe_dll_text(ptr)").unwrap();
+            writeln!(out, "declare ptr @kn_dll_text(ptr)").unwrap();
         }
         if self.needs_dll_get || self.needs_dll_text {
             out.push('\n');
@@ -4254,7 +4254,7 @@ fn encode_llvm_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openepl_ir::parse;
+    use kiln_ir::parse;
 
     fn lower(src: &str) -> Result<String, LowerError> {
         let m = parse(src).unwrap();
@@ -4264,14 +4264,14 @@ mod tests {
     /// Lower as a build with debug information does.
     fn lower_dbg(src: &str) -> String {
         let m = parse(src).unwrap();
-        lower_module_from(&m, &Registry::core(), Some("examples/demo.oir")).unwrap()
+        lower_module_from(&m, &Registry::core(), Some("examples/demo.kiln")).unwrap()
     }
 
     /// `Registry::core()` plus a non-visual component whose `beep` event hands
     /// its handler an int — the shape the `timer`'s `tick` has, without putting
     /// an invented component into the hard-coded core set.
     fn lower_with_buzzer(src: &str) -> String {
-        use openepl_ir::registry::{ComponentDesc, ComponentKind};
+        use kiln_ir::registry::{ComponentDesc, ComponentKind};
         let mut reg = Registry::core();
         reg.insert_component(ComponentDesc {
             name: "buzzer".into(),
@@ -4292,10 +4292,10 @@ mod tests {
     #[test]
     fn a_parameterised_event_binds_through_a_thunk() {
         let ll = lower_with_buzzer(&format!("{BUZZER}sub h(n: int)\n  call print_int(n)\nend\n"));
-        assert!(ll.contains("define internal void @oe_evt_h_i32(i32 %a0)"), "{ll}");
-        assert!(ll.contains("call void @oe_user_h(i32 %a0)"), "{ll}");
+        assert!(ll.contains("define internal void @kn_evt_h_i32(i32 %a0)"), "{ll}");
+        assert!(ll.contains("call void @kn_user_h(i32 %a0)"), "{ll}");
         assert!(
-            ll.contains("@oe_core_component_on(") && ll.contains("ptr @oe_evt_h_i32)"),
+            ll.contains("@kn_core_component_on(") && ll.contains("ptr @kn_evt_h_i32)"),
             "{ll}"
         );
     }
@@ -4306,8 +4306,8 @@ mod tests {
     #[test]
     fn a_handler_that_ignores_the_argument_still_gets_the_event_signature() {
         let ll = lower_with_buzzer(&format!("{BUZZER}sub h\n  call print_int(1)\nend\n"));
-        assert!(ll.contains("define internal void @oe_evt_h_i32(i32 %a0)"), "{ll}");
-        assert!(ll.contains("call void @oe_user_h()"), "{ll}");
+        assert!(ll.contains("define internal void @kn_evt_h_i32(i32 %a0)"), "{ll}");
+        assert!(ll.contains("call void @kn_user_h()"), "{ll}");
     }
 
     /// Two components binding one subroutine to one event share a thunk. Two
@@ -4318,8 +4318,8 @@ mod tests {
         let ll = lower_with_buzzer(
             "module m\n\nbuzzer b1\n  on beep: h\nend\n\nbuzzer b2\n  on beep: h\nend\n\n             sub main\n  call print_int(1)\nend\n\nsub h(n: int)\n  call print_int(n)\nend\n",
         );
-        assert_eq!(ll.matches("define internal void @oe_evt_h_i32").count(), 1, "{ll}");
-        assert_eq!(ll.matches("ptr @oe_evt_h_i32)").count(), 2, "{ll}");
+        assert_eq!(ll.matches("define internal void @kn_evt_h_i32").count(), 1, "{ll}");
+        assert_eq!(ll.matches("ptr @kn_evt_h_i32)").count(), 2, "{ll}");
     }
 
     /// An event that hands nothing over binds the subroutine itself, so every
@@ -4330,15 +4330,15 @@ mod tests {
         let ll = lower_with_buzzer(&format!(
             "module m\n\nbuzzer b\nend\n\nsub main\n  call print_int(1)\nend\n"
         ));
-        assert!(!ll.contains("oe_evt_"), "{ll}");
+        assert!(!ll.contains("kn_evt_"), "{ll}");
     }
 
     #[test]
     fn emits_slot_type_and_abi_call() {
         let ll = lower("module m\nsub main\n  call print_int(42)\nend\n").unwrap();
         assert!(ll.contains("%Slot = type { i32, i32, i64 }"));
-        assert!(ll.contains("declare void @oe_print_int(ptr, i32, ptr)"));
-        assert!(ll.contains("call void @oe_print_int(ptr %"));
+        assert!(ll.contains("declare void @kn_print_int(ptr, i32, ptr)"));
+        assert!(ll.contains("call void @kn_print_int(ptr %"));
         assert!(ll.contains("store i32 3, ptr")); // SDT_INT tag
     }
 
@@ -4347,7 +4347,7 @@ mod tests {
         let ll =
             lower("module m\nsub main\n  let n: int = length(\"hi\")\n  call print_int(n)\nend\n")
                 .unwrap();
-        assert!(ll.contains("call void @oe_length(ptr"));
+        assert!(ll.contains("call void @kn_length(ptr"));
         assert!(ll.contains("load i64, ptr")); // reads the return slot
         assert!(ll.contains("trunc i64")); // int result reinterpret
         assert!(ll.contains("ptrtoint ptr")); // text arg reinterpret
@@ -4370,14 +4370,14 @@ mod tests {
             "module m\nsub fib(n: int): int\n  if n < 2\n    return n\n  end\n  return fib(n - 1) + fib(n - 2)\nend\nsub main\n  call print_int(fib(10))\nend\n",
         )
         .unwrap();
-        assert!(ll.contains("define i32 @oe_user_fib(i32 %p0)"), "{ll}");
-        assert!(ll.contains("call i32 @oe_user_fib(i32 "), "{ll}");
+        assert!(ll.contains("define i32 @kn_user_fib(i32 %p0)"), "{ll}");
+        assert!(ll.contains("call i32 @kn_user_fib(i32 "), "{ll}");
         assert!(ll.contains("ret i32 "), "{ll}");
         // The fall-through past the last `return` is proven dead.
         assert!(ll.contains("unreachable"), "{ll}");
         // A user sub is defined, never declared: a declare + define of the same
         // symbol is not a valid module.
-        assert!(!ll.contains("declare void @oe_user_fib"), "{ll}");
+        assert!(!ll.contains("declare void @kn_user_fib"), "{ll}");
     }
 
     /// Entry points and event handlers must lower to exactly the shape they did
@@ -4386,8 +4386,8 @@ mod tests {
     #[test]
     fn a_plain_sub_lowers_unchanged() {
         let ll = lower("module m\nsub main\n  call print_int(1)\nend\n").unwrap();
-        assert!(ll.contains("define void @oe_user_main() {"), "{ll}");
-        assert!(ll.contains("call void @oe_user_main()"), "{ll}");
+        assert!(ll.contains("define void @kn_user_main() {"), "{ll}");
+        assert!(ll.contains("call void @kn_user_main()"), "{ll}");
     }
 
     #[test]
@@ -4397,14 +4397,14 @@ mod tests {
         )
         .unwrap();
         assert!(ll.contains("define i32 @twice(i32 %a0)"), "{ll}");
-        assert!(ll.contains("call i32 @oe_user_twice(i32 %a0)"), "{ll}");
+        assert!(ll.contains("call i32 @kn_user_twice(i32 %a0)"), "{ll}");
     }
 
     #[test]
     fn text_plus_lowers_to_the_concat_command() {
         let ll = lower("module m\nsub main\n  call print_text(\"a\" + \"b\")\nend\n").unwrap();
-        assert!(ll.contains("declare void @oe_concat(ptr, i32, ptr)"));
-        assert!(ll.contains("call void @oe_concat(ptr %"));
+        assert!(ll.contains("declare void @kn_concat(ptr, i32, ptr)"));
+        assert!(ll.contains("call void @kn_concat(ptr %"));
     }
 
     /// Each side of a text `+` must be evaluated exactly once. Forwarding the
@@ -4414,7 +4414,7 @@ mod tests {
     fn text_plus_evaluates_each_side_once() {
         let ll = lower("module m\nsub main\n  call print_text(read_line() + \"!\")\nend\n")
             .unwrap();
-        assert_eq!(ll.matches("call void @oe_read_line(").count(), 1);
+        assert_eq!(ll.matches("call void @kn_read_line(").count(), 1);
     }
 
     #[test]
@@ -4422,7 +4422,7 @@ mod tests {
         let ll = lower("module m\nsub main\n  var n: int = 9\n  call print_int(n / 3)\nend\n")
             .unwrap();
         assert!(ll.contains("sdiv"));
-        assert!(!ll.contains("oe_notify"), "a constant 3 cannot be zero");
+        assert!(!ll.contains("kn_notify"), "a constant 3 cannot be zero");
     }
 
     /// A divisor that is not a literal is checked for the two values the
@@ -4433,8 +4433,8 @@ mod tests {
             "module m\nsub main\n  var d: int = 0\n  call print_int(10 / d)\nend\n",
         )
         .unwrap();
-        assert!(ll.contains("declare ptr @oe_notify(i32, ptr, ptr)"));
-        assert!(ll.contains("call ptr @oe_notify(i32 5,"));
+        assert!(ll.contains("declare ptr @kn_notify(i32, ptr, ptr)"));
+        assert!(ll.contains("call ptr @kn_notify(i32 5,"));
         assert!(ll.contains("icmp eq i32 %"));
         assert!(ll.contains("-2147483648"), "the overflow check is missing");
         assert!(ll.contains("unreachable"));
@@ -4503,10 +4503,10 @@ mod tests {
             "module m\nsub main\n  var xs: int[] = [7, 8]\n  xs[0] = xs[1]\nend\n",
         )
         .unwrap();
-        assert!(ll.contains("call ptr @oe_ary_new(i32 3, i32 2)"), "{ll}");
-        assert!(ll.contains("call i64 @oe_ary_get(ptr"), "{ll}");
-        assert!(ll.contains("call void @oe_ary_set(ptr"), "{ll}");
-        assert!(ll.contains("declare i64 @oe_ary_get(ptr, i32)"), "{ll}");
+        assert!(ll.contains("call ptr @kn_ary_new(i32 3, i32 2)"), "{ll}");
+        assert!(ll.contains("call i64 @kn_ary_get(ptr"), "{ll}");
+        assert!(ll.contains("call void @kn_ary_set(ptr"), "{ll}");
+        assert!(ll.contains("declare i64 @kn_ary_get(ptr, i32)"), "{ll}");
     }
 
     /// A field is reached by POSITION, counting from 1. No field name may
@@ -4519,10 +4519,10 @@ mod tests {
              sub main\n  var p: point = point(x: 7, y: 8)\n  p.y = p.x\nend\n",
         )
         .unwrap();
-        assert!(ll.contains("call ptr @oe_rec_new(i32 2)"), "{ll}");
+        assert!(ll.contains("call ptr @kn_rec_new(i32 2)"), "{ll}");
         // `x` is field 1 and `y` is field 2, in declaration order.
-        assert!(ll.contains("@oe_rec_set(ptr %t0, i32 1,"), "{ll}");
-        assert!(ll.contains("@oe_rec_set(ptr %t0, i32 2,"), "{ll}");
+        assert!(ll.contains("@kn_rec_set(ptr %t0, i32 1,"), "{ll}");
+        assert!(ll.contains("@kn_rec_set(ptr %t0, i32 2,"), "{ll}");
         // `p.y = p.x` reads field 1 and writes field 2.
         assert!(ll.contains(", i32 1)\n"), "{ll}");
         assert!(!ll.contains("\"x\\00\""), "a field name reached the output:\n{ll}");
@@ -4537,8 +4537,8 @@ mod tests {
              sub main\n  let p: point = point(x: 1)\n  call print_int(p.x)\nend\n",
         )
         .unwrap();
-        assert!(ll.contains("declare i64 @oe_rec_get(ptr, i32)"), "{ll}");
-        assert!(ll.contains("declare ptr @oe_rec_new(i32)"), "{ll}");
+        assert!(ll.contains("declare i64 @kn_rec_get(ptr, i32)"), "{ll}");
+        assert!(ll.contains("declare ptr @kn_rec_new(i32)"), "{ll}");
     }
 
     /// A record passed to a subroutine is one pointer, so a sub that takes one
@@ -4551,7 +4551,7 @@ mod tests {
              sub main\n  let a: point = bump(point(x: 1))\n  call print_int(a.x)\nend\n",
         )
         .unwrap();
-        assert!(ll.contains("define ptr @oe_user_bump(ptr %p0)"), "{ll}");
+        assert!(ll.contains("define ptr @kn_user_bump(ptr %p0)"), "{ll}");
     }
 
     /// `d["k"]` and `d["k"] = v` are `dict_get`/`dict_set` spelled as a
@@ -4562,16 +4562,16 @@ mod tests {
             "module m\nsub main\n  var d: int{} = {\"a\": 1}\n               d[\"b\"] = d[\"a\"]\nend\n",
         )
         .unwrap();
-        // OE_SDT_DICT_OF(OE_SDT_INT) is not a tag: the value tag alone is what
+        // KN_SDT_DICT_OF(KN_SDT_INT) is not a tag: the value tag alone is what
         // the dictionary is told to hold.
-        assert!(ll.contains("call ptr @oe_dict_new(i32 3)"), "{ll}");
-        assert!(ll.contains("call i64 @oe_dict_at(ptr"), "{ll}");
-        assert!(ll.contains("call void @oe_dict_put(ptr"), "{ll}");
-        assert!(ll.contains("declare i64 @oe_dict_at(ptr, ptr)"), "{ll}");
+        assert!(ll.contains("call ptr @kn_dict_new(i32 3)"), "{ll}");
+        assert!(ll.contains("call i64 @kn_dict_at(ptr"), "{ll}");
+        assert!(ll.contains("call void @kn_dict_put(ptr"), "{ll}");
+        assert!(ll.contains("declare i64 @kn_dict_at(ptr, ptr)"), "{ll}");
     }
 
     /// A dictionary reaches a command as a pointer with the dictionary flag
-    /// above its value tag — OE_SDT_DICT_FLAG | OE_SDT_INT.
+    /// above its value tag — KN_SDT_DICT_FLAG | KN_SDT_INT.
     #[test]
     fn a_dictionary_marshals_as_a_pointer() {
         let ll = lower(
@@ -4591,7 +4591,7 @@ mod tests {
         )
         .unwrap();
         assert!(ll.contains("ptrtoint ptr"), "{ll}");
-        // OE_SDT_ARRAY_FLAG | OE_SDT_INT
+        // KN_SDT_ARRAY_FLAG | KN_SDT_INT
         assert!(ll.contains("store i32 259,"), "{ll}");
     }
 
@@ -4602,8 +4602,8 @@ mod tests {
              call print_int(b[0])\nend\n",
         )
         .unwrap();
-        assert!(ll.contains("call void @oe_bin_set(ptr"), "{ll}");
-        assert!(ll.contains("call i32 @oe_bin_at(ptr"), "{ll}");
+        assert!(ll.contains("call void @kn_bin_set(ptr"), "{ll}");
+        assert!(ll.contains("call i32 @kn_bin_at(ptr"), "{ll}");
     }
 
     /// A module-level array starts as no array at all, and a pointer's zero is
@@ -4620,8 +4620,8 @@ mod tests {
     #[test]
     fn only_used_commands_declared() {
         let ll = lower("module m\nsub main\n  call print_int(1)\nend\n").unwrap();
-        assert!(ll.contains("declare void @oe_print_int(ptr, i32, ptr)"));
-        assert!(!ll.contains("oe_sqrt"));
+        assert!(ll.contains("declare void @kn_print_int(ptr, i32, ptr)"));
+        assert!(!ll.contains("kn_sqrt"));
     }
 
     /// Without a source path nothing changes: this is what a `--release`
@@ -4640,7 +4640,7 @@ mod tests {
         assert!(ll.contains("!llvm.dbg.cu = !{!0}"), "{ll}");
         assert!(ll.contains("emissionKind: LineTablesOnly"), "{ll}");
         assert!(
-            ll.contains(r#"!DIFile(filename: "demo.oir", directory: "examples")"#),
+            ll.contains(r#"!DIFile(filename: "demo.kiln", directory: "examples")"#),
             "{ll}"
         );
         assert!(ll.contains(r#"!{i32 7, !"Dwarf Version", i32 5}"#), "{ll}");
@@ -4658,14 +4658,14 @@ mod tests {
             "module m\n\nsub greet\n  call print_int(1)\nend\n\nsub main\n  call greet()\nend\n",
         );
         assert!(
-            ll.contains(r#"!DISubprogram(name: "greet", linkageName: "oe_user_greet""#),
+            ll.contains(r#"!DISubprogram(name: "greet", linkageName: "kn_user_greet""#),
             "{ll}"
         );
         assert!(ll.contains("scopeLine: 3,"), "{ll}");
-        assert!(ll.contains("define void @oe_user_greet() #0 !dbg !6 {"), "{ll}");
+        assert!(ll.contains("define void @kn_user_greet() #0 !dbg !6 {"), "{ll}");
         // and `main`, three lines lower, gets its own subprogram
         assert!(
-            ll.contains(r#"!DISubprogram(name: "main", linkageName: "oe_user_main""#),
+            ll.contains(r#"!DISubprogram(name: "main", linkageName: "kn_user_main""#),
             "{ll}"
         );
         assert!(ll.contains("scopeLine: 7,"), "{ll}");
@@ -4699,7 +4699,7 @@ mod tests {
             }
         }
         // and the instructions inside the branch did get one
-        assert!(ll.contains("call void @oe_print_int"), "{ll}");
+        assert!(ll.contains("call void @kn_print_int"), "{ll}");
         assert!(ll.contains(", !dbg !"), "{ll}");
     }
 

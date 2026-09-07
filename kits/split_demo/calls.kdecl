@@ -1,0 +1,9 @@
+# split_demo, file 2 of 2 — the foreign calls.
+#
+# `split_move` takes the `SplitPoint` declared in `shapes.kdecl`, and
+# `split_add`/`split_greeting` come from the same tiny C library the demoffi kit
+# ships, reached here by its own name.
+
+dll split_add(a: int, b: int): int from "demoffi" as "demoffi_add"
+dll split_greeting(): text from "demoffi" as "demoffi_greeting"
+dll split_move(p: SplitPoint, dx: int, dy: int) from "demoffi" as "demoffi_move"

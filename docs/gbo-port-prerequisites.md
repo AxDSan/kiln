@@ -1,14 +1,14 @@
-# What OpenEPL needs before it can host a real server
+# What Kiln needs before it can host a real server
 
 A handoff from the GodsBattle Online (GBO) repositories, written 2026-09-06. GBO is a working
 MMO server — a live closed beta on a VPS — written in C#/.NET 8, and the question that produced
-this list was whether it could be ported to OpenEPL.
+this list was whether it could be ported to Kiln.
 
 **The point is not to retire the .NET server.** It keeps serving the beta either way. The point is
-that a binary-protocol game server with a database behind it is the most honest load test OpenEPL
+that a binary-protocol game server with a database behind it is the most honest load test Kiln
 has been offered: it exercises sockets, framing, fixed-layout records, a database, a tick loop and
 long-running stability all at once, and every gap it exposes is a gap a real toolsmith language has
-to close anyway. **Read this as an OpenEPL feature list that happens to have a demanding first
+to close anyway. **Read this as an Kiln feature list that happens to have a demanding first
 customer**, not as a porting chore.
 
 Every number below was measured, not estimated. Where a claim comes from reading code, the file and
@@ -43,7 +43,7 @@ speaks to a database. Every other item on this page is small; this one is the ga
 78k lines — it funnels everything through one interface, `IDatabase`
 (`src/GodsBattle.Core/Data/IDatabase.cs`, 78 lines), with **six methods**:
 
-| Method | What OpenEPL needs to offer |
+| Method | What Kiln needs to offer |
 |---|---|
 | `ExecuteAsync(sql, params)` | run INSERT/UPDATE/DELETE/DDL, return affected row count |
 | `QueryAsync(sql, params)` | run a SELECT, materialise the whole result set |
@@ -53,13 +53,13 @@ speaks to a database. Every other item on this page is small; this one is the ga
 | `BulkInsertAsync(table, columns, rows)` | one multi-VALUES statement |
 
 The projections (`QueryAsync<T>`, `QuerySingleAsync<T>`) are C# generics over a row mapper. In
-OpenEPL they collapse into "read the result set, then walk it" — so **the real target is closer to
+Kiln they collapse into "read the result set, then walk it" — so **the real target is closer to
 four commands than six.**
 
 **Parameters are mandatory, never string interpolation.** GBO's `DbParams`
 (`src/GodsBattle.Core/Data/DbParams.cs`) exists specifically so that no call site can concatenate a
 value into SQL; the interface deliberately has *no* overload taking pre-formatted SQL. Whatever
-`libs/db` looks like, **bind parameters must be the only way to pass a value**, or OpenEPL ships an
+`libs/db` looks like, **bind parameters must be the only way to pass a value**, or Kiln ships an
 injection vector as its idiomatic path. This is a language-design decision, not a porting detail.
 
 Connection handling to copy rather than invent: one connection **per unit of work**, from a pool,
@@ -69,7 +69,7 @@ failure, which was a single point of failure and could stack-overflow if the dat
 
 **The build pattern already exists in this repo.** `libs/net` wraps mbedTLS as an *optional*
 dependency: `libs/net/lib.json` declares `optional_requires` / `optional_feature`
-(`OPENEPL_NET_TLS`) / `optional_include_dirs` / `optional_link_args`, and `tools/fetch-mbedtls.sh`
+(`KILN_NET_TLS`) / `optional_include_dirs` / `optional_link_args`, and `tools/fetch-mbedtls.sh`
 fills the paths in. Without mbedTLS vendored the library still builds and still speaks http; https
 fails loudly at run time **rather than failing everyone's build**. A `libs/db` over
 libmysqlclient (or libmariadb) is that same shape, with `tools/fetch-mysql.sh` beside its sibling.
@@ -78,7 +78,7 @@ Note for whoever writes it: most libs are just `X_cmds.c` + `X_libinfo.c` (see `
 81 lines). A `lib.json` is only needed **because** of the optional external dependency — `libs/net`
 is currently the only one that has one, and `libs/db` will be the second.
 
-*A choice worth making deliberately:* SQLite first would be easier and useful to far more OpenEPL
+*A choice worth making deliberately:* SQLite first would be easier and useful to far more Kiln
 programs than MySQL. GBO's schema is MySQL, so the port eventually needs MySQL — but if `libs/db`
 is designed as a gateway with a backend behind it, SQLite can land first and prove the surface.
 
@@ -120,8 +120,8 @@ afternoon by sending `printf '\x04\x00\x11\x27'` at it and checking all four byt
 
 Measured on both sides:
 
-- **OpenEPL:** no `pthread_create` anywhere in `runtime/ libs/ cli/ backend/`. The only thread API
-  in the tree is a raw `CreateThread` declaration in `kits/win` (`kernel32_proc.oed`). Threading
+- **Kiln:** no `pthread_create` anywhere in `runtime/ libs/ cli/ backend/`. The only thread API
+  in the tree is a raw `CreateThread` declaration in `kits/win` (`kernel32_proc.kdecl`). Threading
   primitives were **item 6 of the 0.6.0 roadmap** — "a `thread`, a mutex, an atomic int, so
   concurrent programs don't drop to raw Win32/pthread" — and they did not ship.
 - **GBO:** 33 `new Thread` / `Task.Run` / `Parallel.` / `Concurrent*` sites and 38 `lock (` blocks
@@ -134,7 +134,7 @@ the read and the copy overran the array, and because it ran on a `Timer` callbac
 catch the exception, **.NET terminated the process**. It took the whole realm down twice in one log,
 mid-session, and never once on an idle test machine.
 
-That is an argument for OpenEPL's existing model, not against it: **the event loop shipped in 0.4.0
+That is an argument for Kiln's existing model, not against it: **the event loop shipped in 0.4.0
 plus an explicit tick is very likely the better architecture here**, and the port is the chance to
 prove it. Decide this consciously — "the port needs threads" is the wrong conclusion to reach by
 default.
@@ -147,13 +147,13 @@ are just not a prerequisite for this, and the port should be attempted single-th
 ## Smaller gaps
 
 **Text encodings.** GBO's second and last dependency is `System.Text.Encoding.CodePages`, for GBK —
-the game client's data tables are GBK, and some are UTF-16LE. OpenEPL's `libs/file` and
+the game client's data tables are GBK, and some are UTF-16LE. Kiln's `libs/file` and
 `libs/system` already convert UTF-16 (for Windows paths — `file_cmds.c:93`, `system_cmds.c:67`), so
 the machinery is partly there; what is missing is a general "decode these bytes from codepage X"
 command. Narrow, and not needed until the port touches client data files.
 
 **A tick with a real clock.** GBO's world runs on a fixed tick (`GameServer/World/WorldTick.cs`).
-OpenEPL has `libs/time` and an event loop; whether the loop can carry a reliable periodic timer
+Kiln has `libs/time` and an event loop; whether the loop can carry a reliable periodic timer
 alongside socket readiness needs checking before the GameServer slice, though not before LoginServer.
 
 ---
@@ -167,7 +167,7 @@ protocol frames are fixed-layout binary structures — the player introduction (
 records, the 77-field character sheet — and in C# they are hand-written span arithmetic, offset by
 offset, which is exactly where its decode bugs have come from (thirty-two bytes going out as zero;
 two appearance bytes read as fixed; a field misread as a direction that was a stale send buffer).
-An OpenEPL record with a declared layout says the same thing **declaratively**. There is a real
+An Kiln record with a declared layout says the same thing **declaratively**. There is a real
 chance these decoders come out shorter and more correct than the originals, and that is a
 demonstrable win to point at, not just parity.
 
@@ -190,7 +190,7 @@ are confirmed against the client's own switch table.
 ### The acceptance test for step 3 already exists, and it is unforgiving
 
 LoginServer can be tested **against the real game client**, with no mock and no harness: point the
-client's `config.ini` at the OpenEPL build while the .NET GameServer keeps running behind it. A
+client's `config.ini` at the Kiln build while the .NET GameServer keeps running behind it. A
 successful login is a real one.
 
 It also carries a known, *measured* trap that will cost a day if it is met cold — and it is
@@ -213,7 +213,7 @@ worth reading in full before porting that file, but in short:
 - The original 2008 server never triggered it only because it was slow: 790-830 ms measured, against
   our 11-15 ms.
 
-**This is exactly the class of bug a faster runtime reintroduces.** If the OpenEPL LoginServer is
+**This is exactly the class of bug a faster runtime reintroduces.** If the Kiln LoginServer is
 quicker than the .NET one — and it may well be — a delay that looks like a superstitious sleep is
 the only thing standing between the port and a 50% crash rate. Port the delay, and treat **"logs in
 ten times in a row from a fresh launch without a crash"** as the pass condition, not "logs in once".

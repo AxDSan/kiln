@@ -18,18 +18,18 @@ fn repo() -> PathBuf {
 /// Build `src` to a temp binary, run it, and return its stdout lines. `tag` must
 /// be unique per test so parallel runs never share an output path.
 fn build_run(tag: &str, src: &str) -> Vec<String> {
-    let dir = std::env::temp_dir().join(format!("openepl_iter_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_iter_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
-    let srcpath = dir.join("prog.oir");
+    let srcpath = dir.join("prog.kiln");
     std::fs::write(&srcpath, src).expect("write program source");
     let bin = dir.join("prog");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", srcpath.to_str().unwrap(), "-o"])
         .arg(&bin)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(
         out.status.success(),
         "the program failed to build:\n{}",
@@ -49,17 +49,17 @@ fn build_run(tag: &str, src: &str) -> Vec<String> {
 
 /// Build `src`, assert it FAILS, and return the compiler's stderr.
 fn build_fails(tag: &str, src: &str) -> String {
-    let dir = std::env::temp_dir().join(format!("openepl_iter_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_iter_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
-    let srcpath = dir.join("prog.oir");
+    let srcpath = dir.join("prog.kiln");
     std::fs::write(&srcpath, src).expect("write program source");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", srcpath.to_str().unwrap(), "-o"])
         .arg(dir.join("prog"))
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(
         !out.status.success(),
         "the program was expected to fail to build but succeeded"

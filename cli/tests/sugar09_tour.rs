@@ -1,4 +1,4 @@
-//! The combined 0.9.0 proof: `examples/sugar09_tour.oir` uses the whole
+//! The combined 0.9.0 proof: `examples/sugar09_tour.kiln` uses the whole
 //! milestone's sugar at once — block and raw text, collection literals,
 //! slicing, the dot call, `let` inference, the value `if`, `enum`, `match`,
 //! `repeat`, `assert`, parameter defaults, named arguments, record literals
@@ -20,7 +20,7 @@ fn repo() -> PathBuf {
 /// Nothing here depends on a dictionary's order: the one loop over a
 /// dictionary sorts what it picked before printing it.
 const EXPECTED: &[&str] = &[
-    "OpenEPL 0.9.0",
+    "Kiln 0.9.0",
     "the shorthands, in one program",
     r"C:\logs\{today}.txt",
     "Grace, Alan",
@@ -47,7 +47,7 @@ const EXPECTED: &[&str] = &[
 ];
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_sugar09_tour_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_sugar09_tour_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -56,15 +56,15 @@ fn scratch(tag: &str) -> PathBuf {
 /// Build the tracked example with `extra` flags, and answer where it landed.
 fn build(dir: &Path, extra: &[&str]) -> PathBuf {
     let bin = dir.join("sugar09_tour");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .arg("build")
-        .arg(repo().join("examples/sugar09_tour.oir"))
+        .arg(repo().join("examples/sugar09_tour.kiln"))
         .args(extra)
         .arg("-o")
         .arg(&bin)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(
         out.status.success(),
         "the tour failed to build with {extra:?}:\n{}",

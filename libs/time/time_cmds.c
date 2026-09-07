@@ -27,7 +27,7 @@
 #include <windows.h>
 #endif
 
-#include "openepl_abi.h"
+#include "kiln_abi.h"
 
 /* --- civil-date arithmetic ------------------------------------------------
  * Days between 1970-01-01 and y-m-d in the proleptic Gregorian calendar
@@ -93,7 +93,7 @@ static int utc_fields(int64_t ts, struct tm *out) {
     return 1;
 }
 
-static char *time_alloc(long len) { return (char *)oe_malloc(len + 1); }
+static char *time_alloc(long len) { return (char *)kn_malloc(len + 1); }
 
 /* --- clocks ---------------------------------------------------------------
  * Two clocks, and they are NOT interchangeable. */
@@ -101,7 +101,7 @@ static char *time_alloc(long len) { return (char *)oe_malloc(len + 1); }
 /* time_now_ms() -> int64 : Unix milliseconds, UTC. The wall clock — it can
  * jump backwards when the system clock is corrected, so it is for timestamps,
  * not for measuring how long something took. Infallible. */
-void time_now_ms(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void time_now_ms(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
 #ifdef _WIN32
     /* A FILETIME counts 100ns ticks from 1601-01-01; 11644473600 seconds
@@ -111,11 +111,11 @@ void time_now_ms(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     GetSystemTimeAsFileTime(&ft);
     u.LowPart = ft.dwLowDateTime;
     u.HighPart = ft.dwHighDateTime;
-    oe_ret_int64(ret, (int64_t)(u.QuadPart / 10000) - 11644473600000LL);
+    kn_ret_int64(ret, (int64_t)(u.QuadPart / 10000) - 11644473600000LL);
 #else
     struct timespec ts;
-    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) { oe_ret_int64(ret, (int64_t)time(NULL) * 1000); return; }
-    oe_ret_int64(ret, (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) { kn_ret_int64(ret, (int64_t)time(NULL) * 1000); return; }
+    kn_ret_int64(ret, (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 #endif
 }
 
@@ -123,17 +123,17 @@ void time_now_ms(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
  * origin that never moves backwards. Only the DIFFERENCE between two readings
  * means anything — this is not a Unix time and must never be compared with
  * one, formatted, or passed to time_month and friends. Infallible. */
-void time_monotonic_ms(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void time_monotonic_ms(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
 #ifdef _WIN32
     /* GetTickCount64 rather than QueryPerformanceCounter: this command's unit
      * is the millisecond, and a counter that already counts them cannot drift
      * from its own frequency. */
-    oe_ret_int64(ret, (int64_t)GetTickCount64());
+    kn_ret_int64(ret, (int64_t)GetTickCount64());
 #else
     struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) { oe_ret_int64(ret, 0); return; }
-    oe_ret_int64(ret, (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) { kn_ret_int64(ret, 0); return; }
+    kn_ret_int64(ret, (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 #endif
 }
 
@@ -144,11 +144,11 @@ void time_monotonic_ms(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
  * weekday-as-ISO or day-of-year, and is a legitimate hour/minute/second only
  * for a timestamp that was representable anyway. */
 #define TIME_FIELD(fn, expr)                                                  \
-    void fn(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {            \
+    void fn(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {            \
         (void)argc;                                                           \
         struct tm g;                                                          \
-        if (!utc_fields(oe_arg_int64(argv, 0), &g)) { oe_ret_int(ret, 0); return; } \
-        oe_ret_int(ret, (int32_t)(expr));                                     \
+        if (!utc_fields(kn_arg_int64(argv, 0), &g)) { kn_ret_int(ret, 0); return; } \
+        kn_ret_int(ret, (int32_t)(expr));                                     \
     }
 
 TIME_FIELD(time_month,       g.tm_mon + 1)     /* 1..12                      */
@@ -166,34 +166,34 @@ TIME_FIELD(time_day_of_year, g.tm_yday + 1)    /* 1..366                     */
  * field is out of range (month 13, 30 February, hour 24). FALLIBLE — -1 is
  * also a real timestamp (1969-12-31T23:59:59Z), so a program that cares about
  * that second must read last_error_code() to tell them apart. */
-void time_from_parts(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void time_from_parts(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    int y  = oe_arg_int(argv, 0), mo = oe_arg_int(argv, 1), d = oe_arg_int(argv, 2);
-    int h  = oe_arg_int(argv, 3), mi = oe_arg_int(argv, 4), s = oe_arg_int(argv, 5);
+    int y  = kn_arg_int(argv, 0), mo = kn_arg_int(argv, 1), d = kn_arg_int(argv, 2);
+    int h  = kn_arg_int(argv, 3), mi = kn_arg_int(argv, 4), s = kn_arg_int(argv, 5);
     int dim = month_length(y, mo);
     if (dim < 0 || d < 1 || d > dim || h < 0 || h > 23 ||
         mi < 0 || mi > 59 || s < 0 || s > 59) {
-        oe_error_set(OE_ERR_INVALID_ARG, "time_from_parts: field out of range");
-        oe_ret_int64(ret, -1);
+        kn_error_set(KN_ERR_INVALID_ARG, "time_from_parts: field out of range");
+        kn_ret_int64(ret, -1);
         return;
     }
     int64_t days = days_from_civil(y, mo, d);
-    oe_error_clear();
-    oe_ret_int64(ret, days * 86400 + (int64_t)h * 3600 + (int64_t)mi * 60 + s);
+    kn_error_clear();
+    kn_ret_int64(ret, days * 86400 + (int64_t)h * 3600 + (int64_t)mi * 60 + s);
 }
 
 /* time_add_seconds(timestamp, seconds) -> int64. Infallible; seconds may be
  * negative to move backwards. */
-void time_add_seconds(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void time_add_seconds(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    oe_ret_int64(ret, oe_arg_int64(argv, 0) + oe_arg_int64(argv, 1));
+    kn_ret_int64(ret, kn_arg_int64(argv, 0) + kn_arg_int64(argv, 1));
 }
 
 /* time_diff_seconds(later, earlier) -> int64 : later - earlier, so a positive
  * result means the first argument is the later moment. Infallible. */
-void time_diff_seconds(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void time_diff_seconds(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    oe_ret_int64(ret, oe_arg_int64(argv, 0) - oe_arg_int64(argv, 1));
+    kn_ret_int64(ret, kn_arg_int64(argv, 0) - kn_arg_int64(argv, 1));
 }
 
 /* --- ISO 8601 ------------------------------------------------------------- */
@@ -202,14 +202,14 @@ void time_diff_seconds(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
  * trailing Z is written always, so the text says which zone it is in and
  * time_parse_iso reads back exactly what was written. FALLIBLE: "" with the
  * error slot set when the timestamp is outside the representable range. */
-void time_format_iso(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void time_format_iso(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     struct tm g;
-    if (!utc_fields(oe_arg_int64(argv, 0), &g)) {
+    if (!utc_fields(kn_arg_int64(argv, 0), &g)) {
         char *empty = time_alloc(0);
         empty[0] = '\0';
-        oe_ret_text(ret, empty);
-        oe_error_set(OE_ERR_INVALID_ARG, "time_format_iso: timestamp out of range");
+        kn_ret_text(ret, empty);
+        kn_error_set(KN_ERR_INVALID_ARG, "time_format_iso: timestamp out of range");
         return;
     }
     char buf[64];
@@ -220,8 +220,8 @@ void time_format_iso(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     char *o = time_alloc(n);
     memcpy(o, buf, (size_t)n);
     o[n] = '\0';
-    oe_error_clear();
-    oe_ret_text(ret, o);
+    kn_error_clear();
+    kn_ret_text(ret, o);
 }
 
 static int digits(const char *s, int n) {
@@ -243,9 +243,9 @@ static int num(const char *s, int n) {
  * the T; the trailing Z omitted; and a bare "YYYY-MM-DD", which means midnight
  * that day. Anything else — an offset like +02:00, fractional seconds, a
  * two-digit year — is rejected rather than guessed at. */
-void time_parse_iso(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void time_parse_iso(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *s = oe_arg_text(argv, 0);
+    const char *s = kn_arg_text(argv, 0);
     if (!s) s = "";
     size_t len = strlen(s);
     int y, mo, d, h = 0, mi = 0, sec = 0;
@@ -271,34 +271,34 @@ void time_parse_iso(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         if (dim < 0 || d < 1 || d > dim || h > 23 || mi > 59 || sec > 59) goto bad;
         int64_t t = days_from_civil(y, mo, d) * 86400 +
                     (int64_t)h * 3600 + (int64_t)mi * 60 + sec;
-        oe_error_clear();
-        oe_ret_int64(ret, t);
+        kn_error_clear();
+        kn_ret_int64(ret, t);
         return;
     }
 bad:
-    oe_error_set(OE_ERR_INVALID_ARG, "time_parse_iso: not an ISO 8601 UTC date-time");
-    oe_ret_int64(ret, -1);
+    kn_error_set(KN_ERR_INVALID_ARG, "time_parse_iso: not an ISO 8601 UTC date-time");
+    kn_ret_int64(ret, -1);
 }
 
 /* --- calendar questions --------------------------------------------------- */
 
 /* time_is_leap_year(year) -> bool. Proleptic Gregorian: 2024 yes, 1900 no,
  * 2000 yes. Infallible, so a false here is always a genuine "no". */
-void time_is_leap_year(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void time_is_leap_year(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    oe_ret_bool(ret, is_leap(oe_arg_int(argv, 0)));
+    kn_ret_bool(ret, is_leap(kn_arg_int(argv, 0)));
 }
 
 /* time_days_in_month(year, month) -> int : 28..31, or -1 with the error slot
  * set when month is not 1..12. FALLIBLE. */
-void time_days_in_month(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void time_days_in_month(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    int n = month_length(oe_arg_int(argv, 0), oe_arg_int(argv, 1));
+    int n = month_length(kn_arg_int(argv, 0), kn_arg_int(argv, 1));
     if (n < 0) {
-        oe_error_set(OE_ERR_INVALID_ARG, "time_days_in_month: month must be 1..12");
-        oe_ret_int(ret, -1);
+        kn_error_set(KN_ERR_INVALID_ARG, "time_days_in_month: month must be 1..12");
+        kn_ret_int(ret, -1);
         return;
     }
-    oe_error_clear();
-    oe_ret_int(ret, n);
+    kn_error_clear();
+    kn_ret_int(ret, n);
 }

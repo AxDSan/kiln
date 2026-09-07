@@ -1,4 +1,4 @@
-/* OpenEPL Studio's settings: the schema, and the file it lives in.
+/* Kiln Studio's settings: the schema, and the file it lives in.
  *
  * Two rules shape this file.
  *
@@ -15,13 +15,13 @@
  * second list to forget.
  *
  * The file is `key: value` lines in the user's data directory, the same shape
- * as `project.oeproj`, `template.meta` and the recent list — one format for
+ * as `project.kproj`, `template.meta` and the recent list — one format for
  * everything a person might open in an editor. Unknown keys are preserved on
  * save: a settings file written by a newer Studio must survive being opened by
  * an older one.
  */
-#ifndef OPENEPL_DESIGNER_SETTINGS_H
-#define OPENEPL_DESIGNER_SETTINGS_H
+#ifndef KILN_DESIGNER_SETTINGS_H
+#define KILN_DESIGNER_SETTINGS_H
 
 #include <algorithm>
 #include <cstdio>
@@ -32,7 +32,7 @@
 
 #include "portable.h"
 
-namespace openepl::settings {
+namespace kiln::settings {
 
 enum class Kind { Bool, Int, Choice, Text, Path };
 
@@ -88,7 +88,7 @@ inline const std::vector<Row>& schema() {
          "Also the distance an arrow key nudges with Shift.", {}},
 
         {"build.output_dir", "Build", "Put built binaries in", Kind::Path, "", 0, 0, false,
-         "Where Build puts your program. Empty means the project's build/. Run always uses .openepl/run/ inside the project.", {}},
+         "Where Build puts your program. Empty means the project's build/. Run always uses .kiln/run/ inside the project.", {}},
         {"build.release", "Build", "Build optimised and stripped", Kind::Bool, "false", 0, 0,
          false, "Passes --release. Slower to build, smaller to ship.", {}},
 
@@ -99,7 +99,7 @@ inline const std::vector<Row>& schema() {
         {"startup.recent_limit", "Files and startup", "Recent projects kept", Kind::Int, "8", 1,
          30, false, "", {}},
 
-        {"toolchain.openepl", "Toolchain", "openepl binary", Kind::Path, "", 0, 0, true,
+        {"toolchain.kiln", "Toolchain", "kiln binary", Kind::Path, "", 0, 0, true,
          "Empty uses the one beside Studio.", {}},
 
         // Not shown: state, not preference. See Row::hidden.
@@ -120,7 +120,7 @@ inline const Row* find(const std::string& key) {
 /// `XDG_DATA_HOME` first, which is what keeps a test run out of the file a
 /// person sees on their next real start.
 inline std::string path() {
-    const std::string dir = openepl::sys::data_dir();
+    const std::string dir = kiln::sys::data_dir();
     return dir.empty() ? "" : dir + "/settings";
 }
 
@@ -183,10 +183,10 @@ inline void save() {
     const std::string file = path();
     if (file.empty()) return;
     const size_t slash = file.find_last_of('/');
-    if (slash != std::string::npos) openepl::sys::make_dirs(file.substr(0, slash));
+    if (slash != std::string::npos) kiln::sys::make_dirs(file.substr(0, slash));
     FILE* f = std::fopen(file.c_str(), "w");
     if (!f) return;
-    std::fprintf(f, "# OpenEPL Studio settings. Delete a line to return it to its default.\n");
+    std::fprintf(f, "# Kiln Studio settings. Delete a line to return it to its default.\n");
     for (const auto& r : schema()) {
         auto it = store().values.find(r.key);
         if (it == store().values.end() || it->second == r.def) continue;
@@ -270,6 +270,6 @@ inline std::vector<std::string> categories() {
     return out;
 }
 
-} // namespace openepl::settings
+} // namespace kiln::settings
 
 #endif

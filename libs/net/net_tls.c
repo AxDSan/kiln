@@ -1,6 +1,6 @@
 /* TLS for the HTTP client, on mbedTLS, compiled only when mbedTLS is vendored.
  *
- * The whole file is one `#ifdef OPENEPL_NET_TLS`, and the macro comes from
+ * The whole file is one `#ifdef KILN_NET_TLS`, and the macro comes from
  * `optional_requires` in lib.json matching the archives tools/fetch-mbedtls.sh
  * builds.  Nobody has to fetch it: without it this translation unit is the
  * three stubs at the bottom, `net_tls_available()` answers 0, and net_cmds.c
@@ -18,12 +18,12 @@
  *
  *   No CA store means no connection.  Falling back to "trust everything"
  *   when the trust store cannot be found is the same hole arriving by a
- *   different door, so a machine with no bundle gets OE_ERR_UNSUPPORTED and a
- *   message naming OPENEPL_CA_BUNDLE.
+ *   different door, so a machine with no bundle gets KN_ERR_UNSUPPORTED and a
+ *   message naming KILN_CA_BUNDLE.
  */
 #include "net_internal.h"
 
-#ifdef OPENEPL_NET_TLS
+#ifdef KILN_NET_TLS
 
 #include <mbedtls/ssl.h>
 #include <mbedtls/entropy.h>
@@ -48,7 +48,7 @@ static char g_ca_where[512];
 
 /* Where a Linux or BSD keeps the trust store.  There is no standard location,
  * only a list of the ones distributions actually use, so the list is the
- * mechanism.  OPENEPL_CA_BUNDLE comes first because a container, a corporate
+ * mechanism.  KILN_CA_BUNDLE comes first because a container, a corporate
  * proxy or a test needs to say "this one" and be believed. */
 static const char *const CA_FILES[] = {
     "/etc/ssl/certs/ca-certificates.crt",       /* Debian, Ubuntu, Alpine    */
@@ -65,7 +65,7 @@ static void net_tls_fail(int rc, const char *what) {
     mbedtls_strerror(rc, detail, sizeof detail);
     char msg[320];
     snprintf(msg, sizeof msg, "%s: %s", what, detail);
-    oe_error_set(OE_ERR_INVALID_ARG, msg);
+    kn_error_set(KN_ERR_INVALID_ARG, msg);
 }
 
 /* Load the trust store, or decide there is none.  1 = loaded. */
@@ -74,7 +74,7 @@ static int net_tls_load_ca(void) {
     g_ca_state = -1;
     mbedtls_x509_crt_init(&g_ca);
 
-    const char *env = getenv("OPENEPL_CA_BUNDLE");
+    const char *env = getenv("KILN_CA_BUNDLE");
     if (env && *env) {
         /* A directory of certificates and a single bundle file are both common
          * spellings of the same thing, and a caller should not have to know
@@ -95,9 +95,9 @@ static int net_tls_load_ca(void) {
         mbedtls_strerror(rc, detail, sizeof detail);
         char msg[400];
         snprintf(msg, sizeof msg,
-                 "OPENEPL_CA_BUNDLE names %s, which could not be read as "
+                 "KILN_CA_BUNDLE names %s, which could not be read as "
                  "certificates: %s", env, detail);
-        oe_error_set(OE_ERR_INVALID_ARG, msg);
+        kn_error_set(KN_ERR_INVALID_ARG, msg);
         mbedtls_x509_crt_free(&g_ca);
         g_ca_state = -2;                     /* the slot is already set */
         return 0;
@@ -136,23 +136,23 @@ int net_tls_available(void) { return 1; }
 NetTls *net_tls_start(int fd, const char *host) {
     if (!net_tls_load_ca()) {
         if (g_ca_state == -2) return NULL;         /* slot already set */
-        oe_error_set(OE_ERR_UNSUPPORTED,
+        kn_error_set(KN_ERR_UNSUPPORTED,
                      "https needs a certificate authority store and none was "
                      "found on this machine: install the system CA bundle, or "
-                     "set OPENEPL_CA_BUNDLE to one. Certificates are never "
+                     "set KILN_CA_BUNDLE to one. Certificates are never "
                      "left unverified");
         return NULL;
     }
 
     NetTls *t = (NetTls *)calloc(1, sizeof *t);
-    if (!t) { oe_error_set_errno(ENOMEM, "tls"); return NULL; }
+    if (!t) { kn_error_set_errno(ENOMEM, "tls"); return NULL; }
     t->fd = fd;
     mbedtls_ssl_init(&t->ssl);
     mbedtls_ssl_config_init(&t->conf);
     mbedtls_entropy_init(&t->entropy);
     mbedtls_ctr_drbg_init(&t->drbg);
 
-    const char *pers = "openepl-net";
+    const char *pers = "kiln-net";
     int rc = mbedtls_ctr_drbg_seed(&t->drbg, mbedtls_entropy_func, &t->entropy,
                                    (const unsigned char *)pers, strlen(pers));
     if (rc != 0) { net_tls_fail(rc, "seed the random generator"); goto fail; }
@@ -197,7 +197,7 @@ NetTls *net_tls_start(int fd, const char *host) {
             snprintf(msg, sizeof msg,
                      "the certificate for %s could not be verified against %s: "
                      "%s", host, g_ca_where, why);
-            oe_error_set(OE_ERR_INVALID_ARG, msg);
+            kn_error_set(KN_ERR_INVALID_ARG, msg);
             goto fail;
         }
         net_tls_fail(rc, "tls handshake");
@@ -262,7 +262,7 @@ int net_tls_available(void) { return 0; }
 
 NetTls *net_tls_start(int fd, const char *host) {
     (void)fd; (void)host;
-    oe_error_set(OE_ERR_UNSUPPORTED,
+    kn_error_set(KN_ERR_UNSUPPORTED,
                  "https is not available: this build has no TLS. Run "
                  "tools/fetch-mbedtls.sh and rebuild. The request is never "
                  "downgraded to http");

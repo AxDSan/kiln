@@ -11,7 +11,7 @@
  *
  * A client of the server is a small positive int, counted from 1 in the order
  * of arrival and NEVER reused within a run.  A program that keeps a stale one
- * is told so (OE_ERR_STALE), which is the same promise the handle table makes
+ * is told so (KN_ERR_STALE), which is the same promise the handle table makes
  * and for the same reason: a number that quietly came to mean someone else's
  * connection is the worst thing a chat server can hand its author.
  *
@@ -52,7 +52,7 @@
 
 /* The signatures the typed events are dispatched through.  The compiler emits
  * the handler side with exactly these (backend/src/lib.rs, `handler_symbol`),
- * so the cast back from OpenEPL_HandlerFn is the one the callee was written
+ * so the cast back from Kiln_HandlerFn is the one the callee was written
  * with — see the descriptor in net_libinfo.c. */
 typedef void (*NetIdFn)(int32_t);
 typedef void (*NetIdTextFn)(int32_t, char *);
@@ -135,16 +135,16 @@ static int net_peer_write(NetPeer *p, int *err) {
  * the pump to notice — it reports the disconnect once, in one place. */
 static int net_peer_send(NetPeer *p, const char *data, size_t n) {
     if (p->out.n + n > NET_TCP_OUT_MAX) {
-        oe_error_set(OE_ERR_TABLE_FULL, "send buffer is full: the peer is not reading");
+        kn_error_set(KN_ERR_TABLE_FULL, "send buffer is full: the peer is not reading");
         return 0;
     }
     if (!net_buf_add(&p->out, data, n)) {
-        oe_error_set(OE_ERR_TABLE_FULL, "out of memory queueing data to send");
+        kn_error_set(KN_ERR_TABLE_FULL, "out of memory queueing data to send");
         return 0;
     }
     int e = 0;
     net_peer_write(p, &e);
-    oe_error_clear();
+    kn_error_clear();
     return 1;
 }
 
@@ -213,12 +213,12 @@ static void net_address_text(const struct sockaddr *sa, socklen_t sl, char *out,
 /* Fire `error`, or say it on stderr when nothing is wired to hear it.  The
  * error slot is set by the caller and LEFT set, so a handler that asks
  * last_error_code() reads the failure that woke it. */
-static void net_report(OpenEPL_HandlerFn on_error, const char *type, const char *name) {
-    const char *msg = oe_error_message();
+static void net_report(Kiln_HandlerFn on_error, const char *type, const char *name) {
+    const char *msg = kn_error_message();
     if (on_error) {
         ((NetTextFn)on_error)(net_text(msg, strlen(msg)));
     } else {
-        fprintf(stderr, "openepl: %s %s: %s\n", type, *name ? name : "(unnamed)", msg);
+        fprintf(stderr, "kiln: %s %s: %s\n", type, *name ? name : "(unnamed)", msg);
     }
 }
 
@@ -226,7 +226,7 @@ static int net_copy_bounded(char *dst, size_t cap, const char *src, const char *
     if (strlen(src) >= cap) {
         char msg[96];
         snprintf(msg, sizeof msg, "%s is longer than %d bytes", what, (int)cap - 1);
-        oe_error_set(OE_ERR_INVALID_ARG, msg);
+        kn_error_set(KN_ERR_INVALID_ARG, msg);
         return 0;
     }
     memcpy(dst, src, strlen(src) + 1);
@@ -260,7 +260,7 @@ typedef struct {
      * the pump, or `active = false` called from inside a handler the pump
      * called.  No sweep and no source removal happens while it is. */
     int      busy;
-    OpenEPL_HandlerFn on_connect, on_disconnect, on_receive, on_error;
+    Kiln_HandlerFn on_connect, on_disconnect, on_receive, on_error;
 } NetTcpServer;
 
 static NetTcpServer g_tcpservers[NET_TCPSERVERS_MAX];
@@ -288,7 +288,7 @@ static void net_server_settle(NetTcpServer *s) {
     if (s->busy) return;
     net_server_sweep(s);
     if (!s->active && s->source) {
-        oe_loop_remove(s->source);
+        kn_loop_remove(s->source);
         s->source = 0;
     }
 }
@@ -317,7 +317,7 @@ static void net_server_stop(NetTcpServer *s) {
 static void net_server_start(NetTcpServer *s) {
     s->active = 1;
     if (s->source) return;              /* switched off and on in one turn */
-    s->source = oe_loop_add(net_tcpserver_pump, s, NET_TCP_PERIOD_MS);
+    s->source = kn_loop_add(net_tcpserver_pump, s, NET_TCP_PERIOD_MS);
     if (!s->source) {
         s->active = 0;                  /* the loop set the error slot     */
         net_report(s->on_error, "tcpserver", s->name);
@@ -341,11 +341,11 @@ static int net_server_push(NetTcpServer *s, NetClient *c) {
  * wrong port. */
 static int net_tcpserver_listen(NetTcpServer *s) {
     if (!net_start()) {
-        oe_error_set(OE_ERR_UNSUPPORTED, "Winsock could not be started");
+        kn_error_set(KN_ERR_UNSUPPORTED, "Winsock could not be started");
         return 0;
     }
     if (s->port < 1 || s->port > 65535) {
-        oe_error_set(OE_ERR_INVALID_ARG, "port is not set: a tcpserver needs a port in 1..65535");
+        kn_error_set(KN_ERR_INVALID_ARG, "port is not set: a tcpserver needs a port in 1..65535");
         return 0;
     }
     char portstr[16], where[NET_TCP_HOST_MAX + 32];
@@ -361,7 +361,7 @@ static int net_tcpserver_listen(NetTcpServer *s) {
     if (rc != 0 || !list) {
         char msg[NET_TCP_HOST_MAX + 96];
         snprintf(msg, sizeof msg, "resolve %s: %s", s->address, gai_strerror(rc));
-        oe_error_set(OE_ERR_INVALID_ARG, msg);
+        kn_error_set(KN_ERR_INVALID_ARG, msg);
         return 0;
     }
 
@@ -436,7 +436,7 @@ static void net_client_step(NetTcpServer *s, NetClient *c) {
             char msg[128];
             snprintf(msg, sizeof msg, "client %d sent %ld bytes with no delimiter; dropped",
                      c->id, (long)NET_TCP_IN_MAX);
-            oe_error_set(OE_ERR_TABLE_FULL, msg);
+            kn_error_set(KN_ERR_TABLE_FULL, msg);
             net_report(s->on_error, "tcpserver", s->name);
         }
         net_client_drop(s, c);
@@ -462,9 +462,9 @@ static int32_t net_tcpserver_pump(void *state) {
             /* Nothing is listening for the failure, so the program cannot
              * be one that meant to carry on: say it and stop, the way an
              * httpserver does, rather than run deaf with a port number. */
-            fprintf(stderr, "openepl: tcpserver %s cannot %s\n",
-                    *s->name ? s->name : "(unnamed)", oe_error_message());
-            oe_loop_quit(1);
+            fprintf(stderr, "kiln: tcpserver %s cannot %s\n",
+                    *s->name ? s->name : "(unnamed)", kn_error_message());
+            kn_loop_quit(1);
         }
     }
     if (s->active) net_tcpserver_accept(s);
@@ -472,7 +472,7 @@ static int32_t net_tcpserver_pump(void *state) {
     s->busy--;
     net_server_sweep(s);
     if (!s->active) {
-        /* Dropped by returning 1, never by oe_loop_remove from inside the
+        /* Dropped by returning 1, never by kn_loop_remove from inside the
          * pump: the loop removes this slot itself on 1, and a slot removed
          * twice could take a source registered in between with it. */
         s->source = 0;
@@ -485,7 +485,7 @@ static int32_t net_tcpserver_pump(void *state) {
 
 void *net_tcpserver_create(void) {
     if (g_tcpserver_count >= NET_TCPSERVERS_MAX) {
-        oe_error_set(OE_ERR_TABLE_FULL, "too many tcp servers");
+        kn_error_set(KN_ERR_TABLE_FULL, "too many tcp servers");
         return NULL;
     }
     NetTcpServer *s = &g_tcpservers[g_tcpserver_count++];
@@ -552,7 +552,7 @@ int32_t net_tcpserver_get_int(void *obj, const char *prop) {
     return 0;
 }
 
-int32_t net_tcpserver_on(void *obj, const char *event, OpenEPL_HandlerFn fn) {
+int32_t net_tcpserver_on(void *obj, const char *event, Kiln_HandlerFn fn) {
     NetTcpServer *s = (NetTcpServer *)obj;
     if (strcmp(event, "connect") == 0)    { s->on_connect = fn;    return 0; }
     if (strcmp(event, "disconnect") == 0) { s->on_disconnect = fn; return 0; }
@@ -576,7 +576,7 @@ static NetTcpServer *net_tcpserver_named(const char *name) {
     char msg[NET_TCP_NAME_MAX * 2 + 96];
     snprintf(msg, sizeof msg, "no tcpserver named \"%s\": set name = \"%s\" in the component",
              name, name);
-    oe_error_set(OE_ERR_INVALID_ARG, msg);
+    kn_error_set(KN_ERR_INVALID_ARG, msg);
     return NULL;
 }
 
@@ -585,96 +585,96 @@ static NetTcpServer *net_tcpserver_named(const char *name) {
  * server acts on (drop the room entry, not fix the code). */
 static NetClient *net_client_by_id(NetTcpServer *s, int32_t id) {
     if (id < 1) {
-        oe_error_set(OE_ERR_BAD_HANDLE, "client ids count from 1");
+        kn_error_set(KN_ERR_BAD_HANDLE, "client ids count from 1");
         return NULL;
     }
     for (int32_t i = 0; i < s->count; i++) {
         NetClient *c = s->clients[i];
         if (c->id == id && !c->peer.dead) return c;
     }
-    oe_error_set(id > s->next_id ? OE_ERR_BAD_HANDLE : OE_ERR_STALE,
+    kn_error_set(id > s->next_id ? KN_ERR_BAD_HANDLE : KN_ERR_STALE,
                  id > s->next_id ? "no such client" : "that client has disconnected");
     return NULL;
 }
 
 /* tcpserver_send(server, client, data) -> bool */
-void tcpserver_send(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void tcpserver_send(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    NetTcpServer *s = net_tcpserver_named(oe_arg_text(argv, 0));
-    NetClient *c = s ? net_client_by_id(s, oe_arg_int(argv, 1)) : NULL;
-    if (!c) { oe_ret_bool(ret, 0); return; }
-    const char *data = net_nz(oe_arg_text(argv, 2));
-    oe_ret_bool(ret, net_peer_send(&c->peer, data, strlen(data)));
+    NetTcpServer *s = net_tcpserver_named(kn_arg_text(argv, 0));
+    NetClient *c = s ? net_client_by_id(s, kn_arg_int(argv, 1)) : NULL;
+    if (!c) { kn_ret_bool(ret, 0); return; }
+    const char *data = net_nz(kn_arg_text(argv, 2));
+    kn_ret_bool(ret, net_peer_send(&c->peer, data, strlen(data)));
 }
 
 /* tcpserver_send_all(server, data) -> int: how many clients it was queued
  * for; -1 when there is no such server. */
-void tcpserver_send_all(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void tcpserver_send_all(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    NetTcpServer *s = net_tcpserver_named(oe_arg_text(argv, 0));
-    if (!s) { oe_ret_int(ret, -1); return; }
-    const char *data = net_nz(oe_arg_text(argv, 1));
+    NetTcpServer *s = net_tcpserver_named(kn_arg_text(argv, 0));
+    if (!s) { kn_ret_int(ret, -1); return; }
+    const char *data = net_nz(kn_arg_text(argv, 1));
     int32_t sent = 0;
     for (int32_t i = 0; i < s->count; i++) {
         NetClient *c = s->clients[i];
         if (!c->peer.dead && net_peer_send(&c->peer, data, strlen(data))) sent++;
     }
-    oe_error_clear();
-    oe_ret_int(ret, sent);
+    kn_error_clear();
+    kn_ret_int(ret, sent);
 }
 
 /* tcpserver_disconnect(server, client) -> bool */
-void tcpserver_disconnect(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void tcpserver_disconnect(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    NetTcpServer *s = net_tcpserver_named(oe_arg_text(argv, 0));
-    NetClient *c = s ? net_client_by_id(s, oe_arg_int(argv, 1)) : NULL;
-    if (!c) { oe_ret_bool(ret, 0); return; }
+    NetTcpServer *s = net_tcpserver_named(kn_arg_text(argv, 0));
+    NetClient *c = s ? net_client_by_id(s, kn_arg_int(argv, 1)) : NULL;
+    if (!c) { kn_ret_bool(ret, 0); return; }
     net_client_drop(s, c);
     net_server_settle(s);
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* tcpserver_client_count(server) -> int, -1 when there is no such server. */
-void tcpserver_client_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void tcpserver_client_count(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    NetTcpServer *s = net_tcpserver_named(oe_arg_text(argv, 0));
-    if (!s) { oe_ret_int(ret, -1); return; }
+    NetTcpServer *s = net_tcpserver_named(kn_arg_text(argv, 0));
+    if (!s) { kn_ret_int(ret, -1); return; }
     int32_t live = 0;
     for (int32_t i = 0; i < s->count; i++) live += !s->clients[i]->peer.dead;
-    oe_error_clear();
-    oe_ret_int(ret, live);
+    kn_error_clear();
+    kn_ret_int(ret, live);
 }
 
 /* tcpserver_client_address(server, client) -> text, "ip:port". */
-void tcpserver_client_address(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void tcpserver_client_address(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    NetTcpServer *s = net_tcpserver_named(oe_arg_text(argv, 0));
-    NetClient *c = s ? net_client_by_id(s, oe_arg_int(argv, 1)) : NULL;
-    if (!c) { oe_ret_text(ret, net_empty()); return; }
-    oe_error_clear();
-    oe_ret_text(ret, net_text(c->address, strlen(c->address)));
+    NetTcpServer *s = net_tcpserver_named(kn_arg_text(argv, 0));
+    NetClient *c = s ? net_client_by_id(s, kn_arg_int(argv, 1)) : NULL;
+    if (!c) { kn_ret_text(ret, net_empty()); return; }
+    kn_error_clear();
+    kn_ret_text(ret, net_text(c->address, strlen(c->address)));
 }
 
 /* tcpserver_client(server, n) -> int: the n-th live client's id, counting
  * from 1; 0 past the end, which is a genuine "none" and not a failure. */
-void tcpserver_client(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void tcpserver_client(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    NetTcpServer *s = net_tcpserver_named(oe_arg_text(argv, 0));
-    if (!s) { oe_ret_int(ret, 0); return; }
-    int32_t n = oe_arg_int(argv, 1);
+    NetTcpServer *s = net_tcpserver_named(kn_arg_text(argv, 0));
+    if (!s) { kn_ret_int(ret, 0); return; }
+    int32_t n = kn_arg_int(argv, 1);
     if (n < 1) {
-        oe_error_set(OE_ERR_INVALID_ARG, "positions count from 1");
-        oe_ret_int(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "positions count from 1");
+        kn_ret_int(ret, 0);
         return;
     }
-    oe_error_clear();
+    kn_error_clear();
     for (int32_t i = 0; i < s->count; i++) {
         NetClient *c = s->clients[i];
         if (c->peer.dead) continue;
-        if (--n == 0) { oe_ret_int(ret, c->id); return; }
+        if (--n == 0) { kn_ret_int(ret, c->id); return; }
     }
-    oe_ret_int(ret, 0);
+    kn_ret_int(ret, 0);
 }
 
 /* =========================================================================
@@ -700,7 +700,7 @@ typedef struct {
     int64_t  deadline;
     int32_t  source;
     int      busy;
-    OpenEPL_HandlerFn on_connect, on_disconnect, on_receive, on_error;
+    Kiln_HandlerFn on_connect, on_disconnect, on_receive, on_error;
 } NetTcpClient;
 
 static NetTcpClient g_tcpclients[NET_TCPCLIENTS_MAX];
@@ -724,7 +724,7 @@ static void net_tcpclient_stop(NetTcpClient *c) {
     net_tcpclient_forget_addresses(c);
     if (had && c->on_disconnect) ((NetPlainFn)c->on_disconnect)();
     if (!c->busy && c->source) {
-        oe_loop_remove(c->source);
+        kn_loop_remove(c->source);
         c->source = 0;
     }
 }
@@ -732,7 +732,7 @@ static void net_tcpclient_stop(NetTcpClient *c) {
 static void net_tcpclient_start(NetTcpClient *c) {
     c->active = 1;
     if (c->source) return;
-    c->source = oe_loop_add(net_tcpclient_pump, c, NET_TCP_PERIOD_MS);
+    c->source = kn_loop_add(net_tcpclient_pump, c, NET_TCP_PERIOD_MS);
     if (!c->source) {
         c->active = 0;
         net_report(c->on_error, "tcpclient", c->name);
@@ -749,7 +749,7 @@ static void net_tcpclient_fail(NetTcpClient *c, int code, const char *fallback_m
     else {
         char msg[NET_TCP_HOST_MAX + 160];
         snprintf(msg, sizeof msg, "%s: %s", what, fallback_msg);
-        oe_error_set(OE_ERR_INVALID_ARG, msg);
+        kn_error_set(KN_ERR_INVALID_ARG, msg);
     }
     c->state = NET_CL_IDLE;
     c->active = 0;
@@ -815,7 +815,7 @@ static void net_tcpclient_begin(NetTcpClient *c) {
     if (rc != 0 || !c->list) {
         char msg[NET_TCP_HOST_MAX + 96];
         snprintf(msg, sizeof msg, "resolve %s: %s", c->host, gai_strerror(rc));
-        oe_error_set(OE_ERR_INVALID_ARG, msg);
+        kn_error_set(KN_ERR_INVALID_ARG, msg);
         c->list = NULL;
         c->state = NET_CL_IDLE;
         c->active = 0;
@@ -869,7 +869,7 @@ static void net_tcpclient_step(NetTcpClient *c) {
             char msg[96];
             snprintf(msg, sizeof msg, "%ld bytes arrived with no delimiter; disconnected",
                      (long)NET_TCP_IN_MAX);
-            oe_error_set(OE_ERR_TABLE_FULL, msg);
+            kn_error_set(KN_ERR_TABLE_FULL, msg);
             net_report(c->on_error, "tcpclient", c->name);
         }
         net_tcpclient_stop(c);
@@ -902,7 +902,7 @@ static int32_t net_tcpclient_pump(void *state) {
 
 void *net_tcpclient_create(void) {
     if (g_tcpclient_count >= NET_TCPCLIENTS_MAX) {
-        oe_error_set(OE_ERR_TABLE_FULL, "too many tcp clients");
+        kn_error_set(KN_ERR_TABLE_FULL, "too many tcp clients");
         return NULL;
     }
     NetTcpClient *c = &g_tcpclients[g_tcpclient_count++];
@@ -944,7 +944,7 @@ int32_t net_tcpclient_set(void *obj, const char *prop, const char *value) {
          * true is silent; only a CHANGE is refused — and since the backend
          * ignores a setter's answer, the slot is the only place to say so. */
         if (net_bool_of(value) == (c->state == NET_CL_CONNECTED)) return 0;
-        oe_error_set(OE_ERR_INVALID_ARG, "connected is read-only: set active instead");
+        kn_error_set(KN_ERR_INVALID_ARG, "connected is read-only: set active instead");
         return 1;
     }
     return 1;
@@ -972,7 +972,7 @@ int32_t net_tcpclient_get_int(void *obj, const char *prop) {
     return 0;
 }
 
-int32_t net_tcpclient_on(void *obj, const char *event, OpenEPL_HandlerFn fn) {
+int32_t net_tcpclient_on(void *obj, const char *event, Kiln_HandlerFn fn) {
     NetTcpClient *c = (NetTcpClient *)obj;
     if (strcmp(event, "connect") == 0)    { c->on_connect = fn;    return 0; }
     if (strcmp(event, "disconnect") == 0) { c->on_disconnect = fn; return 0; }
@@ -991,55 +991,55 @@ static NetTcpClient *net_tcpclient_named(const char *name) {
     char msg[NET_TCP_NAME_MAX * 2 + 96];
     snprintf(msg, sizeof msg, "no tcpclient named \"%s\": set name = \"%s\" in the component",
              name, name);
-    oe_error_set(OE_ERR_INVALID_ARG, msg);
+    kn_error_set(KN_ERR_INVALID_ARG, msg);
     return NULL;
 }
 
 /* tcpclient_send(client, data) -> bool */
-void tcpclient_send(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void tcpclient_send(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    NetTcpClient *c = net_tcpclient_named(oe_arg_text(argv, 0));
-    if (!c) { oe_ret_bool(ret, 0); return; }
+    NetTcpClient *c = net_tcpclient_named(kn_arg_text(argv, 0));
+    if (!c) { kn_ret_bool(ret, 0); return; }
     if (c->state != NET_CL_CONNECTED) {
-        oe_error_set(OE_ERR_INVALID_ARG, "not connected");
-        oe_ret_bool(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "not connected");
+        kn_ret_bool(ret, 0);
         return;
     }
-    const char *data = net_nz(oe_arg_text(argv, 1));
-    oe_ret_bool(ret, net_peer_send(&c->peer, data, strlen(data)));
+    const char *data = net_nz(kn_arg_text(argv, 1));
+    kn_ret_bool(ret, net_peer_send(&c->peer, data, strlen(data)));
 }
 
 /* tcpclient_connect(client) -> bool: `active = true` as a call.  True means
  * the attempt is under way (or the client is already connected); the outcome
  * arrives as `connect` or `error`. */
-void tcpclient_connect(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void tcpclient_connect(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    NetTcpClient *c = net_tcpclient_named(oe_arg_text(argv, 0));
-    if (!c) { oe_ret_bool(ret, 0); return; }
+    NetTcpClient *c = net_tcpclient_named(kn_arg_text(argv, 0));
+    if (!c) { kn_ret_bool(ret, 0); return; }
     if (!c->active) net_tcpclient_start(c);
-    if (!c->active) { oe_ret_bool(ret, 0); return; }    /* the slot says why */
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    if (!c->active) { kn_ret_bool(ret, 0); return; }    /* the slot says why */
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* tcpclient_disconnect(client) -> bool: false with code 0 when there was
  * nothing to disconnect. */
-void tcpclient_disconnect(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void tcpclient_disconnect(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    NetTcpClient *c = net_tcpclient_named(oe_arg_text(argv, 0));
-    if (!c) { oe_ret_bool(ret, 0); return; }
-    oe_error_clear();
-    if (!c->active) { oe_ret_bool(ret, 0); return; }
+    NetTcpClient *c = net_tcpclient_named(kn_arg_text(argv, 0));
+    if (!c) { kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    if (!c->active) { kn_ret_bool(ret, 0); return; }
     net_tcpclient_stop(c);
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* tcpclient_connected(client) -> bool */
-void tcpclient_connected(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void tcpclient_connected(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    NetTcpClient *c = net_tcpclient_named(oe_arg_text(argv, 0));
-    if (!c) { oe_ret_bool(ret, 0); return; }
-    oe_error_clear();
-    oe_ret_bool(ret, c->state == NET_CL_CONNECTED);
+    NetTcpClient *c = net_tcpclient_named(kn_arg_text(argv, 0));
+    if (!c) { kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_bool(ret, c->state == NET_CL_CONNECTED);
 }

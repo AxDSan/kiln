@@ -9,11 +9,11 @@
 //!
 //! Two programs, one per platform, and both are self-checking transcripts:
 //!
-//! * `examples/dll/dispatch.oir` opens `libops.so` (from `examples/dll/ops.c`),
+//! * `examples/dll/dispatch.kiln` opens `libops.so` (from `examples/dll/ops.c`),
 //!   which is neither linked against nor declared, fetches five same-shaped
 //!   exports into a `ptr[5]`, and lets a request word decide which to call —
-//!   then checks C's `&`, `|`, `^`, `<<` and `>>` against OpenEPL's own.
-//! * `examples/win/flags.oir` asks `GetProcAddress` for `GetCurrentProcessId`
+//!   then checks C's `&`, `|`, `^`, `<<` and `>>` against Kiln's own.
+//! * `examples/win/flags.kiln` asks `GetProcAddress` for `GetCurrentProcessId`
 //!   and calls it, checking the answer against the same function reached as a
 //!   declared import, and combines and tests the `win` kit's real constants —
 //!   including handing `VirtualAlloc` and `OpenProcess` words built with `bor`.
@@ -38,7 +38,7 @@ fn on_path(tool: &str) -> bool {
 /// A scratch directory per test. The Linux program opens its plug-in by a
 /// relative path, so the library and the binary share one place.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_interop07_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_interop07_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create the scratch directory");
     dir
@@ -47,14 +47,14 @@ fn scratch(tag: &str) -> PathBuf {
 /// Build an example into `dir/<name>`. The working directory is the
 /// repository, which is how `use win` finds `kits/win`.
 fn build(src: &Path, out: &Path, extra: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_openepl"))
+    Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap()])
         .args(extra)
         .args(["-o", out.to_str().unwrap()])
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build")
+        .expect("run kiln build")
 }
 
 // --- Linux: a bit picks the slot, and the slot is called --------------------
@@ -63,7 +63,7 @@ fn build(src: &Path, out: &Path, extra: &[&str]) -> std::process::Output {
 ///
 /// `0xDEAD_BEEF` is a 32-bit pattern with its top bit set, so as an `int` it is
 /// negative — which is what makes `ushr` and `shr` disagree, and what makes
-/// checking OpenEPL's shifts against C's worth doing. The request word leaves
+/// checking Kiln's shifts against C's worth doing. The request word leaves
 /// the left shift out, so the transcript says `skipped shl` before a second
 /// `bor` turns that slot back on.
 #[test]
@@ -78,10 +78,10 @@ fn a_bit_chooses_the_slot_and_the_address_is_called() {
     assert!(status.success(), "clang failed to build libops.so");
 
     let bin = dir.join("dispatch");
-    let built = build(&repo().join("examples/dll/dispatch.oir"), &bin, &[]);
+    let built = build(&repo().join("examples/dll/dispatch.kiln"), &bin, &[]);
     assert!(
         built.status.success(),
-        "dispatch.oir did not build:\n{}",
+        "dispatch.kiln did not build:\n{}",
         String::from_utf8_lossy(&built.stderr)
     );
 
@@ -134,10 +134,10 @@ fn the_win_kit_calls_an_address_and_tests_its_own_flags_under_wine() {
     }
     let dir = scratch("windows");
     let out = dir.join("flags");
-    let built = build(&repo().join("examples/win/flags.oir"), &out, &["--os", "windows"]);
+    let built = build(&repo().join("examples/win/flags.kiln"), &out, &["--os", "windows"]);
     assert!(
         built.status.success(),
-        "flags.oir did not cross-build:\n{}",
+        "flags.kiln did not cross-build:\n{}",
         String::from_utf8_lossy(&built.stderr)
     );
     let image = dir.join("flags.exe");

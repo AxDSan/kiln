@@ -2,7 +2,7 @@
  * commands that read a request and answer it.
  *
  * The server never blocks and never starts a thread.  It registers ONE pump
- * with the runtime's event loop (runtime/oe_loop.c) and does a slice of work
+ * with the runtime's event loop (runtime/kn_loop.c) and does a slice of work
  * each turn: accept what is waiting, read what has arrived, dispatch what is
  * complete, write what it can.  That is the whole reason the loop exists — a
  * form with a server on it keeps repainting while it serves, and a console
@@ -38,7 +38,7 @@
 
 /* One connection, from accept to the last byte of the response.
  *
- * `sock` is first on purpose: the request handle carries OE_HK_SOCKET, so a
+ * `sock` is first on purpose: the request handle carries KN_HK_SOCKET, so a
  * connection is a valid socket seen through the same pointer.  See the
  * NetSock comment in net_internal.h. */
 typedef struct {
@@ -62,7 +62,7 @@ typedef struct {
     char              bind[64];
     int               listen_fd;
     int32_t           source;      /* loop source id                          */
-    OpenEPL_HandlerFn on_request;
+    Kiln_HandlerFn on_request;
     NetConn          *conns[NET_CONNS_MAX];
 } NetServer;
 
@@ -98,11 +98,11 @@ static NetConn *net_req_live(void *payload) {
     return NULL;
 }
 
-static NetConn *net_req_arg(OpenEPL_Slot *argv, int i) {
-    void *p = oe_handle_resolve(oe_arg_int(argv, i), OE_HK_SOCKET);
+static NetConn *net_req_arg(Kiln_Slot *argv, int i) {
+    void *p = kn_handle_resolve(kn_arg_int(argv, i), KN_HK_SOCKET);
     if (!p) return NULL;                    /* the handle table set the slot */
     NetConn *c = net_req_live(p);
-    if (!c) oe_error_set(OE_ERR_WRONG_KIND, "not an http request handle");
+    if (!c) kn_error_set(KN_ERR_WRONG_KIND, "not an http request handle");
     return c;
 }
 
@@ -236,7 +236,7 @@ static void net_conn_free(NetServer *s, int slot) {
     if (!c) return;
     s->conns[slot] = NULL;              /* clear first: net_req_live must not
                                          * hand out a connection being freed */
-    if (c->handle) oe_handle_close(c->handle, OE_HK_SOCKET);
+    if (c->handle) kn_handle_close(c->handle, KN_HK_SOCKET);
     if (c->sock.fd >= 0) close(c->sock.fd);
     net_buf_free(&c->in);
     net_buf_free(&c->out);
@@ -264,7 +264,7 @@ static void net_conn_dispatch(NetServer *s, NetConn *c) {
         return;
     }
 
-    c->handle = oe_handle_new(OE_HK_SOCKET, c, net_req_release);
+    c->handle = kn_handle_new(KN_HK_SOCKET, c, net_req_release);
     int32_t saved = g_current_req;
     g_current_req = c->handle;
     s->on_request();
@@ -281,7 +281,7 @@ static void net_conn_dispatch(NetServer *s, NetConn *c) {
     if (c->handle) {
         int32_t h = c->handle;
         c->handle = 0;
-        oe_handle_close(h, OE_HK_SOCKET);
+        kn_handle_close(h, KN_HK_SOCKET);
     }
 }
 
@@ -451,9 +451,9 @@ static int32_t net_httpd_pump(void *state) {
         if (!net_listen_open(s)) {
             /* A server that cannot bind must not look like one that is
              * running: it would answer nothing, forever, silently. */
-            fprintf(stderr, "openepl: httpserver cannot listen on %s:%d\n",
+            fprintf(stderr, "kiln: httpserver cannot listen on %s:%d\n",
                     s->bind, s->port);
-            oe_loop_quit(1);
+            kn_loop_quit(1);
             return 1;
         }
     }
@@ -473,7 +473,7 @@ static int32_t net_httpd_pump(void *state) {
 
 void *net_httpd_create(void) {
     if (g_next_handle >= NET_SERVERS_MAX) {
-        oe_error_set(OE_ERR_TABLE_FULL, "too many http servers");
+        kn_error_set(KN_ERR_TABLE_FULL, "too many http servers");
         return NULL;
     }
     NetServer *s = &g_servers[g_next_handle++];
@@ -484,7 +484,7 @@ void *net_httpd_create(void) {
      * would be shipping the mistake, not the user. */
     snprintf(s->bind, sizeof s->bind, "127.0.0.1");
     s->listen_fd = -1;
-    s->source = oe_loop_add(net_httpd_pump, s, NET_HTTPD_PERIOD_MS);
+    s->source = kn_loop_add(net_httpd_pump, s, NET_HTTPD_PERIOD_MS);
     return s;
 }
 
@@ -524,7 +524,7 @@ int32_t net_httpd_get_int(void *obj, const char *prop) {
     return 0;
 }
 
-int32_t net_httpd_on(void *obj, const char *event, OpenEPL_HandlerFn handler) {
+int32_t net_httpd_on(void *obj, const char *event, Kiln_HandlerFn handler) {
     NetServer *s = (NetServer *)obj;
     if (strcmp(event, "request") != 0) return 1;
     s->on_request = handler;
@@ -545,68 +545,68 @@ int32_t net_httpd_on(void *obj, const char *event, OpenEPL_HandlerFn handler) {
  *       call net_req_reply(req, 200, "hi")
  *     end
  */
-void net_request(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_request(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
     if (!g_current_req) {
-        oe_error_set(OE_ERR_INVALID_ARG,
+        kn_error_set(KN_ERR_INVALID_ARG,
                      "there is no request here: net_request() answers only "
                      "inside an httpserver `request` handler");
-        oe_ret_int(ret, 0);
+        kn_ret_int(ret, 0);
         return;
     }
-    oe_error_clear();
-    oe_ret_int(ret, g_current_req);
+    kn_error_clear();
+    kn_ret_int(ret, g_current_req);
 }
 
-void net_req_method(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_req_method(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     NetConn *c = net_req_arg(argv, 0);
-    if (!c) { oe_ret_text(ret, net_empty()); return; }
-    oe_error_clear();
-    oe_ret_text(ret, net_text(net_nz(c->method), strlen(net_nz(c->method))));
+    if (!c) { kn_ret_text(ret, net_empty()); return; }
+    kn_error_clear();
+    kn_ret_text(ret, net_text(net_nz(c->method), strlen(net_nz(c->method))));
 }
 
-void net_req_path(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_req_path(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     NetConn *c = net_req_arg(argv, 0);
-    if (!c) { oe_ret_text(ret, net_empty()); return; }
-    oe_error_clear();
-    oe_ret_text(ret, net_text(net_nz(c->path), strlen(net_nz(c->path))));
+    if (!c) { kn_ret_text(ret, net_empty()); return; }
+    kn_error_clear();
+    kn_ret_text(ret, net_text(net_nz(c->path), strlen(net_nz(c->path))));
 }
 
 /* The body as text.  A body with an embedded NUL stops there, which is what a
  * text slot can carry; a server that needs bytes wants a file, not a slot. */
-void net_req_body(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_req_body(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     NetConn *c = net_req_arg(argv, 0);
-    if (!c) { oe_ret_text(ret, net_empty()); return; }
-    oe_error_clear();
+    if (!c) { kn_ret_text(ret, net_empty()); return; }
+    kn_error_clear();
     size_t have = c->in.n > c->head_len ? c->in.n - c->head_len : 0;
     if (have > c->body_len) have = c->body_len;
-    oe_ret_text(ret, net_text(have ? c->in.p + c->head_len : "", have));
+    kn_ret_text(ret, net_text(have ? c->in.p + c->head_len : "", have));
 }
 
 /* An absent header is a genuine "no", so this is infallible on a good handle:
  * "" with error code 0 means the client did not send it. */
-void net_req_header(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_req_header(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     NetConn *c = net_req_arg(argv, 0);
-    if (!c) { oe_ret_text(ret, net_empty()); return; }
-    oe_error_clear();
+    if (!c) { kn_ret_text(ret, net_empty()); return; }
+    kn_error_clear();
     size_t vlen = 0;
-    const char *v = net_hdr_find(c->headers, net_nz(oe_arg_text(argv, 1)), &vlen);
-    oe_ret_text(ret, v ? net_text(v, vlen) : net_empty());
+    const char *v = net_hdr_find(c->headers, net_nz(kn_arg_text(argv, 1)), &vlen);
+    kn_ret_text(ret, v ? net_text(v, vlen) : net_empty());
 }
 
 /* A query parameter, percent-decoded; "" when the request did not carry it. */
-void net_req_query(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_req_query(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     NetConn *c = net_req_arg(argv, 0);
-    if (!c) { oe_ret_text(ret, net_empty()); return; }
-    oe_error_clear();
-    const char *name = net_nz(oe_arg_text(argv, 1));
+    if (!c) { kn_ret_text(ret, net_empty()); return; }
+    kn_error_clear();
+    const char *name = net_nz(kn_arg_text(argv, 1));
     size_t nlen = strlen(name);
-    if (!c->query || !nlen) { oe_ret_text(ret, net_empty()); return; }
+    if (!c->query || !nlen) { kn_ret_text(ret, net_empty()); return; }
 
     for (const char *p = c->query; *p;) {
         const char *amp = strchr(p, '&');
@@ -617,54 +617,54 @@ void net_req_query(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
             const char *v = eq ? eq + 1 : end;
             size_t vlen = (size_t)(end - v);
             char *tmp = (char *)malloc(vlen + 1);
-            if (!tmp) { oe_ret_text(ret, net_empty()); return; }
+            if (!tmp) { kn_ret_text(ret, net_empty()); return; }
             size_t w = net_form_decode(v, vlen, tmp);
             char *out = net_text(tmp, w);
             free(tmp);
-            oe_ret_text(ret, out);
+            kn_ret_text(ret, out);
             return;
         }
         if (!amp) break;
         p = amp + 1;
     }
-    oe_ret_text(ret, net_empty());
+    kn_ret_text(ret, net_empty());
 }
 
-static void net_reply_impl(OpenEPL_Slot *ret, OpenEPL_Slot *argv, const char *type) {
+static void net_reply_impl(Kiln_Slot *ret, Kiln_Slot *argv, const char *type) {
     NetConn *c = net_req_arg(argv, 0);
-    if (!c) { oe_ret_bool(ret, 0); return; }
+    if (!c) { kn_ret_bool(ret, 0); return; }
     if (c->replied) {
-        oe_error_set(OE_ERR_INVALID_ARG, "this request has already been answered");
-        oe_ret_bool(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "this request has already been answered");
+        kn_ret_bool(ret, 0);
         return;
     }
-    int status = oe_arg_int(argv, 1);
+    int status = kn_arg_int(argv, 1);
     if (status < 100 || status > 599) {
-        oe_error_set(OE_ERR_INVALID_ARG, "status must be 100..599");
-        oe_ret_bool(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "status must be 100..599");
+        kn_ret_bool(ret, 0);
         return;
     }
     /* A content type carrying CR or LF would let a program append headers of
      * its own to the response — response splitting, from a value that looks
      * like nothing more than a mime type. */
-    const char *ct = type ? type : net_nz(oe_arg_text(argv, 2));
+    const char *ct = type ? type : net_nz(kn_arg_text(argv, 2));
     if (strpbrk(ct, "\r\n") || !*ct) {
-        oe_error_set(OE_ERR_INVALID_ARG, "content type is empty or has a line break");
-        oe_ret_bool(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "content type is empty or has a line break");
+        kn_ret_bool(ret, 0);
         return;
     }
-    const char *body = net_nz(oe_arg_text(argv, type ? 2 : 3));
+    const char *body = net_nz(kn_arg_text(argv, type ? 2 : 3));
     if (!net_response(c, status, ct, body, strlen(body))) {
-        oe_error_set(OE_ERR_TABLE_FULL, "cannot build the response");
-        oe_ret_bool(ret, 0);
+        kn_error_set(KN_ERR_TABLE_FULL, "cannot build the response");
+        kn_ret_bool(ret, 0);
         return;
     }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* net_req_reply(req, status, text) -> bool */
-void net_req_reply(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_req_reply(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     net_reply_impl(ret, argv, "text/plain; charset=utf-8");
 }
@@ -672,7 +672,7 @@ void net_req_reply(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
 /* net_req_reply_as(req, status, content_type, text) -> bool.  The same reply
  * with the type spelled out, because a server that can only send plain text
  * cannot serve a page or an API. */
-void net_req_reply_as(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_req_reply_as(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     net_reply_impl(ret, argv, NULL);
 }

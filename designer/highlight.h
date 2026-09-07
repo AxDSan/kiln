@@ -4,14 +4,14 @@
  * tokenizer, not a parser: the compiler owns real analysis, and the editor only
  * needs to make the shape of the code readable.
  */
-#ifndef OPENEPL_DESIGNER_HIGHLIGHT_H
-#define OPENEPL_DESIGNER_HIGHLIGHT_H
+#ifndef KILN_DESIGNER_HIGHLIGHT_H
+#define KILN_DESIGNER_HIGHLIGHT_H
 
 #include <cctype>
 #include <string>
 #include <vector>
 
-namespace openepl::designer {
+namespace kiln::designer {
 
 inline bool is_keyword(const std::string& w) {
     // `target`, `to`, `step`, `through` and the infix bitwise words are soft
@@ -120,5 +120,5 @@ inline std::string highlight_line(const std::string& line) {
     return out;
 }
 
-} // namespace openepl::designer
+} // namespace kiln::designer
 #endif

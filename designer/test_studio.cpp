@@ -1,6 +1,6 @@
 /* Headless tests for the Studio editor and the RAD gestures.
  *
- * Two halves. The catalogue half reads canned `openepl commands` listings, so
+ * Two halves. The catalogue half reads canned `kiln commands` listings, so
  * a kit's visual component can be checked without a kit that has one
  * installed. The session half drives the BUILT designer through scripted
  * sessions and reads what its verbs print — the cursor the platform was
@@ -10,8 +10,8 @@
  * Build and run (needs a display, as the frame dumps do):
  *
  *   clang++ -std=c++17 -I abi -I designer designer/test_studio.cpp \
- *       libs/ui/ui_libinfo.c -o /tmp/openepl_studio_test
- *   /tmp/openepl_studio_test ./target/debug/openepl designer/openepl-designer
+ *       libs/ui/ui_libinfo.c -o /tmp/kiln_studio_test
+ *   /tmp/kiln_studio_test ./target/debug/kiln designer/kiln-designer
  */
 #include <algorithm>
 #include <cstdio>
@@ -24,8 +24,9 @@
 #include <vector>
 
 #include "catalog.h"
+#include "help_page.h"
 
-using namespace openepl::designer;
+using namespace kiln::designer;
 
 static int failures = 0;
 static void check(const char* what, bool ok) {
@@ -46,20 +47,20 @@ static bool has(const std::string& hay, const std::string& needle) {
 
 /// Run one scripted session on a fresh copy of `fixture` and return its
 /// stdout. The copy is what the session saves into on exit.
-static std::string session(const std::string& designer, const std::string& openepl,
+static std::string session(const std::string& designer, const std::string& kiln,
                            const std::string& fixture, const std::string& script,
                            std::string* saved_path = nullptr) {
     // Each session gets its own directory, never a shared one: Studio now
     // writes build output *inside the project*, so two sessions sharing a
     // directory would share a build target and race for it.
     static int n = 0;
-    const std::string dir = "/tmp/openepl_studio_test_" + std::to_string(++n);
+    const std::string dir = "/tmp/kiln_studio_test_" + std::to_string(++n);
     ::mkdir(dir.c_str(), 0755);
-    const std::string copy = dir + "/main.oir";
+    const std::string copy = dir + "/main.kiln";
     { std::ofstream f(copy, std::ios::trunc); f << slurp(fixture); }
     if (saved_path) *saved_path = copy;
-    const std::string cmd = "OPENEPL_DESIGNER_SCRIPT='" + script + "' " + designer + " " + copy +
-                            " " + openepl + " 2>/dev/null";
+    const std::string cmd = "KILN_DESIGNER_SCRIPT='" + script + "' " + designer + " " + copy +
+                            " " + kiln + " 2>/dev/null";
     std::string out;
     if (FILE* p = popen(cmd.c_str(), "r")) {
         char buf[4096];
@@ -72,7 +73,7 @@ static std::string session(const std::string& designer, const std::string& opene
 static void test_catalog() {
     std::printf("catalogue\n");
     using namespace catalog_detail;
-    // A kit's own visual control, as `openepl commands --use gauges` would
+    // A kit's own visual control, as `kiln commands --use gauges` would
     // list it — a component this build was never linked against.
     const std::vector<std::string> lines = {
         "command: gauge_set(text, int)",
@@ -128,16 +129,16 @@ static void test_catalog() {
           button.events[0].known && button.events[0].params.empty());
 }
 
-static void test_sessions(const std::string& openepl, const std::string& designer) {
+static void test_sessions(const std::string& kiln, const std::string& designer) {
     std::printf("sessions (%s)\n", designer.c_str());
-    const std::string form = "examples/form.oir";
-    const std::string grid = "examples/grid.oir";
+    const std::string form = "examples/form.kiln";
+    const std::string grid = "examples/grid.kiln";
 
     // The resize cursor: every anchor names its direction, and the platform
     // is asked for exactly that.
     {
         const std::string out =
-            session(designer, openepl, form,
+            session(designer, kiln, form,
                     "select:ok_button;hovergrip:se;hovergrip:n;hovergrip:e;hovergrip:ne;"
                     "hovergrip:s;hovergrip:nw;hovergrip:sw;hovergrip:w");
         check("corner anchor asks for resize-nwse", has(out, "cursor: se resize-nwse"));
@@ -152,7 +153,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
 
     // Double-click on a component with a handler: just go there.
     {
-        const std::string out = session(designer, openepl, form, "dblclick:ok_button;caret");
+        const std::string out = session(designer, kiln, form, "dblclick:ok_button;caret");
         check("existing handler: switches to the code view", has(out, "designer: code view"));
         check("existing handler: caret inside on_ok_click", has(out, "caret: 39,"));
         check("existing handler: nothing was wired", !has(out, "designer: wired"));
@@ -163,7 +164,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     {
         std::string path;
         const std::string out =
-            session(designer, openepl, form, "add:grid;dblclick:grid1;caret", &path);
+            session(designer, kiln, form, "add:grid;dblclick:grid1;caret", &path);
         const std::string file = slurp(path);
         check("grid: wires select, the descriptor's first event",
               has(out, "wired grid1.select to grid1_select"));
@@ -179,7 +180,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     {
         std::string path;
         const std::string out =
-            session(designer, openepl, form, "add:editbox;dblclick:editbox1", &path);
+            session(designer, kiln, form, "add:editbox;dblclick:editbox1", &path);
         check("editbox: change, with no parameters",
               has(out, "wired editbox1.change") && has(slurp(path), "\nsub editbox1_change\n"));
     }
@@ -187,7 +188,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     // the parameters come from the language server.
     {
         std::string path;
-        const std::string out = session(designer, openepl, form, "add:timer;dblclick:timer1", &path);
+        const std::string out = session(designer, kiln, form, "add:timer;dblclick:timer1", &path);
         check("timer: tick is wired from the tray", has(out, "wired timer1.tick to timer1_tick"));
         check("timer: the stub takes the tick count",
               has(slurp(path), "\nsub timer1_tick(n: int)\n  \nend\n"));
@@ -197,7 +198,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     // (The timer above needs none — it is the runtime's own.)
     {
         std::string path;
-        const std::string out = session(designer, openepl, form,
+        const std::string out = session(designer, kiln, form,
                                         "add:tcpserver;save;waitdiag;add:tcpclient;save;waitdiag", &path);
         const std::string saved = slurp(path);
         check("use net: written after use ui", has(saved, "module hello_form\nuse ui\nuse net\n\nform main_window\n"));
@@ -211,9 +212,9 @@ static void test_sessions(const std::string& openepl, const std::string& designe
               has(out, "designer: saved " + path + "\ndiagnostics: 0\n") &&
                   out.find("diagnostics: 0") != out.rfind("diagnostics: 0") && !has(out, "diagnostics: 1") &&
                   !has(out, "diagnostics: 2"));
-        // The spans after two saves are what `openepl inspect` reads back.
+        // The spans after two saves are what `kiln inspect` reads back.
         std::string inspected;
-        for (const auto& l : catalog_detail::run(openepl + " inspect " + path)) inspected += l + "\n";
+        for (const auto& l : catalog_detail::run(kiln + " inspect " + path)) inspected += l + "\n";
         check("use net: inspect agrees the form moved down one line",
               has(inspected, "form: main_window span=11..35\n"));
         check("use net: inspect finds both tray components at their spans",
@@ -221,7 +222,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
                   has(inspected, "modcomponent: tcpclient1 tcpclient span=46..47\n"));
         const std::string build_dir = path + ".build";
         ::mkdir(build_dir.c_str(), 0755);
-        const int rc = std::system((openepl + " build " + path + " -o " + build_dir + "/out >/dev/null 2>&1").c_str());
+        const int rc = std::system((kiln + " build " + path + " -o " + build_dir + "/out >/dev/null 2>&1").c_str());
         check("use net: the saved file builds", rc == 0);
     }
     // The owner's file: a tcpserver already in it, and no `use net`. The
@@ -229,7 +230,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     // once the save is re-read — which is a real 2 -> 0, not a 0 that was
     // there all along.
     {
-        const std::string broken = "/tmp/openepl_studio_test_broken.oir";
+        const std::string broken = "/tmp/kiln_studio_test_broken.kiln";
         {
             std::ofstream f(broken, std::ios::trunc);
             f << slurp(form) << "\ntcpserver tcpserver1\n  port = 8080\nend\n";
@@ -240,7 +241,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
         // shows the last.
         std::string path;
         const std::string out =
-            session(designer, openepl, broken, "waitdiag;add:tcpserver;save;waitdiag;waitdiag", &path);
+            session(designer, kiln, broken, "waitdiag;add:tcpserver;save;waitdiag;waitdiag", &path);
         check("use net: a file missing it is flagged on open",
               has(out, "designer: Ready\ndiagnostics: 1\n  line 1: `tcpserver1`: unknown component type `tcpserver`"));
         const size_t last = out.rfind("diagnostics: ");
@@ -255,12 +256,12 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     }
     {
         std::string path;
-        session(designer, openepl, form, "add:timer;save", &path);
+        session(designer, kiln, form, "add:timer;save", &path);
         check("timer: a runtime component adds no use line",
               slurp(path).find("use ") == slurp(path).rfind("use "));
     }
     {
-        const std::string out = session(designer, openepl, grid, "dblclick:people");
+        const std::string out = session(designer, kiln, grid, "dblclick:people");
         check("a component with no events says so", has(out, "datasource has no events"));
     }
 
@@ -268,7 +269,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     // A wired event says where it goes, and picking it goes there; an
     // unwired one is wired through the same path a double-click takes.
     {
-        const std::string out = session(designer, openepl, form,
+        const std::string out = session(designer, kiln, form,
                                         "rclick:ok_button;menu;menupick:click \xe2\x86\x92 on_ok_click;menu;caret");
         check("menu: right-click on a wired button lists its handler",
               has(out, "menu: open rows=4\n  ok_button (button)\n  Events\n  click \xe2\x86\x92 on_ok_click\n  Delete\n"));
@@ -279,7 +280,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     }
     {
         std::string path;
-        const std::string out = session(designer, openepl, form,
+        const std::string out = session(designer, kiln, form,
                                         "add:button;rclick:button1;menu;menupick:click;caret", &path);
         const std::string file = slurp(path);
         check("menu: a fresh component's event reads plain", has(out, "  Events\n  click\n  Delete\n"));
@@ -290,7 +291,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
         check("menu: caret is inside the new sub", has(out, "caret: " + std::to_string(lines - 1) + ","));
     }
     {
-        const std::string out = session(designer, openepl, form,
+        const std::string out = session(designer, kiln, form,
                                         "rclick:form;menu;key:escape;menu;rclick:greeting;menu;click:formtitle;menu");
         check("menu: right-click on the form lists load, and no Delete",
               has(out, "menu: open rows=3\n  main_window (form)\n  Events\n  load\n"));
@@ -302,11 +303,11 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     {
         std::string path;
         const std::string out =
-            session(designer, openepl, form, "rclick:greeting;menupick:Delete;menu", &path);
+            session(designer, kiln, form, "rclick:greeting;menupick:Delete;menu", &path);
         check("menu: Delete removes the component", has(out, "deleted 1 component(s)") && !has(slurp(path), "greeting"));
     }
     {
-        const std::string out = session(designer, openepl, "examples/tcpchat.oir", "rclick:link;menu");
+        const std::string out = session(designer, kiln, "examples/tcpchat.kiln", "rclick:link;menu");
         check("menu: a tray component lists its events",
               has(out, "menu: open rows=7\n  link (tcpclient)\n  Events\n  connect \xe2\x86\x92 on_connect\n"
                        "  disconnect \xe2\x86\x92 on_disconnect\n  receive \xe2\x86\x92 on_receive\n"
@@ -315,11 +316,11 @@ static void test_sessions(const std::string& openepl, const std::string& designe
 
     // Hover, definition and references through the language server.
     {
-        const std::string out = session(designer, openepl, form, "hoverat:39,10");
+        const std::string out = session(designer, kiln, form, "hoverat:39,10");
         check("hover on a command shows its signature", has(out, "tip=block") && has(out, "print_text(text)"));
     }
     {
-        const std::string out = session(designer, openepl, grid, "gotodef:104,20;refs:96,7");
+        const std::string out = session(designer, kiln, grid, "gotodef:104,20;refs:96,7");
         check("F12 on a local jumps to its declaration", has(out, "definition: caret 102,7"));
         check("Shift+F12 lists the wiring line and the declaration",
               has(out, "references: 2") && has(out, "line 49:18") && has(out, "line 96:5"));
@@ -330,11 +331,11 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     // that property once — the vertical anchors must go, and a resize must
     // leave the block without it.
     {
-        const std::string wrapper = "/tmp/openepl_studio_test_nolabelheight.sh";
+        const std::string wrapper = "/tmp/kiln_studio_test_nolabelheight.sh";
         {
             std::ofstream f(wrapper, std::ios::trunc);
-            f << "#!/bin/sh\nif [ \"$1\" = commands ]; then\n  \"" << openepl
-              << "\" \"$@\" | grep -v '^property: label height'\n  exit 0\nfi\nexec \"" << openepl
+            f << "#!/bin/sh\nif [ \"$1\" = commands ]; then\n  \"" << kiln
+              << "\" \"$@\" | grep -v '^property: label height'\n  exit 0\nfi\nexec \"" << kiln
               << "\" \"$@\"\n";
         }
         ::chmod(wrapper.c_str(), 0755);
@@ -351,7 +352,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
         check("no height: the width it does declare was written", has(file, "width = 430"));
     }
     {
-        const std::string out = session(designer, openepl, form, "select:ok_button;grip:s@0,30");
+        const std::string out = session(designer, kiln, form, "select:ok_button;grip:s@0,30");
         check("with height: the vertical anchor resizes", has(out, "grip: s dragged") && has(out, "height=70"));
     }
 
@@ -359,20 +360,20 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     // of its lines selects them, a keystroke changes nothing, and the newest
     // line is on screen.
     {
-        const std::string out = session(designer, openepl, form, "build;logscroll;logselect:3,5;logdump");
+        const std::string out = session(designer, kiln, form, "build;logscroll;logselect:3,5;logdump");
         check("build log: the newest line is visible after a build", has(out, "newest=VISIBLE"));
         check("build log: a drag selects whole lines",
               has(out, "logselect:") && has(out, "|  stage 2/4") && has(out, "(--gc-sections)"));
         check("build log: typing into it changes nothing", has(out, "edited=no"));
         check("build log: the result keeps its class",
-              has(out, "LOG [ok] OK  /tmp/openepl_studio_test_") && has(out, "/build/hello_form"));
+              has(out, "LOG [ok] OK  /tmp/kiln_studio_test_") && has(out, "/build/hello_form"));
     }
 
     // Completion. Typing opens the popup, typing on narrows it, Enter takes
     // the row — and the character the platform sends after Enter stays out.
     {
         const std::string out = session(
-            designer, openepl, form,
+            designer, kiln, form,
             "goto:40,1;typein:  call pri;waitcomplete;typein:nt_t;waitcomplete;key:enter;waitcomplete;bufline:40");
         check("completion: an identifier opens the popup with the server's items",
               has(out, "open=1 offered=") && has(out, "print_text"));
@@ -384,7 +385,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     // dismisses; and neither key leaves a character in the editor.
     {
         const std::string out = session(
-            designer, openepl, form,
+            designer, kiln, form,
             "goto:40,1;typein:  call ;key:ctrl-space;waitcomplete;key:escape;waitcomplete;bufline:40");
         // The exact count is whatever the language server knows today, and it
         // grew the moment completion learned to read `use` lines; the property
@@ -403,7 +404,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     {
         // Line 38 is `sub on_ok_click`; the caret at its end.
         const std::string out =
-            session(designer, openepl, form,
+            session(designer, kiln, form,
                     "view:code;goto:38,16;key:enter;bufline:39;key:tab;bufline:39;"
                     "key:shift-tab;bufline:39");
         check("indent: Tab stays in the editor rather than moving the focus",
@@ -419,20 +420,20 @@ static void test_sessions(const std::string& openepl, const std::string& designe
         // Line 39 is `  call print_text("button clicked!")`, 36 characters, so
         // column 37 is past its end.
         const std::string out =
-            session(designer, openepl, form, "view:code;goto:39,37;key:enter;bufline:40");
+            session(designer, kiln, form, "view:code;goto:39,37;key:enter;bufline:40");
         check("indent: Return copies an ordinary line's indentation",
               has(out, "buf 40:   \n"));
         // Split mid-line and the tail moves down to that same indent; the
         // block rule must not fire on a statement.
         const std::string mid =
-            session(designer, openepl, form, "view:code;goto:39,20;key:enter;bufline:40");
+            session(designer, kiln, form, "view:code;goto:39,20;key:enter;bufline:40");
         check("indent: a mid-line split indents the tail, it does not open a block",
               has(mid, "buf 40:   button clicked!\")\n"));
         // Return replaces a selection, as the control it stands in for did.
         // Inserting at the caret and leaving the selection behind is the way
         // this reimplementation could quietly differ from a real textarea.
         const std::string sel =
-            session(designer, openepl, form,
+            session(designer, kiln, form,
                     "view:code;goto:39,3;key:shift-end;key:enter;bufline:39;bufline:40");
         check("indent: Return replaces the selection rather than keeping it",
               has(sel, "buf 39:   \n") && has(sel, "buf 40:   \n"));
@@ -444,7 +445,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
         const std::string longline =
             "  greeting.caption = some_long_command_name(another_argument_here_yes())";
         const std::string out =
-            session(designer, openepl, form,
+            session(designer, kiln, form,
                     "winsize:760x620;view:code;goto:39,1;typein:" + longline +
                         ";goto:39,1;codescroll;key:end;codescroll");
         // At column one nothing is scrolled; at the end of a line far wider
@@ -456,13 +457,13 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     // position offers a subroutine that does not exist yet, and accepting it
     // writes the subroutine with the event's parameters.
     {
-        std::string src = slurp("examples/eventparams.oir");
+        std::string src = slurp("examples/eventparams.kiln");
         const size_t at = src.find("  on tick: on_plain\n");
         src.insert(at + std::string("  on tick: on_plain\n").size(), "\n");
-        const std::string fixture = "/tmp/openepl_studio_test_timer.oir";
+        const std::string fixture = "/tmp/kiln_studio_test_timer.kiln";
         { std::ofstream f(fixture, std::ios::trunc); f << src; }
         const std::string out = session(
-            designer, openepl, fixture,
+            designer, kiln, fixture,
             "goto:20,1;typein:  on ;waitcomplete;key:tab;typein:: pl;waitcomplete;key:enter;bufline:20;buftail:4");
         check("completion: `on ` offers the timer's event", has(out, "shown=1 index=0 selected=tick"));
         check("completion: the handler position offers the new subroutine",
@@ -477,9 +478,9 @@ static void test_sessions(const std::string& openepl, const std::string& designe
         std::string bad = slurp(form);
         const size_t at = bad.find("print_text(\"button");
         bad.replace(at, 10, "print_txt");
-        const std::string fixture = "/tmp/openepl_studio_test_bad.oir";
+        const std::string fixture = "/tmp/kiln_studio_test_bad.kiln";
         { std::ofstream f(fixture, std::ios::trunc); f << bad; }
-        const std::string out = session(designer, openepl, fixture, "view:code;waitdiag;scroll:6;waitdiag:1");
+        const std::string out = session(designer, kiln, fixture, "view:code;waitdiag;scroll:6;waitdiag:1");
         check("the diagnostic names the line", has(out, "line 39: in `on_ok_click`"));
     }
 
@@ -488,12 +489,12 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     // nothing on screen.
     {
         std::string path;
-        session(designer, openepl, form, "add:button;key:ctrl-z", &path);
+        session(designer, kiln, form, "add:button;key:ctrl-z", &path);
         check("Ctrl+Z on the canvas undoes the add", !has(slurp(path), "button1"));
-        session(designer, openepl, form, "add:button;click:button1;key:delete", &path);
+        session(designer, kiln, form, "add:button;click:button1;key:delete", &path);
         check("Delete on the canvas removes the selection", !has(slurp(path), "button1"));
         const std::string out =
-            session(designer, openepl, grid, "view:code;goto:104,20;focus;key:f12;waitdef");
+            session(designer, kiln, grid, "view:code;goto:104,20;focus;key:f12;waitdef");
         check("F12 pressed in the editor jumps to the declaration",
               has(out, "definition: caret 102,7"));
     }
@@ -502,7 +503,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     // link goes to the browser rather than anywhere in Studio.
     {
         const std::string out = session(
-            designer, openepl, form,
+            designer, kiln, form,
             "about;aboutstate;key:escape;aboutstate;about;click:ok;aboutstate;about;click:x;"
             "aboutstate;about;clickat:30,300;aboutstate;about;clickat:720,400;aboutstate;"
             "click:GitHub-link;aboutstate");
@@ -512,44 +513,44 @@ static void test_sessions(const std::string& openepl, const std::string& designe
         check("about: Escape, OK, the cross and a click outside all dismiss", closed == 4);
         check("about: a click inside leaves it up", has(out, "click: GitHub-link\nabout: open"));
         check("about: a link opens in the browser",
-              has(out, "about: open https://github.com/AxDSan/openepl"));
+              has(out, "about: open https://github.com/AxDSan/kiln"));
     }
 
     // The document tabs carry the file, and the Code tab the subroutine the
     // caret is in — the name the language server's index knows.
     {
-        const std::string out = session(designer, openepl, form, "tabs;view:code;goto:39,3;tabs;goto:36,1;tabs");
-        check("tabs: both name the file", has(out, "tabs: Designer [main.oir]") &&
-                                          has(out, "] | Code [main.oir]"));
+        const std::string out = session(designer, kiln, form, "tabs;view:code;goto:39,3;tabs;goto:36,1;tabs");
+        check("tabs: both name the file", has(out, "tabs: Designer [main.kiln]") &&
+                                          has(out, "] | Code [main.kiln]"));
         check("tabs: the caret in a sub names it on the Code tab", has(out, "| Code [on_ok_click]"));
         check("tabs: outside every sub the Code tab names the file again",
-              out.rfind("| Code [main.oir]") > out.find("| Code [on_ok_click]"));
+              out.rfind("| Code [main.kiln]") > out.find("| Code [on_ok_click]"));
     }
 
     // The preview's title bar is decoration: the client area starts under it
     // and the file's coordinates are measured from there, unshifted.
     {
         std::string path;
-        const std::string out = session(designer, openepl, form, "geometry:greeting;geometry:ok_button", &path);
+        const std::string out = session(designer, kiln, form, "geometry:greeting;geometry:ok_button", &path);
         check("title bar: the form's own size is kept", has(out, "form=480x300"));
         check("title bar: a component at top=40 is drawn 40px below it",
               has(out, "greeting=40,40") && has(out, "ok_button=40,110"));
         check("title bar: the client area starts under it", has(out, "title=36 client_top=37"));
-        check("title bar: no icon set falls back to the app's", has(out, "icon=openepl-icon-64.png"));
+        check("title bar: no icon set falls back to the app's", has(out, "icon=kiln-icon-64.png"));
         check("a session that does nothing leaves the file byte-identical", slurp(path) == slurp(form));
     }
     {
         // An icon beside the file is shown; one that is not there is not.
-        const std::string dir = "/tmp/openepl_studio_test_icon";
+        const std::string dir = "/tmp/kiln_studio_test_icon";
         ::mkdir(dir.c_str(), 0755);
-        const std::string fixture = dir + "/form.oir";
+        const std::string fixture = dir + "/form.kiln";
         std::string src = slurp(form);
         src.insert(src.find("  width  = 480"), "  icon   = \"mark.png\"\n");
         { std::ofstream f(fixture, std::ios::trunc); f << src; }
         { std::ofstream f(dir + "/mark.png", std::ios::trunc | std::ios::binary); f << slurp("assets/icons/button_16.png"); }
         // session() copies the fixture to /tmp, where mark.png is not.
-        const std::string cmd = "OPENEPL_DESIGNER_SCRIPT='geometry:greeting' " + designer + " " + fixture +
-                                " " + openepl + " 2>/dev/null";
+        const std::string cmd = "KILN_DESIGNER_SCRIPT='geometry:greeting' " + designer + " " + fixture +
+                                " " + kiln + " 2>/dev/null";
         std::string out;
         if (FILE* p = popen(cmd.c_str(), "r")) {
             char buf[4096];
@@ -557,15 +558,15 @@ static void test_sessions(const std::string& openepl, const std::string& designe
             pclose(p);
         }
         check("title bar: the form's icon, a path beside the file, is shown", has(out, "icon=mark.png"));
-        const std::string missing = session(designer, openepl, fixture, "geometry:greeting");
+        const std::string missing = session(designer, kiln, fixture, "geometry:greeting");
         check("title bar: an icon that cannot be read falls back to the app's",
-              has(missing, "icon=openepl-icon-64.png"));
+              has(missing, "icon=kiln-icon-64.png"));
     }
 
     // The wiring, on the canvas and in the inspector, and every way from it
     // into the handler.
     {
-        const std::string out = session(designer, openepl, form, "badges;select:greeting;wiring;select:ok_button;wiring");
+        const std::string out = session(designer, kiln, form, "badges;select:greeting;wiring;select:ok_button;wiring");
         check("badge: a wired component shows event and handler, centred above it",
               has(out, "badge: ok_button click\xe2\x86\x92on_ok_click at 120,69"));
         check("badge: an unwired one shows none", !has(out, "badge: greeting"));
@@ -574,7 +575,7 @@ static void test_sessions(const std::string& openepl, const std::string& designe
         check("wiring: a wired one names the handler", has(out, "wiring: HANDLER WIRINGLinked to: on_ok_click()on click"));
     }
     {
-        const std::string out = session(designer, openepl, form, "select:ok_button;click:wirelink;caret");
+        const std::string out = session(designer, kiln, form, "select:ok_button;click:wirelink;caret");
         check("wiring: the link opens the code view in the handler",
               has(out, "designer: code view") && has(out, "caret: 39,") && !has(out, "wired"));
     }
@@ -582,22 +583,22 @@ static void test_sessions(const std::string& openepl, const std::string& designe
         // A badge is a way into the handler, but only the selection's: one
         // that took every click would sit over the components above it.
         std::string path;
-        const std::string out = session(designer, openepl, form, "add:editbox;click:editbox1;view:designer;caret", &path);
+        const std::string out = session(designer, kiln, form, "add:editbox;click:editbox1;view:designer;caret", &path);
         check("badge: an unselected badge lets the click through to the component under it",
               !has(slurp(path), "editbox1_change"));
     }
     {
-        const std::string out = session(designer, openepl, form, "select:ok_button;badges");
+        const std::string out = session(designer, kiln, form, "select:ok_button;badges");
         check("badge: the selection's badge is live", has(out, "badge: ok_button"));
     }
     {
-        const std::string out = session(designer, openepl, form, "select:ok_button;click:segevents;events;click:ev-click;caret");
+        const std::string out = session(designer, kiln, form, "select:ok_button;click:segevents;events;click:ev-click;caret");
         check("events tab: lists the event with its handler", has(out, "events: click=on_ok_click"));
         check("events tab: choosing it jumps to the handler", has(out, "caret: 39,"));
     }
     {
         std::string path;
-        const std::string out = session(designer, openepl, form, "add:button;click:segevents;events;click:ev-click;tabs", &path);
+        const std::string out = session(designer, kiln, form, "add:button;click:segevents;events;click:ev-click;tabs", &path);
         check("events tab: a fresh component lists the event empty", has(out, "events: click=\n"));
         check("events tab: choosing it creates the handler as double-click does",
               has(out, "wired button1.click to button1_click") && has(slurp(path), "\nsub button1_click\n"));
@@ -610,13 +611,13 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     {
         std::string path;
         const std::string out = session(
-            designer, openepl, form,
+            designer, kiln, form,
             "clickform;props;click:segevents;events;drag:main_window@10,10->200,200;"
             "geometry:greeting;badges;key:delete;select:ok_button;props", &path);
         check("form: a press on the title bar selects it", has(out, "clickform: selected main_window"));
         check("form: the inspector names it as the form", has(out, "props: main_window (form) name=main_window"));
         check("form: and lists its own properties",
-              has(out, " title=OpenEPL width=480 height=300 background_color=#1e2233 icon="));
+              has(out, " title=Kiln width=480 height=300 background_color=#1e2233 icon="));
         check("form: it is framed on the canvas", has(out, "formsel=yes"));
         check("form: the Events tab lists load", has(out, "events: load="));
         check("form: a drag does not move it", has(out, "greeting=40,40 form=480x300"));
@@ -633,11 +634,11 @@ static void test_sessions(const std::string& openepl, const std::string& designe
         std::string src = slurp(form);
         src += "\nsub uses_it\n  ok_button.text = \"ok_button.text\"   # ok_button.text\n"
                "  my_ok_button.text = \"x\"\nend\n";
-        const std::string fixture = "/tmp/openepl_studio_test_rename.oir";
+        const std::string fixture = "/tmp/kiln_studio_test_rename.kiln";
         { std::ofstream f(fixture, std::ios::trunc); f << src; }
         std::string path;
         const std::string out =
-            session(designer, openepl, fixture, "select:ok_button;rename:go_button;props;badges;save", &path);
+            session(designer, kiln, fixture, "select:ok_button;rename:go_button;props;badges;save", &path);
         check("rename: says so", has(out, "designer: renamed ok_button to go_button"));
         check("rename: the inspector shows the new name", has(out, "props: go_button (button) name=go_button"));
         check("rename: the badge follows", has(out, "badge: go_button click"));
@@ -651,13 +652,13 @@ static void test_sessions(const std::string& openepl, const std::string& designe
         check("rename: the handler line still names the sub", has(file, "    on click: on_ok_click\n"));
     }
     {
-        const std::string out = session(designer, openepl, form, "clickform;rename:main;props;save");
+        const std::string out = session(designer, kiln, form, "clickform;rename:main;props;save");
         check("rename: the form too", has(out, "renamed main_window to main") && has(out, "props: main (form)"));
     }
     {
         std::string path;
         const std::string out = session(
-            designer, openepl, form,
+            designer, kiln, form,
             "select:ok_button;rename:greeting;rename:9abc;rename:end;rename:bnot;"
             "rename:on_ok_click;rename:;"
             "clickform;rename:greeting;save", &path);
@@ -684,12 +685,12 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     // the value can still be typed into. Through a CLI whose listing
     // declares the property, so the test does not wait on the ui library.
     {
-        const std::string wrapper = "/tmp/openepl_studio_test_anchors.sh";
+        const std::string wrapper = "/tmp/kiln_studio_test_anchors.sh";
         {
             std::ofstream f(wrapper, std::ios::trunc);
-            f << "#!/bin/sh\nif [ \"$1\" = commands ]; then\n  \"" << openepl
+            f << "#!/bin/sh\nif [ \"$1\" = commands ]; then\n  \"" << kiln
               << "\" \"$@\" | grep -v 'button anchors'\n  echo 'property: button anchors text'\n"
-                 "  echo 'editor: button anchors anchors'\n  exit 0\nfi\nexec \"" << openepl
+                 "  echo 'editor: button anchors anchors'\n  exit 0\nfi\nexec \"" << kiln
               << "\" \"$@\"\n";
         }
         ::chmod(wrapper.c_str(), 0755);
@@ -708,12 +709,12 @@ static void test_sessions(const std::string& openepl, const std::string& designe
 
     // Anchors at design time: dragging the form's grip moves and stretches
     // the anchored children exactly as a window resize does in the built app
-    // (examples/anchors.oir: a 400x300 form; ok_button right,bottom at
+    // (examples/anchors.kiln: a 400x300 form; ok_button right,bottom at
     // 250,230; name_box left,right 20,44 360x26; a label with the defaults).
     {
         std::string path;
         const std::string out =
-            session(designer, openepl, "examples/anchors.oir", "formgrip:se@100,50", &path);
+            session(designer, kiln, "examples/anchors.kiln", "formgrip:se@100,50", &path);
         check("anchors: the form grew by the drag", has(out, "formgrip: se dragged form=500x350"));
         check("anchors: right,bottom moves by the whole delta",
               has(out, "  ok_button 350,280 120x36 anchors=right,bottom\n"));
@@ -728,16 +729,16 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     // and a fast typist crashed Studio inside the text widget.
     {
         std::string path;
-        const std::string out = session(designer, openepl, form,
+        const std::string out = session(designer, kiln, form,
                                         "clickform;focusprop:title;typein: hello there;focused;"
                                         "select:ok_button;focusprop:text;typein:!!!!!!!!!!!!!!!!;focused",
                                         &path);
         check("typing: the title field keeps focus through a whole phrase",
-              has(out, "focused: title value=OpenEPL hello there"));
+              has(out, "focused: title value=Kiln hello there"));
         check("typing: a burst of keystrokes neither crashes nor loses the field",
               has(out, "focused: text value=Click me!!!!!!!!!!!!!!!!"));
         check("typing: what was typed reached the file",
-              has(slurp(path), "title = \"OpenEPL hello there\"") &&
+              has(slurp(path), "title = \"Kiln hello there\"") &&
                   has(slurp(path), "text = \"Click me!!!!!!!!!!!!!!!!\""));
     }
 
@@ -746,12 +747,12 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     // scripted session cannot look at the screen.
     {
         const std::string out =
-            session("OPENEPL_UI_WINDOW=1 " + designer, openepl, form,
+            session("KILN_UI_WINDOW=1 " + designer, kiln, form,
                     "winflags;click:wc-max;pump;winflags");
         check("the window is borderless", has(out, " borderless"));
         check("the maximise dot maximises", has(out, " maximized borderless"));
         const std::string closed =
-            session(designer, openepl, form, "quitcheck;click:wc-close;quitcheck");
+            session(designer, kiln, form, "quitcheck;click:wc-close;quitcheck");
         check("the close dot asks the event loop to stop, as the manager's close does",
               has(closed, "quitcheck: running\n") && has(closed, "quitcheck: quit\n"));
     }
@@ -762,8 +763,8 @@ static void test_sessions(const std::string& openepl, const std::string& designe
     // completely unclickable.
     {
         auto browse = [&](const char* row) {
-            const std::string cmd = "cd examples && OPENEPL_DESIGNER_WELCOME_PICK=browse:file "
-                                    "OPENEPL_DESIGNER_BROWSE_CLICK=" +
+            const std::string cmd = "cd examples && KILN_DESIGNER_WELCOME_PICK=browse:file "
+                                    "KILN_DESIGNER_BROWSE_CLICK=" +
                                     std::string(row) + " ../" + designer + " 2>/dev/null";
             std::string out;
             if (FILE* p = popen(cmd.c_str(), "r")) {
@@ -773,11 +774,11 @@ static void test_sessions(const std::string& openepl, const std::string& designe
             }
             return out;
         };
-        const std::string file = browse("form.oir");
+        const std::string file = browse("form.kiln");
         check("browser: a file row is pressed, not covered by a scrollbar",
               has(file, "hover=<div>") && !has(file, "hover=<slidertrack>"));
         check("browser: pressing a file chooses it",
-              has(file, "chose '") && has(file, "examples/form.oir'"));
+              has(file, "chose '") && has(file, "examples/form.kiln'"));
         // The row filling its list is the same fault seen from the other side:
         // the unstyled slider collapsed every row to a stub.
         check("browser: a row spans the list", has(file, "box 1318x30") || has(file, "box 1"));
@@ -794,18 +795,18 @@ static void test_sessions(const std::string& openepl, const std::string& designe
 /// Each session gets its own XDG_DATA_HOME so a test never reads or writes the
 /// settings file a person sees, and so one test's value cannot leak into the
 /// next one's assertions.
-static void test_settings(const std::string& openepl, const std::string& designer) {
+static void test_settings(const std::string& kiln, const std::string& designer) {
     std::printf("settings\n");
     static int n = 0;
     auto run = [&](const std::string& script) {
         // A COPY of the fixture, never the tracked file: Studio saves on exit,
         // and a test that ran would land in the next commit.
-        const std::string home = "/tmp/openepl_settings_test_" + std::to_string(++n);
-        const std::string copy = home + ".oir";
-        { std::ofstream f(copy, std::ios::trunc); f << slurp("examples/form.oir"); }
+        const std::string home = "/tmp/kiln_settings_test_" + std::to_string(++n);
+        const std::string copy = home + ".kiln";
+        { std::ofstream f(copy, std::ios::trunc); f << slurp("examples/form.kiln"); }
         std::string cmd = "rm -rf " + home + " && mkdir -p " + home + " && XDG_DATA_HOME=" + home +
-                          " OPENEPL_DESIGNER_SCRIPT='" + script + "' " + designer + " " + copy +
-                          " " + openepl + " 2>/dev/null";
+                          " KILN_DESIGNER_SCRIPT='" + script + "' " + designer + " " + copy +
+                          " " + kiln + " 2>/dev/null";
         std::string out;
         if (FILE* p = popen(cmd.c_str(), "r")) {
             char buf[4096];
@@ -844,14 +845,14 @@ static void test_settings(const std::string& openepl, const std::string& designe
           has(bogus, "appearance.theme = light refused"));
 
     // Written on change, and read back by the next start — the whole point.
-    const std::string home = "/tmp/openepl_settings_persist";
-    const std::string copy = home + ".oir";
-    { std::ofstream f(copy, std::ios::trunc); f << slurp("examples/form.oir"); }
+    const std::string home = "/tmp/kiln_settings_persist";
+    const std::string copy = home + ".kiln";
+    { std::ofstream f(copy, std::ios::trunc); f << slurp("examples/form.kiln"); }
     std::string cmd = "rm -rf " + home + " && mkdir -p " + home + " && XDG_DATA_HOME=" + home +
-                      " OPENEPL_DESIGNER_SCRIPT='settings:Appearance;click:appearance.theme=dark' " +
-                      designer + " " + copy + " " + openepl + " >/dev/null 2>&1; XDG_DATA_HOME=" +
-                      home + " OPENEPL_DESIGNER_SCRIPT='getsetting:appearance.theme' " + designer +
-                      " " + copy + " " + openepl + " 2>/dev/null";
+                      " KILN_DESIGNER_SCRIPT='settings:Appearance;click:appearance.theme=dark' " +
+                      designer + " " + copy + " " + kiln + " >/dev/null 2>&1; XDG_DATA_HOME=" +
+                      home + " KILN_DESIGNER_SCRIPT='getsetting:appearance.theme' " + designer +
+                      " " + copy + " " + kiln + " 2>/dev/null";
     std::string second;
     if (FILE* p = popen(cmd.c_str(), "r")) {
         char buf[4096];
@@ -875,31 +876,31 @@ static void test_settings(const std::string& openepl, const std::string& designe
 /// executable in the system's temporary directory under a name shared by
 /// every project, and pressing Build must leave exactly one binary behind —
 /// theirs, in the output directory — with the throwaway gone.
-static void test_build_artifacts(const std::string& openepl, const std::string& designer) {
+static void test_build_artifacts(const std::string& kiln, const std::string& designer) {
     std::printf("build artifacts\n");
 
     static int n = 0;
-    const std::string dir = "/tmp/openepl_artifact_test_" + std::to_string(++n);
+    const std::string dir = "/tmp/kiln_artifact_test_" + std::to_string(++n);
     ::system(("rm -rf " + dir).c_str());
     ::mkdir(dir.c_str(), 0755);
-    const std::string src = dir + "/main.oir";
-    { std::ofstream f(src, std::ios::trunc); f << slurp("examples/hello.oir"); }
+    const std::string src = dir + "/main.kiln";
+    { std::ofstream f(src, std::ios::trunc); f << slurp("examples/hello.kiln"); }
 
     const std::string exists = "test -e ";
     auto present = [&](const std::string& p) { return ::system((exists + p).c_str()) == 0; };
 
     // Run alone: the binary is inside the project, not in /tmp.
-    const std::string cmd = "XDG_DATA_HOME=" + dir + "/xdg OPENEPL_DESIGNER_SCRIPT='run' " +
-                            designer + " " + src + " " + openepl + " >/dev/null 2>&1";
+    const std::string cmd = "XDG_DATA_HOME=" + dir + "/xdg KILN_DESIGNER_SCRIPT='run' " +
+                            designer + " " + src + " " + kiln + " >/dev/null 2>&1";
     ::system(cmd.c_str());
-    check("run: the binary lands inside the project", present(dir + "/.openepl/run/hello"));
+    check("run: the binary lands inside the project", present(dir + "/.kiln/run/hello"));
     // Then Build: its own binary appears, and Run's is cleared away.
-    const std::string cmd2 = "XDG_DATA_HOME=" + dir + "/xdg OPENEPL_DESIGNER_SCRIPT='build' " +
-                             designer + " " + src + " " + openepl + " >/dev/null 2>&1";
+    const std::string cmd2 = "XDG_DATA_HOME=" + dir + "/xdg KILN_DESIGNER_SCRIPT='build' " +
+                             designer + " " + src + " " + kiln + " >/dev/null 2>&1";
     ::system(cmd2.c_str());
     check("build: the binary lands in the project's build directory", present(dir + "/build/hello"));
-    check("build: the run build is cleared away", !present(dir + "/.openepl/run/hello"));
-    check("build: the emptied run directory goes too", !present(dir + "/.openepl"));
+    check("build: the run build is cleared away", !present(dir + "/.kiln/run/hello"));
+    check("build: the emptied run directory goes too", !present(dir + "/.kiln"));
 
     // And the intermediate IR is not left beside either of them.
     check("build: no .ll is left beside the binary", !present(dir + "/build/hello.ll"));
@@ -910,16 +911,16 @@ static void test_build_artifacts(const std::string& openepl, const std::string& 
 /// Debugging, from Studio.
 ///
 /// The whole chain: a breakpoint set by clicking a gutter row, a program built
-/// and traced by `openepl dap`, a stop drawn on the line it stopped at, the
+/// and traced by `kiln dap`, a stop drawn on the line it stopped at, the
 /// variables it holds, and a step that moves both.
-static void test_debugging(const std::string& openepl, const std::string& designer) {
+static void test_debugging(const std::string& kiln, const std::string& designer) {
     std::printf("debugging\n");
 
     static int n = 0;
-    const std::string dir = "/tmp/openepl_debug_studio_" + std::to_string(++n);
+    const std::string dir = "/tmp/kiln_debug_studio_" + std::to_string(++n);
     ::system(("rm -rf " + dir).c_str());
     ::mkdir(dir.c_str(), 0755);
-    const std::string src = dir + "/t.oir";
+    const std::string src = dir + "/t.kiln";
     {
         std::ofstream f(src, std::ios::trunc);
         f << "module demo\n\n"
@@ -933,10 +934,10 @@ static void test_debugging(const std::string& openepl, const std::string& design
     }
 
     const std::string cmd =
-        "XDG_DATA_HOME=" + dir + "/xdg OPENEPL_DESIGNER_SCRIPT='" +
+        "XDG_DATA_HOME=" + dir + "/xdg KILN_DESIGNER_SCRIPT='" +
         "view:code;bp:6;gutter;dbgrun;waitstop;frames;locals;hoverval:6,21;"
         "dbgnext;waitstop;locals;dbgstop' " +
-        designer + " " + src + " " + openepl + " 2>/dev/null";
+        designer + " " + src + " " + kiln + " 2>/dev/null";
     std::string out;
     if (FILE* p = popen(cmd.c_str(), "r")) {
         char buf[4096];
@@ -962,16 +963,158 @@ static void test_debugging(const std::string& openepl, const std::string& design
     ::system(("rm -rf " + dir).c_str());
 }
 
+/* The handbook. Two halves, for the same reason the rest of this file has two:
+ * the renderer can be checked against known Markdown without a window, but
+ * whether F1 actually reaches the right row of a 483-line reference is a
+ * property of the running application and nothing else. */
+static void test_help(const std::string& kiln, const std::string& designer) {
+    std::printf("help\n");
+    namespace hp = kiln::designer::help_page;
+    namespace md = kiln::designer::md;
+
+    const std::string dir = hp::docs_dir();
+    check("help: the handbook is found beside the build", !dir.empty());
+    if (dir.empty()) return;
+
+    // The table of contents is mdBook's own, so the book and the viewer never
+    // list different pages.
+    const std::vector<hp::Entry> toc = hp::toc(dir);
+    check("help: the table of contents comes from SUMMARY.md", toc.size() > 15);
+    bool has_lang = false, has_section = false, has_summary_title = false;
+    for (const hp::Entry& e : toc) {
+        if (e.page == "language") has_lang = true;
+        if (e.section && e.title == "Reference") has_section = true;
+        if (e.title == "Summary") has_summary_title = true;
+    }
+    check("help: it lists the language guide", has_lang);
+    check("help: it keeps the book's sections", has_section);
+    check("help: SUMMARY.md's own title is not a section", !has_summary_title);
+
+    // Rendering. Every construct the docs actually use, on real pages.
+    const md::Doc lang = md::render(md::read_file(dir + "/language.md"), 800, dir);
+    check("help: a page renders with its title", lang.title == "Language guide");
+    check("help: headings become jump targets", !lang.anchors.empty());
+    check("help: code blocks are highlighted, not escaped away",
+          has(lang.rml, "mdcodeline") && has(lang.rml, "mdpre"));
+    check("help: prose becomes paragraphs", has(lang.rml, "mdp"));
+    check("help: tables become rows and cells",
+          has(lang.rml, "mdrow") && has(lang.rml, "mdcell"));
+
+    const md::Doc ref = md::render(md::read_file(dir + "/reference-commands.md"), 800, dir);
+    check("help: every command row is a jump target", ref.anchors.size() > 200);
+    check("help: a command row carries its own id", has(ref.rml, "id='cmd-print_text'"));
+    // The generated banner is an HTML comment, and a comment that reached the
+    // page would render as the first thing on it.
+    check("help: the generated-file banner does not reach the page",
+          !has(ref.rml, "Generated by tools/gen-docs.sh"));
+
+    // editors.md is an mdBook include of docs/editors.md, and a viewer that
+    // did not expand it would show one line of syntax.
+    const md::Doc ed = md::render(md::read_file(dir + "/editors.md"), 800, dir);
+    check("help: an mdBook include is expanded, not printed",
+          !has(ed.rml, "{{#include") && ed.rml.size() > 2000);
+
+    // The lookup F1 depends on.
+    std::string page, anchor;
+    check("help: a core command is found in the reference",
+          hp::lookup(dir, "print_text", &page, &anchor) && page == "reference-commands" &&
+              anchor == "cmd-print_text");
+    check("help: a name that is not a command is not invented",
+          !hp::lookup(dir, "not_a_real_command", &page, &anchor));
+    // A documented command has its own entry, and that is where F1 belongs —
+    // the index row says only what it takes.
+    check("help: a documented command resolves to its own entry",
+          hp::lookup(dir, "file_read_text", &page, &anchor) && anchor == "file_read_text");
+    check("help: an example is copyable", has(ref.rml, "oe-help-copy=") && !ref.code.empty());
+    check("help: a copied example is a whole program, not a fragment",
+          !ref.code.empty() &&
+              [&] {
+                  for (const std::string& c : ref.code)
+                      if (c.find("file_read_text(") != std::string::npos)
+                          return c.rfind("module ", 0) == 0 && c.find("\nend\n") != std::string::npos;
+                  return false;
+              }());
+
+    // Anchors have to agree with mdBook's, or a link that works in the book
+    // scrolls to nothing in Studio.
+    check("help: an anchor keeps a command's underscores",
+          md::slug("print_text") == "print_text");
+    check("help: an anchor is a heading's words, lowercased and dashed",
+          md::slug("When a command fails") == "when-a-command-fails");
+
+    check("help: search finds a command by name", !hp::search(dir, "print_text").empty());
+    check("help: search ignores a one-character query", hp::search(dir, "p").empty());
+
+    if (::access(designer.c_str(), X_OK) != 0) return;
+
+    // The running application. F1 with the caret on a command must land on
+    // that command's row, which is the whole point and the one thing the
+    // renderer cannot prove.
+    static int n = 0;
+    const std::string work = "/tmp/kiln_help_studio_" + std::to_string(++n);
+    ::system(("rm -rf " + work).c_str());
+    ::mkdir(work.c_str(), 0755);
+    const std::string src = work + "/t.kiln";
+    {
+        std::ofstream f(src, std::ios::trunc);
+        // Two commands on purpose: one undocumented, so F1 must fall back to
+        // its row in the index, and one documented, so hover has a sentence
+        // and an example to show.
+        f << "module demo\nuse file\n\nsub main\n  call print_text(\"hi\")\n"
+             "  call file_exists(\"x\")\nend\n";
+    }
+
+    const std::string cmd =
+        "XDG_DATA_HOME=" + work + "/xdg KILN_DESIGNER_SCRIPT='" +
+        "view:code;goto:5,9;f1;helptext;help:language;helptext;helpsearch:breakpoint' " +
+        designer + " " + src + " " + kiln + " 2>/dev/null";
+    std::string out;
+    if (FILE* p = popen(cmd.c_str(), "r")) {
+        char buf[4096];
+        while (fgets(buf, sizeof buf, p)) out += buf;
+        pclose(p);
+    }
+
+    check("help: F1 on a command opens the reference at that command",
+          has(out, "help: reference-commands#cmd-print_text"));
+    check("help: the viewer shows the page it opened, not an empty one",
+          has(out, "helptext: ") && !has(out, "helptext: (closed)"));
+    check("help: a page opens by name", has(out, "help: language"));
+    check("help: the opened page renders its prose",
+          has(out, "Language guide") && has(out, "A whole program is one module"));
+    check("help: searching shows results rather than a page", has(out, "help: search"));
+
+    // Hovering a documented command in the editor. The signature was always
+    // there; the sentence and the example are the point.
+    const std::string hcmd =
+        "XDG_DATA_HOME=" + work + "/xdg KILN_DESIGNER_SCRIPT='" +
+        "view:code;hoverat:6,9;pump;pump' " + designer + " " + src + " " + kiln + " 2>/dev/null";
+    std::string hov;
+    if (FILE* p2 = popen(hcmd.c_str(), "r")) {
+        char buf[4096];
+        while (fgets(buf, sizeof buf, p2)) hov += buf;
+        pclose(p2);
+    }
+    check("hover: the tip still carries the signature", has(hov, "file_exists(text)"));
+    check("hover: and the sentence saying what the command is for",
+          has(hov, "Whether a file exists"));
+    check("hover: and an example of calling it", has(hov, "```kiln"));
+
+    ::system(("rm -rf " + work).c_str());
+}
+
 int main(int argc, char** argv) {
-    const std::string openepl = argc > 1 ? argv[1] : "./target/debug/openepl";
-    const std::string designer = argc > 2 ? argv[2] : "designer/openepl-designer";
+    const std::string kiln = argc > 1 ? argv[1] : "./target/debug/kiln";
+    const std::string designer = argc > 2 ? argv[2] : "designer/kiln-designer";
     test_catalog();
     if (::access(designer.c_str(), X_OK) == 0) {
-        test_sessions(openepl, designer);
-        test_settings(openepl, designer);
-        test_build_artifacts(openepl, designer);
-        test_debugging(openepl, designer);
+        test_sessions(kiln, designer);
+        test_settings(kiln, designer);
+        test_build_artifacts(kiln, designer);
+        test_debugging(kiln, designer);
+        test_help(kiln, designer);
     } else {
+        test_help(kiln, designer);
         std::printf("sessions: %s not built, skipped\n", designer.c_str());
     }
     std::printf("%s\n", failures ? "FAILED" : "all passed");

@@ -13,7 +13,7 @@
  *
  * SHA-256, SHA-1 and MD5 are implemented here from their specifications, with
  * no dependency beyond the C library. The algorithms are checked against the
- * published vectors in examples/hashlib.oir, which is a program you can run.
+ * published vectors in examples/hashlib.kiln, which is a program you can run.
  *
  * Text is bytes: every command hashes or encodes the UTF-8 bytes of its
  * argument, so a digest matches what any other tool computes over the same
@@ -27,13 +27,13 @@
  */
 #include <string.h>
 #include <stdint.h>
-#include "openepl_abi.h"
+#include "kiln_abi.h"
 
 static const char *hash_nz(const char *s) { return s ? s : ""; }
 
 /* Every result is runtime-owned memory, never a literal: the runtime frees
  * program data at exit. */
-static char *hash_alloc(long len) { return (char *)oe_malloc(len + 1); }
+static char *hash_alloc(long len) { return (char *)kn_malloc(len + 1); }
 static char *hash_empty(void) { char *o = hash_alloc(0); o[0] = '\0'; return o; }
 
 /* ---------------------------------------------------------------- SHA-256 */
@@ -269,50 +269,50 @@ static char *hash_to_hex(const unsigned char *b, long n) {
 /* ------------------------------------------------------------- the commands */
 
 /* hash_sha256(text) -> text : lowercase hex, 64 characters. Infallible. */
-void hash_sha256(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void hash_sha256(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *s = hash_nz(oe_arg_text(argv, 0));
+    const char *s = hash_nz(kn_arg_text(argv, 0));
     unsigned char d[32];
     hash_sha256_ctx c;
     hash_sha256_init(&c);
     hash_sha256_update(&c, s, strlen(s));
     hash_sha256_final(&c, d);
-    oe_ret_text(ret, hash_to_hex(d, 32));
+    kn_ret_text(ret, hash_to_hex(d, 32));
 }
 
 /* hash_sha1(text) -> text : lowercase hex, 40 characters. Infallible.
  * Broken against deliberate collisions; here for legacy formats only. */
-void hash_sha1(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void hash_sha1(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *s = hash_nz(oe_arg_text(argv, 0));
+    const char *s = hash_nz(kn_arg_text(argv, 0));
     unsigned char d[20];
     hash_sha1_ctx c;
     hash_sha1_init(&c);
     hash_sha1_update(&c, s, strlen(s));
     hash_sha1_final(&c, d);
-    oe_ret_text(ret, hash_to_hex(d, 20));
+    kn_ret_text(ret, hash_to_hex(d, 20));
 }
 
 /* hash_md5(text) -> text : lowercase hex, 32 characters. Infallible.
  * Thoroughly broken; here for legacy formats only. */
-void hash_md5(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void hash_md5(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *s = hash_nz(oe_arg_text(argv, 0));
+    const char *s = hash_nz(kn_arg_text(argv, 0));
     unsigned char d[16];
     hash_md5_ctx c;
     hash_md5_init(&c);
     hash_md5_update(&c, s, strlen(s));
     hash_md5_final(&c, d);
-    oe_ret_text(ret, hash_to_hex(d, 16));
+    kn_ret_text(ret, hash_to_hex(d, 16));
 }
 
 /* hash_crc32(text) -> int64 : the CRC-32 of IEEE 802.3 / zip / PNG (reflected,
  * polynomial 0xEDB88320, initial and final inversion). Returned as int64 so the
  * top bit is a value and not a sign: an int would report half of all checksums
  * as negative. Infallible — a checksum has no failure. */
-void hash_crc32(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void hash_crc32(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *s = hash_nz(oe_arg_text(argv, 0));
+    const char *s = hash_nz(kn_arg_text(argv, 0));
     uint32_t crc = 0xFFFFFFFFu;
     size_t i, n = strlen(s);
     int k;
@@ -322,7 +322,7 @@ void hash_crc32(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
             crc = (crc >> 1) ^ (0xEDB88320u & (uint32_t)(-(int32_t)(crc & 1)));
     }
     crc ^= 0xFFFFFFFFu;
-    oe_ret_int64(ret, (int64_t)(uint64_t)crc);
+    kn_ret_int64(ret, (int64_t)(uint64_t)crc);
 }
 
 /* hash_hmac_sha256(key, message) -> text : HMAC-SHA-256 as lowercase hex
@@ -332,10 +332,10 @@ void hash_crc32(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
  * This is the command to use to authenticate a message. hash_sha256 of a key
  * concatenated with a message is NOT the same thing and is forgeable by length
  * extension. */
-void hash_hmac_sha256(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void hash_hmac_sha256(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *key = hash_nz(oe_arg_text(argv, 0));
-    const char *msg = hash_nz(oe_arg_text(argv, 1));
+    const char *key = hash_nz(kn_arg_text(argv, 0));
+    const char *msg = hash_nz(kn_arg_text(argv, 1));
     unsigned char k[64], ipad[64], opad[64], inner[32], outer[32];
     size_t klen = strlen(key);
     int i;
@@ -361,7 +361,7 @@ void hash_hmac_sha256(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     hash_sha256_update(&c, inner, 32);
     hash_sha256_final(&c, outer);
 
-    oe_ret_text(ret, hash_to_hex(outer, 32));
+    kn_ret_text(ret, hash_to_hex(outer, 32));
 }
 
 /* ------------------------------------------------------------------ base64 */
@@ -373,9 +373,9 @@ static const char HASH_B64[] =
  * with '=' to a multiple of four, never line-wrapped. Infallible.
  *
  * Encoding is not encryption. Anyone can read this back. */
-void base64_encode(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void base64_encode(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const unsigned char *s = (const unsigned char *)hash_nz(oe_arg_text(argv, 0));
+    const unsigned char *s = (const unsigned char *)hash_nz(kn_arg_text(argv, 0));
     long n = (long)strlen((const char *)s);
     long groups = (n + 2) / 3;
     char *o = hash_alloc(groups * 4);
@@ -392,7 +392,7 @@ void base64_encode(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         i += 3;
     }
     o[w] = '\0';
-    oe_ret_text(ret, o);
+    kn_ret_text(ret, o);
 }
 
 static int hash_b64_value(unsigned char ch) {
@@ -415,9 +415,9 @@ static int hash_b64_value(unsigned char ch) {
  *
  * A decoded byte of zero ends the text, so binary data containing a NUL comes
  * back truncated. That is a property of `text`, not of this command. */
-void base64_decode(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void base64_decode(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const unsigned char *s = (const unsigned char *)hash_nz(oe_arg_text(argv, 0));
+    const unsigned char *s = (const unsigned char *)hash_nz(kn_arg_text(argv, 0));
     long n = (long)strlen((const char *)s);
     char *o = hash_alloc(n / 4 * 3 + 3);
     uint32_t acc = 0;
@@ -432,9 +432,9 @@ void base64_decode(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         if (ch == '=') { seen_pad = 1; continue; }
         v = hash_b64_value(ch);
         if (v < 0 || seen_pad) {          /* a character after padding is junk too */
-            oe_mfree(o);
-            oe_error_set(OE_ERR_INVALID_ARG, "base64_decode: not valid base64");
-            oe_ret_text(ret, hash_empty());
+            kn_mfree(o);
+            kn_error_set(KN_ERR_INVALID_ARG, "base64_decode: not valid base64");
+            kn_ret_text(ret, hash_empty());
             return;
         }
         acc = (acc << 6) | (uint32_t)v;
@@ -442,26 +442,26 @@ void base64_decode(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         if (have == 4) { o[w++] = (char)(acc >> 16); o[w++] = (char)(acc >> 8); o[w++] = (char)acc; acc = 0; have = 0; }
     }
     if (have == 1) {                       /* six leftover bits encode nothing */
-        oe_mfree(o);
-        oe_error_set(OE_ERR_INVALID_ARG, "base64_decode: truncated base64 input");
-        oe_ret_text(ret, hash_empty());
+        kn_mfree(o);
+        kn_error_set(KN_ERR_INVALID_ARG, "base64_decode: truncated base64 input");
+        kn_ret_text(ret, hash_empty());
         return;
     }
     if (have == 2) { o[w++] = (char)(acc >> 4); }
     else if (have == 3) { acc >>= 2; o[w++] = (char)(acc >> 8); o[w++] = (char)acc; }
     o[w] = '\0';
-    oe_error_clear();
-    oe_ret_text(ret, o);
+    kn_error_clear();
+    kn_ret_text(ret, o);
 }
 
 /* --------------------------------------------------------------------- hex */
 
 /* hex_encode(text) -> text : lowercase hex of the bytes, two characters per
  * byte, no separators. Infallible. */
-void hex_encode(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void hex_encode(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *s = hash_nz(oe_arg_text(argv, 0));
-    oe_ret_text(ret, hash_to_hex((const unsigned char *)s, (long)strlen(s)));
+    const char *s = hash_nz(kn_arg_text(argv, 0));
+    kn_ret_text(ret, hash_to_hex((const unsigned char *)s, (long)strlen(s)));
 }
 
 static int hash_hex_value(unsigned char ch) {
@@ -477,9 +477,9 @@ static int hash_hex_value(unsigned char ch) {
  * Upper and lower case are both accepted, and ASCII whitespace is ignored so
  * that hex copied out of a dump with spaces between the bytes still decodes.
  * As with base64_decode, a decoded zero byte ends the text. */
-void hex_decode(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void hex_decode(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const unsigned char *s = (const unsigned char *)hash_nz(oe_arg_text(argv, 0));
+    const unsigned char *s = (const unsigned char *)hash_nz(kn_arg_text(argv, 0));
     long n = (long)strlen((const char *)s);
     char *o = hash_alloc(n / 2 + 1);
     long i, w = 0;
@@ -491,21 +491,21 @@ void hex_decode(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         if (ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t' || ch == '\f' || ch == '\v') continue;
         v = hash_hex_value(ch);
         if (v < 0) {
-            oe_mfree(o);
-            oe_error_set(OE_ERR_INVALID_ARG, "hex_decode: not a hex digit");
-            oe_ret_text(ret, hash_empty());
+            kn_mfree(o);
+            kn_error_set(KN_ERR_INVALID_ARG, "hex_decode: not a hex digit");
+            kn_ret_text(ret, hash_empty());
             return;
         }
         if (hi < 0) hi = v;
         else { o[w++] = (char)((hi << 4) | v); hi = -1; }
     }
     if (hi >= 0) {                         /* half a byte is not a byte */
-        oe_mfree(o);
-        oe_error_set(OE_ERR_INVALID_ARG, "hex_decode: odd number of hex digits");
-        oe_ret_text(ret, hash_empty());
+        kn_mfree(o);
+        kn_error_set(KN_ERR_INVALID_ARG, "hex_decode: odd number of hex digits");
+        kn_ret_text(ret, hash_empty());
         return;
     }
     o[w] = '\0';
-    oe_error_clear();
-    oe_ret_text(ret, o);
+    kn_error_clear();
+    kn_ret_text(ret, o);
 }

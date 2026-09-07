@@ -5,7 +5,7 @@
  *
  * TLS IS OPTIONAL, AND WHAT THAT MEANS IS EXACT.
  * --------------------------------------------------------------------------
- * OpenEPL links a program statically, so a TLS stack is vendored into every
+ * Kiln links a program statically, so a TLS stack is vendored into every
  * binary that uses one — megabytes of code and a security-critical dependency
  * on someone else's patch schedule.  Nobody who only speaks http should pay
  * that, and nobody who does not want https should have their build fail for
@@ -14,7 +14,7 @@
  * and runs exactly as before.
  *
  * What never happens, in either state, is a downgrade.  Without TLS an
- * https:// URL FAILS with OE_ERR_UNSUPPORTED naming the fetch script; it is
+ * https:// URL FAILS with KN_ERR_UNSUPPORTED naming the fetch script; it is
  * never rewritten to http, because that would put a user's password or token
  * on the wire in the clear and the program would look like it worked.  A
  * redirect FROM https TO http is refused for the same reason even when TLS is
@@ -37,7 +37,7 @@
 
 #ifdef _WIN32
 /* Winsock refuses every call until WSAStartup has run.  The runtime is
- * single-threaded — see the sort-tag comment in runtime/oe_array.c — so a
+ * single-threaded — see the sort-tag comment in runtime/kn_array.c — so a
  * plain flag is enough, and a library has no initialiser hook to do it in. */
 static int g_wsa_ready = 0;
 int net_start(void) {
@@ -70,17 +70,17 @@ void net_fail(int code, const char *what) {
 #ifdef _WIN32
     char msg[128];
     snprintf(msg, sizeof msg, "%s: Winsock error %d", what, code);
-    oe_error_set((int32_t)code, msg);
+    kn_error_set((int32_t)code, msg);
 #else
-    oe_error_set_errno(code, what);
+    kn_error_set_errno(code, what);
 #endif
 }
 
 const char *net_nz(const char *s) { return s ? s : ""; }
 
 char *net_text(const char *p, size_t n) {
-    char *o = (char *)oe_malloc((long)n + 1);
-    if (!o) return NULL;                 /* oe_malloc aborts, but be explicit */
+    char *o = (char *)kn_malloc((long)n + 1);
+    if (!o) return NULL;                 /* kn_malloc aborts, but be explicit */
     if (n) memcpy(o, p, n);
     o[n] = '\0';
     return o;
@@ -120,15 +120,15 @@ static char *g_headers = NULL;    /* its header block, for net_http_header   */
  * receive/send timeouts) afterwards. */
 static int net_dial(const char *host, int port) {
     if (!net_start()) {
-        oe_error_set(OE_ERR_UNSUPPORTED, "Winsock could not be started");
+        kn_error_set(KN_ERR_UNSUPPORTED, "Winsock could not be started");
         return -1;
     }
     if (!host || !*host) {
-        oe_error_set(OE_ERR_INVALID_ARG, "host is empty");
+        kn_error_set(KN_ERR_INVALID_ARG, "host is empty");
         return -1;
     }
     if (port <= 0 || port > 65535) {
-        oe_error_set(OE_ERR_INVALID_ARG, "port must be 1..65535");
+        kn_error_set(KN_ERR_INVALID_ARG, "port must be 1..65535");
         return -1;
     }
 
@@ -146,7 +146,7 @@ static int net_dial(const char *host, int port) {
          * detail, so it goes in the message and the code says "bad input". */
         char msg[256];
         snprintf(msg, sizeof msg, "resolve %s: %s", host, gai_strerror(rc));
-        oe_error_set(OE_ERR_INVALID_ARG, msg);
+        kn_error_set(KN_ERR_INVALID_ARG, msg);
         return -1;
     }
 
@@ -267,63 +267,63 @@ static int net_sock_send_all(int fd, const char *p, size_t n, int *saved) {
 }
 
 /* net_tcp_connect(text host, int port) -> int handle (0 on failure) */
-void net_tcp_connect(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_tcp_connect(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *host = net_nz(oe_arg_text(argv, 0));
-    int port = oe_arg_int(argv, 1);
+    const char *host = net_nz(kn_arg_text(argv, 0));
+    int port = kn_arg_int(argv, 1);
 
     int fd = net_dial(host, port);            /* sets the slot on failure */
-    if (fd < 0) { oe_ret_int(ret, 0); return; }
+    if (fd < 0) { kn_ret_int(ret, 0); return; }
 
     NetSock *s = (NetSock *)calloc(1, sizeof *s);
     int ce = errno;                       /* nothing may intervene */
     if (!s) {
         int e = ce;
         close(fd);
-        oe_error_set_errno(e, "allocate connection");
-        oe_ret_int(ret, 0);
+        kn_error_set_errno(e, "allocate connection");
+        kn_ret_int(ret, 0);
         return;
     }
     s->fd = fd;
 
-    int32_t h = oe_handle_new(OE_HK_SOCKET, s, net_sock_close);
-    if (h == 0) {                              /* oe_handle_new set the slot */
+    int32_t h = kn_handle_new(KN_HK_SOCKET, s, net_sock_close);
+    if (h == 0) {                              /* kn_handle_new set the slot */
         net_sock_close(s);
-        oe_ret_int(ret, 0);
+        kn_ret_int(ret, 0);
         return;
     }
-    oe_error_clear();
-    oe_ret_int(ret, h);
+    kn_error_clear();
+    kn_ret_int(ret, h);
 }
 
 /* net_tcp_send(int handle, text data) -> bool */
-void net_tcp_send(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_tcp_send(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    NetSock *s = (NetSock *)oe_handle_resolve(oe_arg_int(argv, 0), OE_HK_SOCKET);
-    if (!s) { oe_ret_bool(ret, 0); return; }   /* handle table set the slot */
+    NetSock *s = (NetSock *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_SOCKET);
+    if (!s) { kn_ret_bool(ret, 0); return; }   /* handle table set the slot */
 
-    const char *data = net_nz(oe_arg_text(argv, 1));
+    const char *data = net_nz(kn_arg_text(argv, 1));
     int saved = 0;
     if (!net_sock_send_all(s->fd, data, strlen(data), &saved)) {
         net_fail(saved, "send");
-        oe_ret_bool(ret, 0);
+        kn_ret_bool(ret, 0);
         return;
     }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* net_tcp_receive(int handle, int max_bytes) -> text ("" on failure OR at end;
  * net_tcp_at_end and last_error_code tell the two apart) */
-void net_tcp_receive(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_tcp_receive(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    NetSock *s = (NetSock *)oe_handle_resolve(oe_arg_int(argv, 0), OE_HK_SOCKET);
-    if (!s) { oe_ret_text(ret, net_empty()); return; }
+    NetSock *s = (NetSock *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_SOCKET);
+    if (!s) { kn_ret_text(ret, net_empty()); return; }
 
-    int max = oe_arg_int(argv, 1);
+    int max = kn_arg_int(argv, 1);
     if (max <= 0) {
-        oe_error_set(OE_ERR_INVALID_ARG, "max_bytes must be positive");
-        oe_ret_text(ret, net_empty());
+        kn_error_set(KN_ERR_INVALID_ARG, "max_bytes must be positive");
+        kn_ret_text(ret, net_empty());
         return;
     }
 
@@ -331,24 +331,24 @@ void net_tcp_receive(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     int r = net_sock_fill(s, &saved);
     if (r < 0) {
         net_fail(saved, "receive");
-        oe_ret_text(ret, net_empty());
+        kn_ret_text(ret, net_empty());
         return;
     }
-    if (r == 0) { oe_error_clear(); oe_ret_text(ret, net_empty()); return; }
+    if (r == 0) { kn_error_clear(); kn_ret_text(ret, net_empty()); return; }
 
     int have = s->blen - s->bpos;
     if (have > max) have = max;
     char *out = net_text(s->buf + s->bpos, (size_t)have);
     s->bpos += have;
-    oe_error_clear();
-    oe_ret_text(ret, out);
+    kn_error_clear();
+    kn_ret_text(ret, out);
 }
 
 /* net_tcp_receive_line(int handle) -> text, without its line ending */
-void net_tcp_receive_line(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_tcp_receive_line(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    NetSock *s = (NetSock *)oe_handle_resolve(oe_arg_int(argv, 0), OE_HK_SOCKET);
-    if (!s) { oe_ret_text(ret, net_empty()); return; }
+    NetSock *s = (NetSock *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_SOCKET);
+    if (!s) { kn_ret_text(ret, net_empty()); return; }
 
     NetBuf line = {0};
     for (;;) {
@@ -357,7 +357,7 @@ void net_tcp_receive_line(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         if (r < 0) {
             net_buf_free(&line);
             net_fail(saved, "receive");
-            oe_ret_text(ret, net_empty());
+            kn_ret_text(ret, net_empty());
             return;
         }
         if (r == 0) break;                        /* end of input */
@@ -367,8 +367,8 @@ void net_tcp_receive_line(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         int take = i - s->bpos;
         if (!net_buf_add(&line, s->buf + s->bpos, (size_t)take)) {
             net_buf_free(&line);
-            oe_error_set_errno(ENOMEM, "receive");
-            oe_ret_text(ret, net_empty());
+            kn_error_set_errno(ENOMEM, "receive");
+            kn_ret_text(ret, net_empty());
             return;
         }
         s->bpos = (i < s->blen) ? i + 1 : i;      /* consume the '\n' too */
@@ -376,8 +376,8 @@ void net_tcp_receive_line(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
 
         if ((long)line.n > NET_MAX_LINE) {
             net_buf_free(&line);
-            oe_error_set(OE_ERR_INVALID_ARG, "line longer than 1 MiB");
-            oe_ret_text(ret, net_empty());
+            kn_error_set(KN_ERR_INVALID_ARG, "line longer than 1 MiB");
+            kn_ret_text(ret, net_empty());
             return;
         }
     }
@@ -385,53 +385,53 @@ void net_tcp_receive_line(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     if (line.n && line.p[line.n - 1] == '\r') line.n--;
     char *out = net_text(line.p ? line.p : "", line.n);
     net_buf_free(&line);
-    oe_error_clear();
-    oe_ret_text(ret, out);
+    kn_error_clear();
+    kn_ret_text(ret, out);
 }
 
 /* net_tcp_at_end(int handle) -> bool.  The predicate that makes "" readable:
  * an empty receive is end-of-input here, and a failure otherwise. */
-void net_tcp_at_end(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_tcp_at_end(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    NetSock *s = (NetSock *)oe_handle_resolve(oe_arg_int(argv, 0), OE_HK_SOCKET);
-    if (!s) { oe_ret_bool(ret, 0); return; }
-    oe_error_clear();
-    oe_ret_bool(ret, s->eof && s->bpos >= s->blen);
+    NetSock *s = (NetSock *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_SOCKET);
+    if (!s) { kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_bool(ret, s->eof && s->bpos >= s->blen);
 }
 
 /* net_tcp_close(int handle) -> bool */
-void net_tcp_close(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_tcp_close(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    /* oe_handle_close reports stale/wrong-kind itself and clears on success. */
-    oe_ret_bool(ret, oe_handle_close(oe_arg_int(argv, 0), OE_HK_SOCKET));
+    /* kn_handle_close reports stale/wrong-kind itself and clears on success. */
+    kn_ret_bool(ret, kn_handle_close(kn_arg_int(argv, 0), KN_HK_SOCKET));
 }
 
 /* net_tcp_close_all() -> int, the number closed */
-void net_tcp_close_all(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_tcp_close_all(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
-    oe_ret_int(ret, oe_handle_close_kind(OE_HK_SOCKET));   /* clears the slot */
+    kn_ret_int(ret, kn_handle_close_kind(KN_HK_SOCKET));   /* clears the slot */
 }
 
 /* --- timeouts --------------------------------------------------------- */
 
 /* net_timeout_set(int milliseconds) -> bool */
-void net_timeout_set(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_timeout_set(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    int ms = oe_arg_int(argv, 0);
+    int ms = kn_arg_int(argv, 0);
     if (ms <= 0) {
-        oe_error_set(OE_ERR_INVALID_ARG, "timeout must be positive");
-        oe_ret_bool(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "timeout must be positive");
+        kn_ret_bool(ret, 0);
         return;
     }
     g_timeout_ms = ms;
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* net_timeout_get() -> int.  Infallible: never touches the error slot. */
-void net_timeout_get(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_timeout_get(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
-    oe_ret_int(ret, g_timeout_ms);
+    kn_ret_int(ret, g_timeout_ms);
 }
 
 /* --- URLs ------------------------------------------------------------- */
@@ -450,11 +450,11 @@ static int net_hexval(char c) {
 /* net_url_encode(text) -> text.  Percent-encoding for a form field or a query
  * value: space becomes '+', everything outside the unreserved set becomes %XX.
  * Infallible. */
-void net_url_encode(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_url_encode(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *s = net_nz(oe_arg_text(argv, 0));
+    const char *s = net_nz(kn_arg_text(argv, 0));
     size_t n = strlen(s);
-    char *out = (char *)oe_malloc((long)n * 3 + 1);
+    char *out = (char *)kn_malloc((long)n * 3 + 1);
     size_t o = 0;
     for (size_t i = 0; i < n; i++) {
         unsigned char c = (unsigned char)s[i];
@@ -464,18 +464,18 @@ void net_url_encode(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
                out[o++] = '%'; out[o++] = H[c >> 4]; out[o++] = H[c & 15]; }
     }
     out[o] = '\0';
-    oe_ret_text(ret, out);
+    kn_ret_text(ret, out);
 }
 
 /* net_url_decode(text) -> text.  Lenient by design: a stray '%' that is not
  * followed by two hex digits is kept as a literal '%', because refusing to
  * decode a URL a browser accepts would be the surprising behaviour.
  * Infallible. */
-void net_url_decode(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_url_decode(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *s = net_nz(oe_arg_text(argv, 0));
+    const char *s = net_nz(kn_arg_text(argv, 0));
     size_t n = strlen(s);
-    char *out = (char *)oe_malloc((long)n + 1);
+    char *out = (char *)kn_malloc((long)n + 1);
     size_t o = 0;
     for (size_t i = 0; i < n; i++) {
         if (s[i] == '+') { out[o++] = ' '; continue; }
@@ -486,17 +486,17 @@ void net_url_decode(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         out[o++] = s[i];
     }
     out[o] = '\0';
-    oe_ret_text(ret, out);
+    kn_ret_text(ret, out);
 }
 
 /* net_host_ip(text host) -> text, the first address the resolver returns
  * ("" on failure) */
-void net_host_ip(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_host_ip(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *host = net_nz(oe_arg_text(argv, 0));
+    const char *host = net_nz(kn_arg_text(argv, 0));
     if (!*host) {
-        oe_error_set(OE_ERR_INVALID_ARG, "host is empty");
-        oe_ret_text(ret, net_empty());
+        kn_error_set(KN_ERR_INVALID_ARG, "host is empty");
+        kn_ret_text(ret, net_empty());
         return;
     }
 
@@ -506,8 +506,8 @@ void net_host_ip(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     hints.ai_socktype = SOCK_STREAM;
 
     if (!net_start()) {
-        oe_error_set(OE_ERR_UNSUPPORTED, "Winsock could not be started");
-        oe_ret_text(ret, net_empty());
+        kn_error_set(KN_ERR_UNSUPPORTED, "Winsock could not be started");
+        kn_ret_text(ret, net_empty());
         return;
     }
     int rc = getaddrinfo(host, NULL, &hints, &list);
@@ -515,8 +515,8 @@ void net_host_ip(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         char msg[256];
         snprintf(msg, sizeof msg, "resolve %s: %s", host, gai_strerror(rc));
         if (list) freeaddrinfo(list);
-        oe_error_set(OE_ERR_INVALID_ARG, msg);
-        oe_ret_text(ret, net_empty());
+        kn_error_set(KN_ERR_INVALID_ARG, msg);
+        kn_ret_text(ret, net_empty());
         return;
     }
 
@@ -534,11 +534,11 @@ void net_host_ip(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
 
     if (!p) {
         net_fail(e, "format address");
-        oe_ret_text(ret, net_empty());
+        kn_ret_text(ret, net_empty());
         return;
     }
-    oe_error_clear();
-    oe_ret_text(ret, net_text(text, strlen(text)));
+    kn_error_clear();
+    kn_ret_text(ret, net_text(text, strlen(text)));
 }
 
 /* --- HTTP ------------------------------------------------------------- */
@@ -585,14 +585,14 @@ static int net_url_split(const char *url, char *host, size_t hostsz,
                          int *port, char *path, size_t pathsz, int *tls) {
     const char *sep = strstr(url, "://");
     if (!sep) {
-        oe_error_set(OE_ERR_INVALID_ARG, "url must begin with http:// or https://");
+        kn_error_set(KN_ERR_INVALID_ARG, "url must begin with http:// or https://");
         return 0;
     }
     size_t schemelen = (size_t)(sep - url);
     *tls = 0;
     if (schemelen == 5 && strncasecmp(url, "https", 5) == 0) {
         if (!net_tls_available()) {
-            oe_error_set(OE_ERR_UNSUPPORTED,
+            kn_error_set(KN_ERR_UNSUPPORTED,
                          "https is not available: this build has no TLS. Run "
                          "tools/fetch-mbedtls.sh and rebuild. An https url is "
                          "never downgraded to http");
@@ -600,7 +600,7 @@ static int net_url_split(const char *url, char *host, size_t hostsz,
         }
         *tls = 1;
     } else if (schemelen != 4 || strncasecmp(url, "http", 4) != 0) {
-        oe_error_set(OE_ERR_INVALID_ARG, "only the http and https schemes are supported");
+        kn_error_set(KN_ERR_INVALID_ARG, "only the http and https schemes are supported");
         return 0;
     }
 
@@ -617,14 +617,14 @@ static int net_url_split(const char *url, char *host, size_t hostsz,
     if (*auth == '[') {                          /* [::1]:8080 */
         const char *rb = strchr(auth, ']');
         if (!rb || rb > end) {
-            oe_error_set(OE_ERR_INVALID_ARG, "malformed ipv6 host in url");
+            kn_error_set(KN_ERR_INVALID_ARG, "malformed ipv6 host in url");
             return 0;
         }
         if (rb + 1 < end && rb[1] == ':') colon = rb + 1;
         auth++;                                   /* strip the brackets */
         size_t hl = (size_t)(rb - auth);
         if (hl == 0 || hl >= hostsz) {
-            oe_error_set(OE_ERR_INVALID_ARG, "host is empty or too long");
+            kn_error_set(KN_ERR_INVALID_ARG, "host is empty or too long");
             return 0;
         }
         memcpy(host, auth, hl);
@@ -633,7 +633,7 @@ static int net_url_split(const char *url, char *host, size_t hostsz,
         for (const char *q = auth; q < end; q++) if (*q == ':') colon = q;
         size_t hl = (size_t)((colon ? colon : end) - auth);
         if (hl == 0 || hl >= hostsz) {
-            oe_error_set(OE_ERR_INVALID_ARG, "host is empty or too long");
+            kn_error_set(KN_ERR_INVALID_ARG, "host is empty or too long");
             return 0;
         }
         memcpy(host, auth, hl);
@@ -644,7 +644,7 @@ static int net_url_split(const char *url, char *host, size_t hostsz,
     if (colon) {
         long v = strtol(colon + 1, NULL, 10);
         if (v <= 0 || v > 65535) {
-            oe_error_set(OE_ERR_INVALID_ARG, "port must be 1..65535");
+            kn_error_set(KN_ERR_INVALID_ARG, "port must be 1..65535");
             return 0;
         }
         *port = (int)v;
@@ -656,7 +656,7 @@ static int net_url_split(const char *url, char *host, size_t hostsz,
         const char *hash = strchr(end, '#');
         if (hash) pl = (size_t)(hash - end);
         if (pl >= pathsz) {
-            oe_error_set(OE_ERR_INVALID_ARG, "url path is too long");
+            kn_error_set(KN_ERR_INVALID_ARG, "url path is too long");
             return 0;
         }
         memcpy(path, end, pl);
@@ -733,7 +733,7 @@ static int net_http_do(const char *method, const char *url,
                        const char *ctype, const char *reqbody, NetBuf *body) {
     char cur[2048];
     if (strlen(url) >= sizeof cur) {
-        oe_error_set(OE_ERR_INVALID_ARG, "url is too long");
+        kn_error_set(KN_ERR_INVALID_ARG, "url is too long");
         return 0;
     }
     snprintf(cur, sizeof cur, "%s", url);
@@ -769,7 +769,7 @@ static int net_http_do(const char *method, const char *url,
             hn = snprintf(head, sizeof head,
                 "%s %s HTTP/1.1\r\nHost: %s:%d\r\n", method, path, host, port);
         net_buf_add(&req, head, (size_t)hn);
-        net_buf_add(&req, "User-Agent: OpenEPL/1.0\r\n", 25);
+        net_buf_add(&req, "User-Agent: Kiln/1.0\r\n", 25);
         net_buf_add(&req, "Accept: */*\r\n", 13);
         net_buf_add(&req, "Accept-Encoding: identity\r\n", 27);
         net_buf_add(&req, "Connection: close\r\n", 19);
@@ -814,13 +814,13 @@ static int net_http_do(const char *method, const char *url,
             if (!net_buf_add(&raw, chunk, (size_t)r)) {
                 net_buf_free(&raw);
                 net_conn_close(&conn);
-                oe_error_set_errno(ENOMEM, "receive response");
+                kn_error_set_errno(ENOMEM, "receive response");
                 return 0;
             }
             if ((long)raw.n > NET_MAX_BODY) {
                 net_buf_free(&raw);
                 net_conn_close(&conn);
-                oe_error_set(OE_ERR_UNSUPPORTED, "response larger than 64 MiB");
+                kn_error_set(KN_ERR_UNSUPPORTED, "response larger than 64 MiB");
                 return 0;
             }
         }
@@ -832,7 +832,7 @@ static int net_http_do(const char *method, const char *url,
                 raw.p[i+2] == '\r' && raw.p[i+3] == '\n') { sep = raw.p + i; break; }
         if (!sep || raw.n < 12 || strncmp(raw.p, "HTTP/", 5) != 0) {
             net_buf_free(&raw);
-            oe_error_set(OE_ERR_INVALID_ARG, "not an http response");
+            kn_error_set(KN_ERR_INVALID_ARG, "not an http response");
             return 0;
         }
 
@@ -842,7 +842,7 @@ static int net_http_do(const char *method, const char *url,
             if (q[0] == '\r' && q[1] == '\n') { eol = q; break; }
         if (!eol) {
             net_buf_free(&raw);
-            oe_error_set(OE_ERR_INVALID_ARG, "not an http response");
+            kn_error_set(KN_ERR_INVALID_ARG, "not an http response");
             return 0;
         }
         const char *sp = (const char *)memchr(raw.p, ' ', (size_t)(eol - raw.p));
@@ -870,7 +870,7 @@ static int net_http_do(const char *method, const char *url,
             char next[2048];
             if (tls && strncasecmp(loc, "http://", 7) == 0) {
                 net_buf_free(&raw);
-                oe_error_set(OE_ERR_UNSUPPORTED,
+                kn_error_set(KN_ERR_UNSUPPORTED,
                              "the server redirected an https request to http, "
                              "which would put the rest of the exchange on the "
                              "wire in the clear: the redirect is refused");
@@ -903,7 +903,7 @@ static int net_http_do(const char *method, const char *url,
         if (net_header(g_headers, "Content-Encoding", v, sizeof v) &&
             *v && strcasecmp(v, "identity") != 0) {
             net_buf_free(&raw);
-            oe_error_set(OE_ERR_UNSUPPORTED, "compressed response bodies are "
+            kn_error_set(KN_ERR_UNSUPPORTED, "compressed response bodies are "
                          "not supported: the server ignored Accept-Encoding: identity");
             return 0;
         }
@@ -913,7 +913,7 @@ static int net_http_do(const char *method, const char *url,
             if (!net_dechunk(bstart, blen, body)) {
                 net_buf_free(body);
                 net_buf_free(&raw);
-                oe_error_set(OE_ERR_INVALID_ARG,
+                kn_error_set(KN_ERR_INVALID_ARG,
                              "malformed chunked response body");
                 return 0;
             }
@@ -924,84 +924,84 @@ static int net_http_do(const char *method, const char *url,
             }
             if (blen && !net_buf_add(body, bstart, blen)) {
                 net_buf_free(&raw);
-                oe_error_set_errno(ENOMEM, "read body");
+                kn_error_set_errno(ENOMEM, "read body");
                 return 0;
             }
         }
 
         net_buf_free(&raw);
-        oe_error_clear();
+        kn_error_clear();
         return 1;
     }
 
-    oe_error_set(OE_ERR_UNSUPPORTED, "too many redirects");
+    kn_error_set(KN_ERR_UNSUPPORTED, "too many redirects");
     return 0;
 }
 
 /* net_http_get(text url) -> text body ("" on failure) */
-void net_http_get(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_http_get(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     NetBuf body = {0};
-    if (!net_http_do("GET", net_nz(oe_arg_text(argv, 0)), NULL, NULL, &body)) {
+    if (!net_http_do("GET", net_nz(kn_arg_text(argv, 0)), NULL, NULL, &body)) {
         net_buf_free(&body);
-        oe_ret_text(ret, net_empty());
+        kn_ret_text(ret, net_empty());
         return;
     }
     char *out = net_text(body.p ? body.p : "", body.n);
     net_buf_free(&body);
-    oe_ret_text(ret, out);                    /* net_http_do cleared the slot */
+    kn_ret_text(ret, out);                    /* net_http_do cleared the slot */
 }
 
 /* net_http_post(text url, text content_type, text body) -> text ("" on failure) */
-void net_http_post(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_http_post(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     NetBuf body = {0};
-    if (!net_http_do("POST", net_nz(oe_arg_text(argv, 0)),
-                     net_nz(oe_arg_text(argv, 1)),
-                     net_nz(oe_arg_text(argv, 2)), &body)) {
+    if (!net_http_do("POST", net_nz(kn_arg_text(argv, 0)),
+                     net_nz(kn_arg_text(argv, 1)),
+                     net_nz(kn_arg_text(argv, 2)), &body)) {
         net_buf_free(&body);
-        oe_ret_text(ret, net_empty());
+        kn_ret_text(ret, net_empty());
         return;
     }
     char *out = net_text(body.p ? body.p : "", body.n);
     net_buf_free(&body);
-    oe_ret_text(ret, out);
+    kn_ret_text(ret, out);
 }
 
 /* net_http_status() -> int, the status of the last request (0 if none, or if
  * the request failed before a response arrived).  Infallible: reading it must
  * not disturb the error that explains the failure. */
-void net_http_status(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_http_status(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
-    oe_ret_int(ret, g_status);
+    kn_ret_int(ret, g_status);
 }
 
 /* net_http_header(text name) -> text, from the last response; "" when absent.
  * Infallible for the same reason: an absent header is a genuine "no". */
-void net_http_header(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_http_header(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     char v[1024];
-    if (!net_header(g_headers, net_nz(oe_arg_text(argv, 0)), v, sizeof v)) {
-        oe_ret_text(ret, net_empty());
+    if (!net_header(g_headers, net_nz(kn_arg_text(argv, 0)), v, sizeof v)) {
+        kn_ret_text(ret, net_empty());
         return;
     }
-    oe_ret_text(ret, net_text(v, strlen(v)));
+    kn_ret_text(ret, net_text(v, strlen(v)));
 }
 
 /* net_http_download(text url, text path) -> bool */
-void net_http_download(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void net_http_download(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = net_nz(oe_arg_text(argv, 1));
+    const char *path = net_nz(kn_arg_text(argv, 1));
     if (!*path) {
-        oe_error_set(OE_ERR_INVALID_ARG, "path is empty");
-        oe_ret_bool(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "path is empty");
+        kn_ret_bool(ret, 0);
         return;
     }
 
     NetBuf body = {0};
-    if (!net_http_do("GET", net_nz(oe_arg_text(argv, 0)), NULL, NULL, &body)) {
+    if (!net_http_do("GET", net_nz(kn_arg_text(argv, 0)), NULL, NULL, &body)) {
         net_buf_free(&body);
-        oe_ret_bool(ret, 0);
+        kn_ret_bool(ret, 0);
         return;
     }
     /* An error page is not the file that was asked for; writing it would leave
@@ -1010,8 +1010,8 @@ void net_http_download(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         char msg[128];
         snprintf(msg, sizeof msg, "http status %d", g_status);
         net_buf_free(&body);
-        oe_error_set(OE_ERR_INVALID_ARG, msg);
-        oe_ret_bool(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, msg);
+        kn_ret_bool(ret, 0);
         return;
     }
 
@@ -1019,8 +1019,8 @@ void net_http_download(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     int e = errno;
     if (!f) {
         net_buf_free(&body);
-        oe_error_set_errno(e, "open");
-        oe_ret_bool(ret, 0);
+        kn_error_set_errno(e, "open");
+        kn_ret_bool(ret, 0);
         return;
     }
     size_t w = body.n ? fwrite(body.p, 1, body.n, f) : 0;
@@ -1029,10 +1029,10 @@ void net_http_download(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     if (fclose(f) != 0 && !bad) { bad = 1; we = errno; }
     net_buf_free(&body);
     if (bad) {
-        oe_error_set_errno(we, "write");
-        oe_ret_bool(ret, 0);
+        kn_error_set_errno(we, "write");
+        kn_ret_bool(ret, 0);
         return;
     }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }

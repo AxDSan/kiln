@@ -40,7 +40,7 @@ fn mingw_present() -> bool {
 }
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_time_windows_{tag}_test"));
+    let dir = std::env::temp_dir().join(format!("kiln_time_windows_{tag}_test"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -48,7 +48,7 @@ fn scratch(tag: &str) -> PathBuf {
 
 /// Build `source` into `out`; `os` is `None` for this machine.
 fn build(source: &Path, out: &Path, os: Option<&str>) {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_openepl"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_kiln"));
     cmd.args(["build", source.to_str().unwrap()]);
     if let Some(os) = os {
         cmd.args(["--os", os]);
@@ -56,12 +56,12 @@ fn build(source: &Path, out: &Path, os: Option<&str>) {
     let status = cmd
         .arg("-o")
         .arg(out)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(
         status.success(),
-        "openepl build {} failed for {}",
+        "kiln build {} failed for {}",
         os.map(|o| format!("--os {o}")).unwrap_or_default(),
         source.display()
     );
@@ -136,7 +136,7 @@ fn same_on_both(tag: &str, source: &Path, must_say: &[&str]) {
 fn timelib_example_says_the_same_under_wine() {
     same_on_both(
         "example",
-        &repo().join("examples/timelib.oir"),
+        &repo().join("examples/timelib.kiln"),
         &["1969-07-21T02:56:15Z", "iso round trip ok"],
     );
 }
@@ -147,7 +147,7 @@ fn timelib_example_says_the_same_under_wine() {
 #[test]
 fn pre_1970_calendar_fields_say_the_same_under_wine() {
     let dir = scratch("src");
-    let source = dir.join("before1970.oir");
+    let source = dir.join("before1970.kiln");
     std::fs::write(
         &source,
         r#"module before1970

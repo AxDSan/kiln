@@ -1,6 +1,6 @@
-/* OpenEPL Studio design tokens.
+/* Kiln Studio design tokens.
  *
- * From the OpenEPL Studio design specification. Kept in one place so the chrome
+ * From the Kiln Studio design specification. Kept in one place so the chrome
  * never hard-codes a colour: changing the palette here changes the whole IDE —
  * which is what the theme setting does.
  *
@@ -14,12 +14,12 @@
  * and a size that changed under an already-laid-out document would move every
  * box without telling the layout.
  */
-#ifndef OPENEPL_DESIGNER_THEME_H
-#define OPENEPL_DESIGNER_THEME_H
+#ifndef KILN_DESIGNER_THEME_H
+#define KILN_DESIGNER_THEME_H
 
 #include <string>
 
-namespace openepl::designer::theme {
+namespace kiln::designer::theme {
 
 // Primary / accent
 /// Padding inside the code editor. Named because relayout() must subtract it
@@ -185,5 +185,5 @@ inline void set_palette(bool dark) {
 /// flag beside it, so the two can never disagree.
 inline bool dark_palette() { return PANEL != "#ffffff"; }
 
-} // namespace openepl::designer::theme
+} // namespace kiln::designer::theme
 #endif

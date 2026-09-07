@@ -1,4 +1,4 @@
-//! The GDI32 half of the `win` declaration kit: `kits/win/gdi32.oed`.
+//! The GDI32 half of the `win` declaration kit: `kits/win/gdi32.kdecl`.
 //!
 //! GDI is one of the few Win32 subsystems a headless machine can actually
 //! exercise. A *memory* device context is software all the way down — no
@@ -16,12 +16,12 @@
 //! need a real window or a printer. Those cannot run headless; referencing them
 //! proves they parse, type-check and lower, which is all this can prove.
 //!
-//! A fourth test never runs a line of OpenEPL: it hands mingw a C file of
+//! A fourth test never runs a line of Kiln: it hands mingw a C file of
 //! `_Static_assert`s over the real `<windows.h>` — every struct's size, every
 //! field's offset, and the value of every constant this kit spells in decimal
 //! because the language has no hex literal. That file is what the records were
 //! transcribed from, so it pins the numbers the transcription was made against;
-//! the sizes then meet OpenEPL's own `size of` in the drawing program's output,
+//! the sizes then meet Kiln's own `size of` in the drawing program's output,
 //! and the field *order* is pinned by the fields the running program reads back
 //! after GDI itself wrote them — `BITMAP.width`, `LOGPEN.width.x`,
 //! `LOGFONTA.height`, `POINT.x`, `RECT.right`, `XFORM.m11`.
@@ -60,7 +60,7 @@ fn mingw_present() -> bool {
 /// A scratch directory per test: a Windows program's working files land beside
 /// it, and two tests must not share one.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_win_gdi32_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_win_gdi32_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -75,11 +75,11 @@ fn scratch(tag: &str) -> PathBuf {
 /// scratch project holding only the files this stage owns keeps the check
 /// honest in the meantime, and says so.
 fn kit_cwd(tag: &str) -> PathBuf {
-    let listed = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let listed = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["commands", "--use", "win"])
         .current_dir(repo())
         .output()
-        .expect("run openepl commands");
+        .expect("run kiln commands");
     let stdout = String::from_utf8_lossy(&listed.stdout);
     if listed.status.success() && stdout.contains("dll: BitBlt") {
         return repo();
@@ -93,13 +93,13 @@ fn kit_cwd(tag: &str) -> PathBuf {
     let dir = scratch(&format!("{tag}_kit"));
     let kit = dir.join("kits").join("win");
     std::fs::create_dir_all(&kit).expect("create scratch kit dir");
-    // gdi32.oed, plus a shared `common*.oed` if the integrator has moved the
+    // gdi32.kdecl, plus a shared `common*.kdecl` if the integrator has moved the
     // names two subsystems both need — the mechanism the kit spec names.
-    std::fs::copy(repo().join("kits/win/gdi32.oed"), kit.join("gdi32.oed")).expect("copy gdi32.oed");
+    std::fs::copy(repo().join("kits/win/gdi32.kdecl"), kit.join("gdi32.kdecl")).expect("copy gdi32.kdecl");
     for entry in std::fs::read_dir(repo().join("kits/win")).expect("read kits/win").flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with("common") && name.ends_with(".oed") {
-            std::fs::copy(entry.path(), kit.join(&name)).expect("copy common oed");
+        if name.starts_with("common") && name.ends_with(".kdecl") {
+            std::fs::copy(entry.path(), kit.join(&name)).expect("copy common kdecl");
         }
     }
     std::fs::write(
@@ -114,19 +114,19 @@ fn kit_cwd(tag: &str) -> PathBuf {
 /// directory's `kits/`.
 fn build_windows(cwd: &Path, source: &str, name: &str) -> PathBuf {
     let dir = scratch(name);
-    let src = dir.join(format!("{name}.oir"));
+    let src = dir.join(format!("{name}.kiln"));
     std::fs::write(&src, source).expect("write program source");
     let out = dir.join(format!("{name}.exe"));
-    let result = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let result = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "--os", "windows", "-o"])
         .arg(&out)
         .current_dir(cwd)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(
         result.status.success(),
-        "openepl build --os windows failed for {name}:\n{}",
+        "kiln build --os windows failed for {name}:\n{}",
         String::from_utf8_lossy(&result.stderr)
     );
     out
@@ -358,7 +358,7 @@ sub main
   call say("type.memdc", GetObjectType(dc))
 
   var lb: LOGBRUSH
-  lb.style = BS_SOLID
+  lb.style = KN_SOLID
   lb.color = 65280
   call say("type.brushindirect", GetObjectType(CreateBrushIndirect(lb)))
 
@@ -653,7 +653,7 @@ const REST_EXPECTED: &[&str] = &[
 
 /// The C file mingw checks: `<windows.h>` on the target these declarations are
 /// for, asserting every size, every offset and every constant the kit states.
-const LAYOUT_CHECK: &str = r#"/* Cross-check every struct kits/win/gdi32.oed declares against the real
+const LAYOUT_CHECK: &str = r#"/* Cross-check every struct kits/win/gdi32.kdecl declares against the real
  * <windows.h> on the same target the kit is built for. sizeof alone would miss
  * a transposed field, so every member's offset is asserted too. */
 #include <windows.h>
@@ -754,8 +754,8 @@ _Static_assert(CAPTUREBLT == 1073741824, "CAPTUREBLT");
 _Static_assert(TRANSPARENT == 1 && OPAQUE == 2, "bk modes");
 _Static_assert(PS_SOLID == 0 && PS_DASH == 1 && PS_DOT == 2 && PS_DASHDOT == 3
     && PS_DASHDOTDOT == 4 && PS_NULL == 5 && PS_INSIDEFRAME == 6, "pen styles");
-_Static_assert(BS_SOLID == 0 && BS_NULL == 1 && BS_HOLLOW == 1 && BS_HATCHED == 2
-    && BS_PATTERN == 3 && BS_DIBPATTERN == 5, "brush styles");
+_Static_assert(KN_SOLID == 0 && KN_NULL == 1 && KN_HOLLOW == 1 && KN_HATCHED == 2
+    && KN_PATTERN == 3 && KN_DIBPATTERN == 5, "brush styles");
 _Static_assert(HS_HORIZONTAL == 0 && HS_VERTICAL == 1 && HS_FDIAGONAL == 2
     && HS_BDIAGONAL == 3 && HS_CROSS == 4 && HS_DIAGCROSS == 5, "hatch styles");
 _Static_assert(WHITE_BRUSH == 0 && LTGRAY_BRUSH == 1 && GRAY_BRUSH == 2
@@ -809,7 +809,7 @@ _Static_assert(ETO_OPAQUE == 2 && ETO_CLIPPED == 4, "ExtTextOut flags");
 int main(void) { return 0; }
 "#;
 
-/// Nothing in OpenEPL can tell you whether `record BITMAP is c` has its fields
+/// Nothing in Kiln can tell you whether `record BITMAP is c` has its fields
 /// in the order the real `BITMAP` does — two swapped `int`s give the same size.
 /// The C compiler can, so it is asked.
 #[test]
@@ -827,7 +827,7 @@ fn record_layouts_match_the_real_windows_headers() {
         .expect("run the mingw cross compiler");
     assert!(
         out.status.success(),
-        "kits/win/gdi32.oed disagrees with <windows.h>:\n{}",
+        "kits/win/gdi32.kdecl disagrees with <windows.h>:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
 }
@@ -865,20 +865,20 @@ fn gdi32_exercises_the_rest_of_the_bundle() {
     assert_eq!(lines, REST_EXPECTED, "the second program said something else");
 }
 
-/// `openepl commands --use win` is what Studio's completion and the generated
+/// `kiln commands --use win` is what Studio's completion and the generated
 /// reference read, so the bundle has to be listed and not merely usable. This
 /// one needs no cross compiler: listing a kit works on any machine.
 #[test]
 fn commands_lists_the_gdi32_bundle() {
     let cwd = kit_cwd("list");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["commands", "--use", "win"])
         .current_dir(&cwd)
         .output()
-        .expect("run openepl commands");
+        .expect("run kiln commands");
     assert!(
         out.status.success(),
-        "openepl commands --use win failed:\n{}",
+        "kiln commands --use win failed:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
     let listed = String::from_utf8_lossy(&out.stdout);
@@ -897,11 +897,11 @@ fn commands_lists_the_gdi32_bundle() {
         "const: PS_SOLID",
         "const: WHITE_BRUSH",
         "const: DC_BRUSH",
-        "const: BS_SOLID",
+        "const: KN_SOLID",
     ] {
         assert!(
             listed.lines().any(|l| l.starts_with(want)),
-            "`openepl commands --use win` does not list `{want}`"
+            "`kiln commands --use win` does not list `{want}`"
         );
     }
 }

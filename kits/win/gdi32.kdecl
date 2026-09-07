@@ -1,0 +1,565 @@
+# win, the GDI32 half — Windows' graphics device interface: device contexts,
+# pens, brushes, fonts, bitmaps, regions and everything that draws through them.
+# Every `dll` here is an export of `gdi32.dll`, except the small block at the
+# bottom, which is the device-context and paint family that Windows happens to
+# export from `user32.dll` even though a GDI program cannot draw without it.
+#
+# ANSI entry points throughout: a call that takes a string is bound under its
+# `...A` name, which is both what a program writes and the symbol gdi32 exports,
+# so an Kiln `text` crosses as the C `char *` it already is. The `...W` wide
+# entries take UTF-16 and are not bound here.
+#
+# COLORREF has no macro in Kiln, so compute one: a colour is
+#     colour = red + green * 256 + blue * 65536
+# with each channel 0..255 — that is exactly what C's `RGB(r,g,b)` expands to.
+# Unpack the other way with `red = colour % 256`, `green = (colour / 256) % 256`,
+# `blue = (colour / 65536) % 256`. Constants are written in decimal here because they
+# predate the lexer's hex literals; `0x00FF_FF00` compiles now, and the hex a
+# header would show is in the comment either way.
+#
+# BITMAPFILEHEADER is deliberately absent. It is `#pragma pack(2)` — 14 bytes,
+# not the 16 that natural alignment gives — so no c-record can have its layout.
+# Build one with `mem_alloc(14)`, `ptr_write_int` for its two DWORDs and a pair
+# of `ptr_write_byte` for each WORD — there is no 16-bit `ptr_write`.
+
+# ---------------------------------------------------------------------------
+# Structures
+# ---------------------------------------------------------------------------
+
+# The two coordinate primitives every GDI call is written in terms of.
+record POINT is c
+  x: int
+  y: int
+end
+
+record RECT is c
+  left: int
+  top: int
+  right: int
+  bottom: int
+end
+
+record SIZE is c
+  cx: int
+  cy: int
+end
+
+# What BeginPaint fills in: the DC to draw through and the rectangle Windows
+# wants repainted. `rgbReserved` is a private 32-byte scratch area the system
+# owns — it is here so the struct is the 72 bytes Windows expects.
+record PAINTSTRUCT is c
+  hdc: ptr
+  erase: bool
+  paint: RECT
+  restore: bool
+  inc_update: bool
+  reserved: byte[32]
+end
+
+# GetObjectA on an HBITMAP fills this in. `planes` and `bits_pixel` are WORDs.
+record BITMAP is c
+  kind: int
+  width: int
+  height: int
+  width_bytes: int
+  planes: word
+  bits_pixel: word
+  bits: ptr
+end
+
+# CreateFontIndirectA's description of a font. `face_name` is CHAR[32], written
+# a byte at a time or filled with `mem_copy(address of lf.face_name,
+# ptr_of_text("Segoe UI"), 8)` — the array is not NUL-filled for you beyond the
+# zero a fresh c-record starts as.
+record LOGFONTA is c
+  height: int
+  width: int
+  escapement: int
+  orientation: int
+  weight: int
+  italic: byte
+  underline: byte
+  strike_out: byte
+  char_set: byte
+  out_precision: byte
+  clip_precision: byte
+  quality: byte
+  pitch_and_family: byte
+  face_name: byte[32]
+end
+
+# GetTextMetricsA's answer: how tall a line is, how wide a character is, and
+# the rest of what laying out text needs.
+record TEXTMETRICA is c
+  height: int
+  ascent: int
+  descent: int
+  internal_leading: int
+  external_leading: int
+  ave_char_width: int
+  max_char_width: int
+  weight: int
+  overhang: int
+  digitized_aspect_x: int
+  digitized_aspect_y: int
+  first_char: byte
+  last_char: byte
+  default_char: byte
+  break_char: byte
+  italic: byte
+  underlined: byte
+  struck_out: byte
+  pitch_and_family: byte
+  char_set: byte
+end
+
+# The DIB description a device-independent bitmap is created and blitted from.
+record BITMAPINFOHEADER is c
+  size: int
+  width: int
+  height: int
+  planes: word
+  bit_count: word
+  compression: int
+  size_image: int
+  x_pels_per_meter: int
+  y_pels_per_meter: int
+  clr_used: int
+  clr_important: int
+end
+
+record RGBQUAD is c
+  blue: byte
+  green: byte
+  red: byte
+  reserved: byte
+end
+
+# C declares `bmiColors[1]` and a palettised bitmap over-allocates past the end
+# of the struct. This is that struct exactly; for more than one palette entry,
+# `mem_alloc(size of BITMAPINFO + extra * 4)` and write through the pointer.
+record BITMAPINFO is c
+  header: BITMAPINFOHEADER
+  colors: RGBQUAD[1]
+end
+
+# CreateBrushIndirect / GetObjectA on an HBRUSH. `hatch` is a ULONG_PTR: an
+# HS_* number for a hatch brush, an HBITMAP for a pattern brush — pointer-wide
+# either way, so it is a `ptr` and a hatch index goes in with `ptr_from_int`.
+record LOGBRUSH is c
+  style: int
+  color: int
+  hatch: ptr
+end
+
+# CreatePenIndirect / GetObjectA on an HPEN. `width` is a POINT because the
+# original API carried an x and a y width; only x is used.
+record LOGPEN is c
+  style: int
+  width: POINT
+  color: int
+end
+
+# The 2-D affine transform SetWorldTransform applies, in single-precision
+# floats — read and written as doubles, stored as the 4-byte floats C declares.
+record XFORM is c
+  m11: float
+  m12: float
+  m21: float
+  m22: float
+  dx: float
+  dy: float
+end
+
+# StartDocA's description of a print job.
+record DOCINFOA is c
+  cb_size: int
+  doc_name: text
+  output: text
+  data_type: text
+  kind: int
+end
+
+# ---------------------------------------------------------------------------
+# Device contexts and GDI objects
+# ---------------------------------------------------------------------------
+
+dll CreateCompatibleDC(hdc: ptr): ptr from "gdi32" system
+dll CreateDCA(driver: text, device: text, port: text, mode: ptr): ptr from "gdi32" system
+dll DeleteDC(hdc: ptr): int from "gdi32" system
+dll SaveDC(hdc: ptr): int from "gdi32" system
+dll RestoreDC(hdc: ptr, saved: int): int from "gdi32" system
+dll GetDeviceCaps(hdc: ptr, index: int): int from "gdi32" system
+dll GdiFlush(): int from "gdi32" system
+
+dll SelectObject(hdc: ptr, obj: ptr): ptr from "gdi32" system
+dll DeleteObject(obj: ptr): int from "gdi32" system
+dll GetStockObject(index: int): ptr from "gdi32" system
+# `out` receives a BITMAP, a LOGPEN, a LOGBRUSH or a LOGFONTA depending on what
+# `obj` is, so it is a plain `ptr` — pass `address of` the record that fits.
+dll GetObjectA(obj: ptr, bytes: int, out: ptr): int from "gdi32" system
+dll GetObjectType(obj: ptr): int from "gdi32" system
+
+# ---------------------------------------------------------------------------
+# Brushes, pens and fonts
+# ---------------------------------------------------------------------------
+
+dll CreateSolidBrush(color: int): ptr from "gdi32" system
+dll CreateHatchBrush(hatch: int, color: int): ptr from "gdi32" system
+dll CreatePatternBrush(bitmap: ptr): ptr from "gdi32" system
+dll CreateBrushIndirect(spec: LOGBRUSH): ptr from "gdi32" system
+dll CreatePen(style: int, width: int, color: int): ptr from "gdi32" system
+dll CreatePenIndirect(spec: LOGPEN): ptr from "gdi32" system
+dll SetDCBrushColor(hdc: ptr, color: int): int from "gdi32" system
+dll SetDCPenColor(hdc: ptr, color: int): int from "gdi32" system
+
+dll CreateFontA(height: int, width: int, escapement: int, orientation: int, weight: int, italic: int, underline: int, strike_out: int, char_set: int, out_precision: int, clip_precision: int, quality: int, pitch_and_family: int, face: text): ptr from "gdi32" system
+dll CreateFontIndirectA(spec: LOGFONTA): ptr from "gdi32" system
+
+# ---------------------------------------------------------------------------
+# Bitmaps and blitting
+# ---------------------------------------------------------------------------
+
+dll CreateCompatibleBitmap(hdc: ptr, width: int, height: int): ptr from "gdi32" system
+dll CreateBitmap(width: int, height: int, planes: int, bits_pixel: int, bits: ptr): ptr from "gdi32" system
+# `bits` is an out-parameter: a `void **` the call writes the pixel address to.
+dll CreateDIBSection(hdc: ptr, info: ptr, usage: int, bits: ptr, section: ptr, offset: int): ptr from "gdi32" system
+dll SetDIBits(hdc: ptr, bitmap: ptr, start: int, lines: int, bits: ptr, info: ptr, usage: int): int from "gdi32" system
+dll GetDIBits(hdc: ptr, bitmap: ptr, start: int, lines: int, bits: ptr, info: ptr, usage: int): int from "gdi32" system
+dll StretchDIBits(hdc: ptr, xdest: int, ydest: int, wdest: int, hdest: int, xsrc: int, ysrc: int, wsrc: int, hsrc: int, bits: ptr, info: ptr, usage: int, rop: int): int from "gdi32" system
+
+dll BitBlt(hdc: ptr, x: int, y: int, width: int, height: int, src: ptr, xsrc: int, ysrc: int, rop: int): int from "gdi32" system
+dll StretchBlt(hdc: ptr, x: int, y: int, width: int, height: int, src: ptr, xsrc: int, ysrc: int, wsrc: int, hsrc: int, rop: int): int from "gdi32" system
+dll PatBlt(hdc: ptr, x: int, y: int, width: int, height: int, rop: int): int from "gdi32" system
+dll SetStretchBltMode(hdc: ptr, mode: int): int from "gdi32" system
+dll GetStretchBltMode(hdc: ptr): int from "gdi32" system
+
+# ---------------------------------------------------------------------------
+# Drawing
+# ---------------------------------------------------------------------------
+
+# `prev` may be null when the previous position is not wanted, so it is a `ptr`
+# rather than a POINT parameter — `ptr_null()` or `address of` a POINT.
+dll MoveToEx(hdc: ptr, x: int, y: int, prev: ptr): int from "gdi32" system
+dll LineTo(hdc: ptr, x: int, y: int): int from "gdi32" system
+dll GetCurrentPositionEx(hdc: ptr, at: POINT): int from "gdi32" system
+
+dll Rectangle(hdc: ptr, left: int, top: int, right: int, bottom: int): int from "gdi32" system
+dll RoundRect(hdc: ptr, left: int, top: int, right: int, bottom: int, width: int, height: int): int from "gdi32" system
+dll Ellipse(hdc: ptr, left: int, top: int, right: int, bottom: int): int from "gdi32" system
+dll Arc(hdc: ptr, left: int, top: int, right: int, bottom: int, x1: int, y1: int, x2: int, y2: int): int from "gdi32" system
+dll Chord(hdc: ptr, left: int, top: int, right: int, bottom: int, x1: int, y1: int, x2: int, y2: int): int from "gdi32" system
+dll Pie(hdc: ptr, left: int, top: int, right: int, bottom: int, x1: int, y1: int, x2: int, y2: int): int from "gdi32" system
+# An array of POINTs, so a `ptr` to bytes the program laid out — a c-record
+# parameter would be one struct, not a run of them.
+dll Polygon(hdc: ptr, points: ptr, count: int): int from "gdi32" system
+dll Polyline(hdc: ptr, points: ptr, count: int): int from "gdi32" system
+dll PolyBezier(hdc: ptr, points: ptr, count: int): int from "gdi32" system
+
+dll SetPixel(hdc: ptr, x: int, y: int, color: int): int from "gdi32" system
+dll GetPixel(hdc: ptr, x: int, y: int): int from "gdi32" system
+dll SetPolyFillMode(hdc: ptr, mode: int): int from "gdi32" system
+dll SetROP2(hdc: ptr, mode: int): int from "gdi32" system
+dll GetROP2(hdc: ptr): int from "gdi32" system
+
+# ---------------------------------------------------------------------------
+# Text
+# ---------------------------------------------------------------------------
+
+dll TextOutA(hdc: ptr, x: int, y: int, text: text, count: int): int from "gdi32" system
+dll ExtTextOutA(hdc: ptr, x: int, y: int, options: int, box: ptr, text: text, count: int, spacing: ptr): int from "gdi32" system
+dll GetTextExtentPoint32A(hdc: ptr, text: text, count: int, extent: SIZE): int from "gdi32" system
+dll GetTextMetricsA(hdc: ptr, metrics: TEXTMETRICA): int from "gdi32" system
+
+dll SetTextColor(hdc: ptr, color: int): int from "gdi32" system
+dll GetTextColor(hdc: ptr): int from "gdi32" system
+dll SetBkColor(hdc: ptr, color: int): int from "gdi32" system
+dll GetBkColor(hdc: ptr): int from "gdi32" system
+dll SetBkMode(hdc: ptr, mode: int): int from "gdi32" system
+dll GetBkMode(hdc: ptr): int from "gdi32" system
+dll SetTextAlign(hdc: ptr, align: int): int from "gdi32" system
+dll GetTextAlign(hdc: ptr): int from "gdi32" system
+
+# ---------------------------------------------------------------------------
+# Regions and clipping
+# ---------------------------------------------------------------------------
+
+dll CreateRectRgn(left: int, top: int, right: int, bottom: int): ptr from "gdi32" system
+dll CreateRectRgnIndirect(box: RECT): ptr from "gdi32" system
+dll CreateEllipticRgn(left: int, top: int, right: int, bottom: int): ptr from "gdi32" system
+dll CreateRoundRectRgn(left: int, top: int, right: int, bottom: int, width: int, height: int): ptr from "gdi32" system
+dll CombineRgn(dest: ptr, first: ptr, second: ptr, mode: int): int from "gdi32" system
+dll PtInRegion(region: ptr, x: int, y: int): int from "gdi32" system
+dll FillRgn(hdc: ptr, region: ptr, brush: ptr): int from "gdi32" system
+dll FrameRgn(hdc: ptr, region: ptr, brush: ptr, width: int, height: int): int from "gdi32" system
+dll SelectClipRgn(hdc: ptr, region: ptr): int from "gdi32" system
+dll IntersectClipRect(hdc: ptr, left: int, top: int, right: int, bottom: int): int from "gdi32" system
+dll ExcludeClipRect(hdc: ptr, left: int, top: int, right: int, bottom: int): int from "gdi32" system
+dll GetClipBox(hdc: ptr, box: RECT): int from "gdi32" system
+
+# ---------------------------------------------------------------------------
+# Coordinate spaces
+# ---------------------------------------------------------------------------
+
+# The `prev` out-parameters are optional, so `ptr` — pass `ptr_null()` when the
+# old origin or extent is not wanted.
+dll SetMapMode(hdc: ptr, mode: int): int from "gdi32" system
+dll GetMapMode(hdc: ptr): int from "gdi32" system
+dll SetWindowOrgEx(hdc: ptr, x: int, y: int, prev: ptr): int from "gdi32" system
+dll SetViewportOrgEx(hdc: ptr, x: int, y: int, prev: ptr): int from "gdi32" system
+dll SetWindowExtEx(hdc: ptr, cx: int, cy: int, prev: ptr): int from "gdi32" system
+dll SetViewportExtEx(hdc: ptr, cx: int, cy: int, prev: ptr): int from "gdi32" system
+dll DPtoLP(hdc: ptr, points: ptr, count: int): int from "gdi32" system
+dll LPtoDP(hdc: ptr, points: ptr, count: int): int from "gdi32" system
+dll SetGraphicsMode(hdc: ptr, mode: int): int from "gdi32" system
+dll SetWorldTransform(hdc: ptr, transform: XFORM): int from "gdi32" system
+dll GetWorldTransform(hdc: ptr, transform: XFORM): int from "gdi32" system
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+
+dll BeginPath(hdc: ptr): int from "gdi32" system
+dll EndPath(hdc: ptr): int from "gdi32" system
+dll CloseFigure(hdc: ptr): int from "gdi32" system
+dll StrokePath(hdc: ptr): int from "gdi32" system
+dll FillPath(hdc: ptr): int from "gdi32" system
+dll StrokeAndFillPath(hdc: ptr): int from "gdi32" system
+
+# ---------------------------------------------------------------------------
+# Printing — the same DC calls, aimed at a printer
+# ---------------------------------------------------------------------------
+
+dll StartDocA(hdc: ptr, info: DOCINFOA): int from "gdi32" system
+dll StartPage(hdc: ptr): int from "gdi32" system
+dll EndPage(hdc: ptr): int from "gdi32" system
+dll EndDoc(hdc: ptr): int from "gdi32" system
+dll AbortDoc(hdc: ptr): int from "gdi32" system
+
+# ---------------------------------------------------------------------------
+# The DC and paint family, which lives in user32.dll
+#
+# These six are not gdi32 exports, but no GDI program can reach a screen
+# without them: they are what hands out the device context everything above
+# draws through. If user32.kdecl declares any of them, one copy has to go — a
+# name is unique across the whole kit — and this block is the one to cut.
+# ---------------------------------------------------------------------------
+
+dll GetDC(hwnd: ptr): ptr from "user32" system
+dll GetWindowDC(hwnd: ptr): ptr from "user32" system
+dll ReleaseDC(hwnd: ptr, hdc: ptr): int from "user32" system
+dll BeginPaint(hwnd: ptr, paint: PAINTSTRUCT): ptr from "user32" system
+dll EndPaint(hwnd: ptr, paint: PAINTSTRUCT): int from "user32" system
+dll FillRect(hdc: ptr, box: RECT, brush: ptr): int from "user32" system
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+# Raster operations for BitBlt, StretchBlt and PatBlt.
+const SRCCOPY = 13369376        # 0x00CC0020
+const SRCPAINT = 15597702       # 0x00EE0086
+const SRCAND = 8913094          # 0x008800C6
+const SRCINVERT = 6684742       # 0x00660046
+const SRCERASE = 4457256        # 0x00440328
+const NOTSRCCOPY = 3342344      # 0x00330008
+const NOTSRCERASE = 1114278     # 0x001100A6
+const MERGECOPY = 12583114      # 0x00C000CA
+const MERGEPAINT = 12255782     # 0x00BB0226
+const PATCOPY = 15728673        # 0x00F00021
+const PATPAINT = 16452105       # 0x00FB0A09
+const PATINVERT = 5898313       # 0x005A0049
+const DSTINVERT = 5570569       # 0x00550009
+const BLACKNESS = 66            # 0x00000042
+const WHITENESS = 16711778      # 0x00FF0062
+const CAPTUREBLT = 1073741824   # 0x40000000, OR'd into a BitBlt rop
+
+# Background mode, for SetBkMode.
+const TRANSPARENT = 1
+const OPAQUE = 2
+
+# Pen styles, for CreatePen and LOGPEN.
+const PS_SOLID = 0
+const PS_DASH = 1
+const PS_DOT = 2
+const PS_DASHDOT = 3
+const PS_DASHDOTDOT = 4
+const PS_NULL = 5
+const PS_INSIDEFRAME = 6
+
+# Brush styles, for LOGBRUSH.
+const KN_SOLID = 0
+const KN_NULL = 1
+const KN_HOLLOW = 1
+const KN_HATCHED = 2
+const KN_PATTERN = 3
+const KN_DIBPATTERN = 5
+
+# Hatch patterns, for CreateHatchBrush.
+const HS_HORIZONTAL = 0
+const HS_VERTICAL = 1
+const HS_FDIAGONAL = 2
+const HS_BDIAGONAL = 3
+const HS_CROSS = 4
+const HS_DIAGCROSS = 5
+
+# Stock objects, for GetStockObject. These are never deleted, so DeleteObject
+# on one is a no-op rather than a leak. DC_BRUSH and DC_PEN take their colour
+# from SetDCBrushColor and SetDCPenColor.
+const WHITE_BRUSH = 0
+const LTGRAY_BRUSH = 1
+const GRAY_BRUSH = 2
+const DKGRAY_BRUSH = 3
+const BLACK_BRUSH = 4
+const NULL_BRUSH = 5
+const HOLLOW_BRUSH = 5
+const WHITE_PEN = 6
+const BLACK_PEN = 7
+const NULL_PEN = 8
+const OEM_FIXED_FONT = 10
+const ANSI_FIXED_FONT = 11
+const ANSI_VAR_FONT = 12
+const SYSTEM_FONT = 13
+const DEVICE_DEFAULT_FONT = 14
+const DEFAULT_PALETTE = 15
+const SYSTEM_FIXED_FONT = 16
+const DEFAULT_GUI_FONT = 17
+const DC_BRUSH = 18
+const DC_PEN = 19
+
+# Text alignment, for SetTextAlign — one horizontal flag plus one vertical.
+const TA_LEFT = 0
+const TA_RIGHT = 2
+const TA_CENTER = 6
+const TA_TOP = 0
+const TA_BOTTOM = 8
+const TA_BASELINE = 24
+const TA_NOUPDATECP = 0
+const TA_UPDATECP = 1
+
+# ExtTextOutA options.
+const ETO_OPAQUE = 2
+const ETO_CLIPPED = 4
+
+# Mapping modes, for SetMapMode.
+const MM_TEXT = 1
+const MM_LOMETRIC = 2
+const MM_HIMETRIC = 3
+const MM_LOENGLISH = 4
+const MM_HIENGLISH = 5
+const MM_TWIPS = 6
+const MM_ISOTROPIC = 7
+const MM_ANISOTROPIC = 8
+
+# Graphics mode, for SetGraphicsMode. A world transform needs GM_ADVANCED.
+const GM_COMPATIBLE = 1
+const GM_ADVANCED = 2
+
+# GetDeviceCaps indices.
+const DRIVERVERSION = 0
+const TECHNOLOGY = 2
+const HORZSIZE = 4
+const VERTSIZE = 6
+const HORZRES = 8
+const VERTRES = 10
+const BITSPIXEL = 12
+const PLANES = 14
+const NUMCOLORS = 24
+const LOGPIXELSX = 88
+const LOGPIXELSY = 90
+const COLORRES = 108
+const VREFRESH = 116
+const DESKTOPVERTRES = 117
+const DESKTOPHORZRES = 118
+
+# Binary raster operations, for SetROP2.
+const R2_BLACK = 1
+const R2_NOT = 6
+const R2_XORPEN = 7
+const R2_COPYPEN = 13
+const R2_WHITE = 16
+
+# Polygon fill, for SetPolyFillMode.
+const ALTERNATE = 1
+const WINDING = 2
+
+# Stretch modes, for SetStretchBltMode. The STRETCH_* names are the same
+# numbers under the spelling the newer documentation uses.
+const BLACKONWHITE = 1
+const WHITEONBLACK = 2
+const COLORONCOLOR = 3
+const HALFTONE = 4
+const STRETCH_ANDSCANS = 1
+const STRETCH_ORSCANS = 2
+const STRETCH_DELETESCANS = 3
+const STRETCH_HALFTONE = 4
+
+# DIB colour-table usage and compression.
+const DIB_RGB_COLORS = 0
+const DIB_PAL_COLORS = 1
+const BI_RGB = 0
+const BI_RLE8 = 1
+const BI_RLE4 = 2
+const BI_BITFIELDS = 3
+
+# Region combination for CombineRgn, and the kind of region a region call
+# answers with. Windows also defines ERROR as 0 here; it is too general a name
+# to export, so compare a region result against 0 instead.
+const RGN_AND = 1
+const RGN_OR = 2
+const RGN_XOR = 3
+const RGN_DIFF = 4
+const RGN_COPY = 5
+const NULLREGION = 1
+const SIMPLEREGION = 2
+const COMPLEXREGION = 3
+
+# Font weights, for CreateFontA and LOGFONTA.
+const FW_DONTCARE = 0
+const FW_THIN = 100
+const FW_NORMAL = 400
+const FW_BOLD = 700
+const FW_HEAVY = 900
+
+# Character sets, output and clipping precision, quality.
+const ANSI_CHARSET = 0
+const DEFAULT_CHARSET = 1
+const OEM_CHARSET = 255
+const OUT_DEFAULT_PRECIS = 0
+const OUT_TT_PRECIS = 4
+const CLIP_DEFAULT_PRECIS = 0
+const DEFAULT_QUALITY = 0
+const DRAFT_QUALITY = 1
+const PROOF_QUALITY = 2
+const NONANTIALIASED_QUALITY = 3
+const ANTIALIASED_QUALITY = 4
+const CLEARTYPE_QUALITY = 5
+
+# Pitch and family, OR'd together into one byte.
+const DEFAULT_PITCH = 0
+const FIXED_PITCH = 1
+const VARIABLE_PITCH = 2
+const FF_DONTCARE = 0
+const FF_ROMAN = 16
+const FF_SWISS = 32
+const FF_MODERN = 48
+const FF_SCRIPT = 64
+const FF_DECORATIVE = 80
+
+# The size of LOGFONTA's face-name array, so a program can bound its own copy.
+const LF_FACESIZE = 32
+
+# What GetObjectType answers.
+const OBJ_PEN = 1
+const OBJ_BRUSH = 2
+const OBJ_DC = 3
+const OBJ_METADC = 4
+const OBJ_PAL = 5
+const OBJ_FONT = 6
+const OBJ_BITMAP = 7
+const OBJ_REGION = 8
+const OBJ_MEMDC = 10
+
+# What a colour call answers when it fails. C spells it 0xFFFFFFFF; a COLORREF
+# crosses as a 32-bit int, so the same bits read as -1.
+const CLR_INVALID = -1

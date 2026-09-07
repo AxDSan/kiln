@@ -1,4 +1,4 @@
-//! OpenEPL Studio cross-built for Windows: `designer/build-windows.sh`
+//! Kiln Studio cross-built for Windows: `designer/build-windows.sh`
 //! produces a PE32+ image for the GUI subsystem with the DLLs it imports
 //! beside it, and — where wine is installed — that image gets through
 //! Windows' loader and as far as this machine's display lets it, which with
@@ -62,7 +62,7 @@ fn windows_ui_present() -> bool {
 }
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_studio_windows_{tag}_test"));
+    let dir = std::env::temp_dir().join(format!("kiln_studio_windows_{tag}_test"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -205,8 +205,8 @@ fn studio_cross_builds_to_a_gui_pe_with_its_dlls_and_loads_under_wine() {
         .status()
         .expect("run designer/build-windows.sh");
     assert!(status.success(), "designer/build-windows.sh failed");
-    let image = dir.join("openepl-studio.exe");
-    assert!(image.is_file(), "no openepl-studio.exe at {}", image.display());
+    let image = dir.join("kiln-studio.exe");
+    assert!(image.is_file(), "no kiln-studio.exe at {}", image.display());
 
     assert_eq!(pe_subsystem(&image), 2, "Studio must link for the GUI subsystem");
     let dlls = dlls_beside(&image);
@@ -217,8 +217,8 @@ fn studio_cross_builds_to_a_gui_pe_with_its_dlls_and_loads_under_wine() {
     // A scripted session on a copy of an example, as the Linux Studio tests
     // run one; the recent list and the cache go to the scratch directory,
     // never to the person's %APPDATA%.
-    let form = dir.join("form.oir");
-    std::fs::copy(repo().join("examples/form.oir"), &form).unwrap();
+    let form = dir.join("form.kiln");
+    std::fs::copy(repo().join("examples/form.kiln"), &form).unwrap();
     let dump = dir.join("studio.ppm");
     let xdg = dir.join("xdg");
     let Some(out) = wine(
@@ -226,8 +226,8 @@ fn studio_cross_builds_to_a_gui_pe_with_its_dlls_and_loads_under_wine() {
         &[form.to_str().unwrap()],
         &dir,
         &[
-            ("OPENEPL_DESIGNER_SCRIPT", "select:ok_button"),
-            ("OPENEPL_DESIGNER_DUMP", dump.to_str().unwrap()),
+            ("KILN_DESIGNER_SCRIPT", "select:ok_button"),
+            ("KILN_DESIGNER_DUMP", dump.to_str().unwrap()),
             ("XDG_DATA_HOME", xdg.to_str().unwrap()),
             ("XDG_CACHE_HOME", xdg.to_str().unwrap()),
         ],

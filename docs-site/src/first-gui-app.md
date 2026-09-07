@@ -3,8 +3,8 @@
 ## Create it
 
 ```sh
-openepl new gui-app my-app
-bin/openepl-studio my-app/main.oir
+kiln new gui-app my-app
+bin/kiln-studio my-app/main.kiln
 ```
 
 Or start Studio with no arguments and pick **GUI Application** from the
@@ -28,7 +28,7 @@ that could drift from your source.
 ## Wire the button
 
 Select the button, switch the inspector to **Events**, and put a subroutine
-name against `click`. If the subroutine does not exist yet, OpenEPL writes an
+name against `click`. If the subroutine does not exist yet, Kiln writes an
 empty one for you.
 
 Then open the **Code** tab and fill it in:

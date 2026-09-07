@@ -9,7 +9,7 @@ what their events hand a handler.
 ## Visual and non-visual
 
 A component is one of two kinds, and the toolchain tells you which:
-`openepl commands` prints `kind: button visual` and `kind: timer nonvisual`.
+`kiln commands` prints `kind: button visual` and `kind: timer nonvisual`.
 
 A **visual** component draws a rectangle, so it lives inside a form and has
 `left`, `top`, `width` and `height`. A **non-visual** one has nothing to draw,
@@ -119,7 +119,7 @@ event `tick` hands a handler (int), but `on_tick` takes (text) — take exactly
 those, or none: `sub on_tick(n: int)`
 ```
 
-The event parameters are not in `openepl commands` output yet, so the
+The event parameters are not in `kiln commands` output yet, so the
 generated reference lists an event's name without what it hands over; the
 table above is kept by hand against `runtime/core_libinfo.c` and the
 libraries' `_libinfo.c` files.

@@ -2,7 +2,7 @@
  *
  * Two sources, because neither is complete on its own:
  *
- *   `openepl kits` / `openepl commands --use <kit>` name every kit installed,
+ *   `kiln kits` / `kiln commands --use <kit>` name every kit installed,
  *   the section it files under, and the components it declares — including
  *   kits the IDE has never heard of, which is the whole promise of the kit
  *   system: a kit dropped into `kits/` appears in Studio with no IDE change.
@@ -21,8 +21,8 @@
  * a visual component in the tray is a nuisance, and a non-visual one dropped
  * into a form is source the validator rejects.
  */
-#ifndef OPENEPL_DESIGNER_CATALOG_H
-#define OPENEPL_DESIGNER_CATALOG_H
+#ifndef KILN_DESIGNER_CATALOG_H
+#define KILN_DESIGNER_CATALOG_H
 
 #include <cstdio>
 #include <cstring>
@@ -33,11 +33,11 @@
 #include "descriptors.h"
 #include "portable.h"
 
-namespace openepl::designer {
+namespace kiln::designer {
 
 struct CatalogProp {
     std::string name;
-    std::string type;            // as `openepl commands` spells it
+    std::string type;            // as `kiln commands` spells it
     std::string editor;          // "", "color", "file", "font", "multiline"
     std::string default_value;
     bool has_default = false;
@@ -97,12 +97,12 @@ struct Catalog {
     }
 };
 
-/// The OpenEPL spelling of a slot tag, for what the linked table declares.
+/// The Kiln spelling of a slot tag, for what the linked table declares.
 inline const char* tag_name(int tag) {
-    return tag == OE_SDT_INT      ? "int"
-           : tag == OE_SDT_INT64  ? "int64"
-           : tag == OE_SDT_DOUBLE ? "double"
-           : tag == OE_SDT_BOOL   ? "bool"
+    return tag == KN_SDT_INT      ? "int"
+           : tag == KN_SDT_INT64  ? "int64"
+           : tag == KN_SDT_DOUBLE ? "double"
+           : tag == KN_SDT_BOOL   ? "bool"
                                   : "text";
 }
 
@@ -111,7 +111,7 @@ namespace catalog_detail {
 inline std::vector<std::string> run(const std::string& cmd) {
     std::vector<std::string> out;
     std::string text;
-    if (openepl::sys::capture_output(cmd, false, text) == -1 && text.empty()) return out;
+    if (kiln::sys::capture_output(cmd, false, text) == -1 && text.empty()) return out;
     std::istringstream lines(text);
     std::string line;
     while (std::getline(lines, line)) {
@@ -137,7 +137,7 @@ inline std::vector<std::string> words(const std::string& s) {
     return out;
 }
 
-/// One kit, as `openepl kits` describes it. Emission order IS resolution
+/// One kit, as `kiln kits` describes it. Emission order IS resolution
 /// order, so the vector's order is the kit ordering and nothing sorts it.
 struct KitLine {
     std::string name, display, section;
@@ -171,7 +171,7 @@ inline std::vector<KitLine> read_kits(const std::string& bin) {
     return kits;
 }
 
-/// The components in one `openepl commands` listing, with their declared
+/// The components in one `kiln commands` listing, with their declared
 /// properties, editors, kind and events. Takes the lines rather than running
 /// the command so the reading can be tested against a listing no installed
 /// kit produces.
@@ -236,9 +236,9 @@ inline std::vector<CatalogComponent> read_components(const std::string& bin,
 /// default, what each event hands its handler, and — for a listing old enough
 /// to have no `kind:` line — whether the component is visual.
 inline void enrich_from_libinfo(CatalogComponent& c) {
-    const OpenEPL_ComponentDesc* desc = describe(c.type_name.c_str());
+    const Kiln_ComponentDesc* desc = describe(c.type_name.c_str());
     if (!desc) return;
-    if (!c.kind_known) c.visual = (desc->kind == OE_COMPONENT_VISUAL);
+    if (!c.kind_known) c.visual = (desc->kind == KN_COMPONENT_VISUAL);
     for (auto& p : c.props) {
         for (int i = 0; i < desc->property_count; i++) {
             if (p.name != desc->properties[i].name) continue;
@@ -264,7 +264,7 @@ inline void enrich_from_libinfo(CatalogComponent& c) {
 }  // namespace catalog_detail
 
 /// Assemble the catalogue. One subprocess per kit, once, at startup.
-inline Catalog build_catalog(const std::string& openepl_bin) {
+inline Catalog build_catalog(const std::string& kiln_bin) {
     using namespace catalog_detail;
     Catalog cat;
 
@@ -273,15 +273,15 @@ inline Catalog build_catalog(const std::string& openepl_bin) {
     // baseline that keeps them from being attributed to whichever kit was
     // asked first.
     std::vector<std::string> baseline_names;
-    for (auto& c : read_components(openepl_bin, "")) {
+    for (auto& c : read_components(kiln_bin, "")) {
         baseline_names.push_back(c.type_name);
         enrich_from_libinfo(c);
         c.section = "System";
         cat.components.push_back(c);
     }
 
-    for (const auto& kit : read_kits(openepl_bin)) {
-        for (auto& c : read_components(openepl_bin, kit.name)) {
+    for (const auto& kit : read_kits(kiln_bin)) {
+        for (auto& c : read_components(kiln_bin, kit.name)) {
             bool baseline = false;
             for (const auto& b : baseline_names) {
                 if (b == c.type_name) baseline = true;
@@ -308,18 +308,18 @@ inline Catalog build_catalog(const std::string& openepl_bin) {
     // against is added here if the CLI did not already report it.
     {
         std::string ui_section = "Common Controls";
-        for (const auto& k : read_kits(openepl_bin)) {
+        for (const auto& k : read_kits(kiln_bin)) {
             if (k.name != "ui") continue;
             ui_section = (k.section.empty() || k.section == "Libraries") ? k.display : k.section;
         }
-        const OpenEPL_LibInfo* lib = ui_library();
+        const Kiln_LibInfo* lib = ui_library();
         for (int i = 0; i < lib->component_count; i++) {
-            const OpenEPL_ComponentDesc& d = lib->components[i];
+            const Kiln_ComponentDesc& d = lib->components[i];
             if (cat.find(d.name)) continue;
             CatalogComponent c;
             c.type_name = d.name;
             c.kit = "ui";
-            c.visual = (d.kind == OE_COMPONENT_VISUAL);
+            c.visual = (d.kind == KN_COMPONENT_VISUAL);
             c.kind_known = true;
             c.section = c.visual ? ui_section : "System";
             for (int j = 0; j < d.property_count; j++) {
@@ -357,5 +357,5 @@ inline Catalog build_catalog(const std::string& openepl_bin) {
     return cat;
 }
 
-}  // namespace openepl::designer
+}  // namespace kiln::designer
 #endif

@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <mutex>
 
-namespace openepl::a11y {
+namespace kiln::a11y {
 namespace {
 std::mutex g_mutex;
 std::vector<Node> g_nodes;
@@ -76,4 +76,4 @@ void clear() {
     g_focus = 0;
 }
 
-} // namespace openepl::a11y
+} // namespace kiln::a11y

@@ -1,9 +1,9 @@
 {
-  "name": "openepl",
-  "displayName": "OpenEPL",
-  "description": "OpenEPL language support: syntax highlighting, the openepl language server (diagnostics, completion, hover, go-to-definition, references), and debugging (breakpoints, stepping, variables).",
+  "name": "kiln",
+  "displayName": "Kiln",
+  "description": "Kiln language support: syntax highlighting, the kiln language server (diagnostics, completion, hover, go-to-definition, references), and debugging (breakpoints, stepping, variables).",
   "version": "0.11.1",
-  "publisher": "openepl",
+  "publisher": "kiln",
   "license": "MIT",
   "engines": {
     "vscode": "^1.75.0"
@@ -13,51 +13,51 @@
     "Debuggers"
   ],
   "activationEvents": [
-    "onLanguage:openepl",
-    "onDebugResolve:openepl"
+    "onLanguage:kiln",
+    "onDebugResolve:kiln"
   ],
   "main": "./extension.js",
   "contributes": {
     "languages": [
       {
-        "id": "openepl",
+        "id": "kiln",
         "aliases": [
-          "OpenEPL"
+          "Kiln"
         ],
         "extensions": [
-          ".oir"
+          ".kiln"
         ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "openepl",
-        "scopeName": "source.openepl",
-        "path": "./syntaxes/openepl.tmLanguage.json"
+        "language": "kiln",
+        "scopeName": "source.kiln",
+        "path": "./syntaxes/kiln.tmLanguage.json"
       }
     ],
     "configuration": {
-      "title": "OpenEPL",
+      "title": "Kiln",
       "properties": {
-        "openepl.serverPath": {
+        "kiln.serverPath": {
           "type": "string",
-          "default": "openepl",
-          "description": "Path to the openepl executable. The extension runs `<path> lsp`."
+          "default": "kiln",
+          "description": "Path to the kiln executable. The extension runs `<path> lsp`."
         }
       }
     },
     "breakpoints": [
       {
-        "language": "openepl"
+        "language": "kiln"
       }
     ],
     "debuggers": [
       {
-        "type": "openepl",
-        "label": "OpenEPL",
+        "type": "kiln",
+        "label": "Kiln",
         "languages": [
-          "openepl"
+          "kiln"
         ],
         "configurationAttributes": {
           "launch": {
@@ -67,7 +67,7 @@
             "properties": {
               "program": {
                 "type": "string",
-                "description": "The .oir file to debug.",
+                "description": "The .kiln file to debug.",
                 "default": "${file}"
               },
               "args": {
@@ -98,7 +98,7 @@
         },
         "initialConfigurations": [
           {
-            "type": "openepl",
+            "type": "kiln",
             "request": "launch",
             "name": "Debug the current file",
             "program": "${file}",
@@ -107,10 +107,10 @@
         ],
         "configurationSnippets": [
           {
-            "label": "OpenEPL: debug a file",
-            "description": "Build an .oir file and debug it.",
+            "label": "Kiln: debug a file",
+            "description": "Build an .kiln file and debug it.",
             "body": {
-              "type": "openepl",
+              "type": "kiln",
               "request": "launch",
               "name": "${2:Debug the current file}",
               "program": "^\"\\${1:\\${file}}\"",

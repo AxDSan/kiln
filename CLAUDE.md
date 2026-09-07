@@ -1,6 +1,6 @@
-# OpenEPL — working notes for contributors
+# Kiln — working notes for contributors
 
-OpenEPL is an open implementation of Easy Programming Language (易语言, EPL): a
+Kiln is an open implementation of Easy Programming Language (易语言, EPL): a
 RAD environment where you draw a form, wire its events, and compile to a native
 binary. English-first, cross-platform, open source.
 
@@ -9,12 +9,12 @@ binary. English-first, cross-platform, open source.
 ```
 ir/         parser, type checker, validator          (Rust)
 backend/    lowering to LLVM IR                      (Rust)
-cli/        the `openepl` binary, language server    (Rust)
+cli/        the `kiln` binary, language server    (Rust)
 runtime/    the core runtime and its commands        (C)
 libs/       support libraries — `use <name>`         (C / C++)
 abi/        the C ABI shared by all of the above
-designer/   OpenEPL Studio, the IDE                  (C++ / RmlUi)
-templates/  project templates for `openepl new`
+designer/   Kiln Studio, the IDE                  (C++ / RmlUi)
+templates/  project templates for `kiln new`
 kits/       a project-tier kit (`units`), the worked example of one
 editors/    the VS Code extension
 docs-site/  the documentation site (mdBook + landing page)
@@ -36,8 +36,8 @@ tools/fetch-mbedtls.sh       # optional: https in `net`
 ## Conventions that matter
 
 - **The CLI is the only reader of a project file.** The designer and the
-  documentation call `openepl inspect`, `openepl commands` and
-  `openepl templates` rather than parsing `.oir` themselves. Two parsers would
+  documentation call `kiln inspect`, `kiln commands` and
+  `kiln templates` rather than parsing `.kiln` themselves. Two parsers would
   drift.
 - **Reference documentation is generated**, never hand-written:
   `tools/gen-docs.sh` builds it from the toolchain, and `tools/check-docs.sh`
@@ -49,10 +49,10 @@ tools/fetch-mbedtls.sh       # optional: https in `net`
   and is what the README links; `docs-site/src/editors.md` is an mdBook
   include of it. Edit the one in `docs/`.
 - **Verify UI work by rendering it.** Studio bugs pass tests and fail on screen.
-  `OPENEPL_DESIGNER_DUMP=x.ppm OPENEPL_DESIGNER_SCRIPT='view:code' ...` writes a
+  `KILN_DESIGNER_DUMP=x.ppm KILN_DESIGNER_SCRIPT='view:code' ...` writes a
   frame you can look at; the scripted verbs are in `designer/main.cpp`.
-  A headless run (those variables, or `OPENEPL_UI_EXIT_AFTER_FRAMES` /
-  `OPENEPL_UI_DUMP` for a built app) defaults to `SDL_VIDEODRIVER=offscreen`, so
+  A headless run (those variables, or `KILN_UI_EXIT_AFTER_FRAMES` /
+  `KILN_UI_DUMP` for a built app) defaults to `SDL_VIDEODRIVER=offscreen`, so
   it opens no window and steals no focus. Set `SDL_VIDEODRIVER` yourself to
   override. Never run a UI test or a scripted session without one of them.
 - **Never open a tracked example in Studio.** It saves on exit, and the change
@@ -64,6 +64,14 @@ tools/fetch-mbedtls.sh       # optional: https in `net`
 ## Adding a command
 
 Declare it in the library's `_libinfo.c` table (name, symbol, return type,
-parameter types), implement it against the slot ABI in `abi/openepl_abi.h`, and
-it appears in `openepl commands`, in the language server's completion, and in
+parameter types), implement it against the slot ABI in `abi/kiln_abi.h`, and
+it appears in `kiln commands`, in the language server's completion, and in
 the generated reference.
+
+Two more fields on that row — a one-sentence `doc` and an `example` — are
+optional and worth writing. They give the command its own entry in the
+reference, the sentence and sample the language server shows on hover, and the
+page F1 opens in Studio. `libs/hello/hello_libinfo.c` is the worked example and
+`libs/file` is the fully documented one. The example is emitted as a whole
+program and `tools/check-docs.sh` compiles it, so a wrong example fails the
+build rather than the reader.

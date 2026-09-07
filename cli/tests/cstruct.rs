@@ -2,7 +2,7 @@
 //! fixed C memory layout, so a `dll` is handed a pointer to a real C struct.
 //!
 //! Builds `examples/dll/geo.c` into a shared library, builds
-//! `examples/dll/cstruct.oir` against it, runs the two together, and proves the
+//! `examples/dll/cstruct.kiln` against it, runs the two together, and proves the
 //! whole surface — field read/write through the flat layout, `size of`,
 //! `address of` a c-record, a `dll` mutating one through its pointer, and the
 //! padding of a mixed record held to clang's own `sizeof`/`offsetof`.
@@ -28,7 +28,7 @@ fn on_path(tool: &str) -> bool {
 /// beside its own executable, so the two must share one directory, and two
 /// tests must not race on it.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_cstruct_{tag}_test"));
+    let dir = std::env::temp_dir().join(format!("kiln_cstruct_{tag}_test"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -46,25 +46,25 @@ fn build_geo_so(dir: &Path) {
     assert!(status.success(), "clang failed to build libgeo.so");
 }
 
-/// Build `examples/dll/<name>.oir` to `dir/<name>`; return the binary path.
+/// Build `examples/dll/<name>.kiln` to `dir/<name>`; return the binary path.
 fn build_oir(name: &str, dir: &Path) -> PathBuf {
     let repo = repo();
-    let src = repo.join("examples/dll").join(format!("{name}.oir"));
+    let src = repo.join("examples/dll").join(format!("{name}.kiln"));
     let out = dir.join(name);
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", out.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
-        .expect("run openepl");
-    assert!(status.success(), "openepl build {name} failed");
+        .expect("run kiln");
+    assert!(status.success(), "kiln build {name} failed");
     out
 }
 
-/// The lines every run of `cstruct.oir` must print — the same on Linux and,
-/// below, under wine. Line 4 is OpenEPL's `size of Mixed` and line 5 is clang's
+/// The lines every run of `cstruct.kiln` must print — the same on Linux and,
+/// below, under wine. Line 4 is Kiln's `size of Mixed` and line 5 is clang's
 /// `sizeof(Mixed)` returned from `geo.c`: their being equal is the layout held
 /// to the C compiler's. Lines 7 and 8 write through the struct pointer at the
-/// offset clang reports and read the field OpenEPL placed, so a wrong offset
+/// offset clang reports and read the field Kiln placed, so a wrong offset
 /// would not round-trip.
 const EXPECT: &[&str] = &[
     "13",         // p.x: move_point(+10) mutated the struct through the pointer
@@ -138,14 +138,14 @@ fn c_record_rejections_are_build_errors() {
         ),
     ];
     for (i, (src, needle)) in cases.iter().enumerate() {
-        let path = dir.join(format!("bad{i}.oir"));
+        let path = dir.join(format!("bad{i}.kiln"));
         std::fs::write(&path, src).unwrap();
-        let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+        let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
             .args(["build", path.to_str().unwrap(), "-o"])
             .arg(dir.join(format!("bad{i}")))
-            .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+            .env("KILN_RUNTIME_DIR", repo().join("runtime"))
             .output()
-            .expect("run openepl");
+            .expect("run kiln");
         assert!(
             !out.status.success(),
             "case {i} should not build:\n{src}"
@@ -187,19 +187,19 @@ fn cstruct_cross_builds_for_windows_and_runs_under_wine() {
     assert!(status.success(), "mingw failed to build geo.dll");
 
     let bin = dir.join("cstruct.exe");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
-            repo().join("examples/dll/cstruct.oir").to_str().unwrap(),
+            repo().join("examples/dll/cstruct.kiln").to_str().unwrap(),
             "--os",
             "windows",
             "-o",
         ])
         .arg(&bin)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl --os windows");
-    assert!(status.success(), "openepl build --os windows failed");
+        .expect("run kiln --os windows");
+    assert!(status.success(), "kiln build --os windows failed");
 
     if !on_path("wine") {
         eprintln!("wine is not installed; the Windows image was built but not run");

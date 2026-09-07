@@ -1,6 +1,6 @@
-//! `openepl lsp` — a Language Server Protocol server for `.oir` sources.
+//! `kiln lsp` — a Language Server Protocol server for `.kiln` sources.
 //!
-//! This is how OpenEPL gets a real editing experience without writing an editor
+//! This is how Kiln gets a real editing experience without writing an editor
 //! widget. Any LSP client (VS Code, Neovim, Helix, Zed — and, later, Studio's
 //! own code pane) speaks to this over stdio and gets live diagnostics.
 //!
@@ -57,9 +57,9 @@ use lsp_types::{
     TextDocumentSyncKind, TextEdit, Uri,
 };
 
-use openepl_ir::registry::ComponentDesc;
-use openepl_ir::validate::{param_list, validate_with, Hints};
-use openepl_ir::{parse, Registry, Signature, Span};
+use kiln_ir::registry::ComponentDesc;
+use kiln_ir::validate::{param_list, validate_with, Hints};
+use kiln_ir::{parse, Registry, Signature, Span};
 
 use crate::kit;
 use crate::libload;
@@ -69,11 +69,11 @@ use crate::lsp_index::{Index, Occurrence, SymKind};
 pub fn run() -> i32 {
     // Diagnostics and logging go to stderr: stdout is the protocol channel and
     // a stray `println!` corrupts the stream.
-    eprintln!("openepl-lsp: starting on stdio");
+    eprintln!("kiln-lsp: starting on stdio");
     match serve() {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("openepl-lsp: {e}");
+            eprintln!("kiln-lsp: {e}");
             1
         }
     }
@@ -83,7 +83,7 @@ fn serve() -> Result<(), Box<dyn Error + Sync + Send>> {
     let (connection, io_threads) = Connection::stdio();
 
     let caps = serde_json::to_value(ServerCapabilities {
-        // Full-text sync: `.oir` files are small and we re-parse from scratch
+        // Full-text sync: `.kiln` files are small and we re-parse from scratch
         // anyway, so incremental sync would be complexity with no payoff.
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         // A client only sends requests for capabilities the server advertises,
@@ -119,11 +119,11 @@ fn serve() -> Result<(), Box<dyn Error + Sync + Send>> {
     // Drop the connection BEFORE joining. The writer thread lives until its
     // channel closes, and the channel closes when the last `Sender` — held by
     // `connection` — goes away. Joining first hangs the process forever, which
-    // means every editor session would leak an `openepl lsp` behind it.
+    // means every editor session would leak an `kiln lsp` behind it.
     drop(connection);
     io_threads.join()?;
     result?;
-    eprintln!("openepl-lsp: shutting down");
+    eprintln!("kiln-lsp: shutting down");
     Ok(())
 }
 
@@ -150,7 +150,7 @@ impl Server {
         // working directory, which for a language server is whatever the editor
         // happened to be launched from — often the user's home. Moving to the
         // workspace before any request makes the editor resolve kits the way
-        // `openepl build` does in that project, which is the entire point: the
+        // `kiln build` does in that project, which is the entire point: the
         // editor must not disagree with the compiler.
         if let Some(ws) = &workspace {
             let _ = std::env::set_current_dir(ws);
@@ -159,7 +159,7 @@ impl Server {
         // Walking up from the editor's workspace finds the runtime when the
         // project lives inside a checkout. It does NOT when the project lives
         // anywhere else — which, for anything created from a template, is the
-        // normal case. `OPENEPL_RUNTIME_DIR` and our own location cover that:
+        // normal case. `KILN_RUNTIME_DIR` and our own location cover that:
         // the first is what an installed toolchain sets, the second is the
         // runtime shipping beside the binary.
         let repo_root = workspace
@@ -173,8 +173,8 @@ impl Server {
                     .and_then(|d| find_repo_root_from(&d))
             });
         match &repo_root {
-            Some(r) => eprintln!("openepl-lsp: runtime at {}", r.display()),
-            None => eprintln!("openepl-lsp: no runtime found — parse-only mode"),
+            Some(r) => eprintln!("kiln-lsp: runtime at {}", r.display()),
+            None => eprintln!("kiln-lsp: no runtime found — parse-only mode"),
         }
         Server {
             docs: HashMap::new(),
@@ -215,7 +215,7 @@ impl Server {
                 let resp = Response::new_err(
                     id,
                     lsp_server::ErrorCode::MethodNotFound as i32,
-                    format!("openepl-lsp does not support `{}` yet", req.method),
+                    format!("kiln-lsp does not support `{}` yet", req.method),
                 );
                 let _ = conn.sender.send(Message::Response(resp));
                 return;
@@ -359,7 +359,7 @@ impl Server {
             for name in reg.component_names() {
                 items.push(item(name, CompletionItemKind::CLASS, "component".into()));
             }
-            // Foreign functions, record types and constants a kit's `.oed`
+            // Foreign functions, record types and constants a kit's `.kdecl`
             // bundle contributed. They are in the registry the same way a
             // command is — the file that `use`s the kit never spells them out —
             // so completion has to read them from here, not from the file's own
@@ -426,7 +426,22 @@ impl Server {
         let text = if let Some(text) = member {
             text
         } else if let Some(cmd) = registry.as_ref().and_then(|r| r.get(&occ.name)) {
-            format!("```\n{}\n```\n\ncommand", signature_text(&occ.name, &cmd.sig))
+            let sig = signature_text(&occ.name, &cmd.sig);
+            let doc = registry.as_ref().and_then(|r| r.doc(&occ.name));
+            // The signature says what the command takes. The sentence says what
+            // it is for, and the example says what calling it looks like —
+            // which is the question someone hovering a name is actually asking.
+            // A command with neither reads exactly as it did before.
+            let mut text = match doc.map(|d| d.summary.as_str()).unwrap_or("") {
+                "" => format!("```\n{sig}\n```\n\ncommand"),
+                summary => format!("```\n{sig}\n```\n\n{summary}."),
+            };
+            if let Some(example) = doc.map(|d| d.example.as_str()).filter(|e| !e.is_empty()) {
+                // `kiln` is the language id the VS Code extension registers,
+                // so the block highlights rather than sitting there grey.
+                text.push_str(&format!("\n\n```kiln\n{example}\n```"));
+            }
+            text
         } else if let Some(ty) = ix.component_types.get(&occ.name) {
             format!("```\n{} {}\n```\n\ncomponent", ty, occ.name)
         } else if let Some(header) = ix.sub_headers.get(&occ.name) {
@@ -517,7 +532,7 @@ impl Server {
         let (src, line, col) = self.context(params)?;
         let ix = Index::build(&src);
         let occ = ix.at(line, col)?;
-        // Commands live in C support libraries: there is no `.oir` position to
+        // Commands live in C support libraries: there is no `.kiln` position to
         // jump to. Returning null is honest; hover carries the signature.
         let def = ix.definition_of(occ)?;
         serde_json::to_value(Location {
@@ -650,7 +665,7 @@ impl Server {
             Err(msg) => {
                 // Degraded: we parsed, but can't type-check. Say so once, at the
                 // top of the file, instead of pretending the file is clean.
-                return vec![diag(src, Span::line(1), format!("OpenEPL runtime unavailable: {msg}"))];
+                return vec![diag(src, Span::line(1), format!("Kiln runtime unavailable: {msg}"))];
             }
         };
 
@@ -705,9 +720,9 @@ impl Server {
             return cached.clone();
         }
         let result = match &self.repo_root {
-            None => Err("could not locate runtime/openepl_core.h from the workspace root".into()),
+            None => Err("could not locate runtime/kiln_core.h from the workspace root".into()),
             // Through the same kit overlay `build` uses, and metadata-only for
-            // the same reason `openepl commands` is: a library's commands are
+            // the same reason `kiln commands` is: a library's commands are
             // readable without the ability to *link* it, so a project that uses
             // the UI stack still completes on a machine that never vendored it.
             // Resolving differently from the compiler is the worst failure this
@@ -770,22 +785,22 @@ fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
     Some(PathBuf::from(String::from_utf8(out).ok()?))
 }
 
-/// The repo root implied by `$OPENEPL_RUNTIME_DIR`, which an installed
+/// The repo root implied by `$KILN_RUNTIME_DIR`, which an installed
 /// toolchain sets and a checkout does not. Checked only after the workspace,
 /// so a checkout you are editing still wins over an installation elsewhere.
 fn runtime_dir_from_env() -> Option<PathBuf> {
-    let dir = PathBuf::from(std::env::var_os("OPENEPL_RUNTIME_DIR")?);
-    dir.join("openepl_core.h")
+    let dir = PathBuf::from(std::env::var_os("KILN_RUNTIME_DIR")?);
+    dir.join("kiln_core.h")
         .is_file()
         .then(|| dir.parent().map(Path::to_path_buf))?
 }
 
-/// Walk up from `start` looking for `runtime/openepl_core.h`, mirroring the
+/// Walk up from `start` looking for `runtime/kiln_core.h`, mirroring the
 /// build path's search but rooted at the editor's workspace rather than at CWD.
 fn find_repo_root_from(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
-        if dir.join("runtime/openepl_core.h").is_file() {
+        if dir.join("runtime/kiln_core.h").is_file() {
             return Some(dir);
         }
         if !dir.pop() {
@@ -1107,7 +1122,7 @@ fn diag(src: &str, at: Span, msg: String) -> Diagnostic {
     Diagnostic {
         range,
         severity: Some(DiagnosticSeverity::ERROR),
-        source: Some("openepl".into()),
+        source: Some("kiln".into()),
         message: msg,
         ..Default::default()
     }

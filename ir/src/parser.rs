@@ -1,4 +1,4 @@
-//! Recursive-descent parser: `.oir` text -> `Module`.
+//! Recursive-descent parser: `.kiln` text -> `Module`.
 //!
 //! Grammar (v0):
 //! ```text
@@ -836,7 +836,7 @@ impl Parser {
                 }
                 // A default belongs to whoever wrote the body, and a `dll` has
                 // none: the C function on the other side decides what its
-                // arguments mean, and OpenEPL inventing a value for one it was
+                // arguments mean, and Kiln inventing a value for one it was
                 // not given would be a guess with someone else's memory.
                 if matches!(self.peek(), Tok::Eq) {
                     return self.err(format!(
@@ -900,7 +900,7 @@ impl Parser {
         }
 
         // `as "symbol"` — an optional override for the exported name, for when
-        // the symbol a library exports is not a legal OpenEPL identifier or
+        // the symbol a library exports is not a legal Kiln identifier or
         // simply differs from the name a program wants to call it by.
         let symbol = if matches!(self.peek(), Tok::Ident(w) if w == "as") {
             self.bump();
@@ -1077,7 +1077,7 @@ impl Parser {
     ///
     /// A set of named whole numbers, and nothing more: each member becomes a
     /// `const` named `Enum.member`, numbered from **1** in declaration order —
-    /// the same place every position in OpenEPL counts from, so the first
+    /// the same place every position in Kiln counts from, so the first
     /// member of an enum and the first element of an array agree.
     ///
     /// The dotted name is why the members do not crowd the module's namespace:
@@ -1362,7 +1362,7 @@ impl Parser {
         self.bump();
         let count = match self.bump() {
             Tok::Int(n) if n >= 1 => n,
-            // `T[]` is an OpenEPL list: a pointer to a runtime-owned array, and
+            // `T[]` is an Kiln list: a pointer to a runtime-owned array, and
             // not a block of bytes a struct can hold.
             Tok::RBracket => {
                 return self.err(format!(
@@ -3070,7 +3070,7 @@ impl Parser {
     /// `bor` — the loosest bitwise level, and looser than a comparison, so
     /// `flags band WS_VISIBLE <> 0` reads the way it looks. (C binds these
     /// tighter than `==`, which is the reason C programmers parenthesise every
-    /// flag test; OpenEPL does not need them to.)
+    /// flag test; Kiln does not need them to.)
     fn bor_expr(&mut self) -> Result<Expr, ParseError> {
         let mut lhs = self.bxor_expr()?;
         while self.infix_word() == Some("bor") {

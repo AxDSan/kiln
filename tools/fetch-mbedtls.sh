@@ -4,7 +4,7 @@
 #
 # This one is OPTIONAL, unlike tools/fetch-rmlui.sh. Without it every build
 # still works and `net` still speaks http; what is missing is https, which then
-# fails at run time with OE_ERR_UNSUPPORTED and never downgrades itself to a
+# fails at run time with KN_ERR_UNSUPPORTED and never downgrades itself to a
 # plaintext request. `libs/net/lib.json` names the archives below under
 # `optional_requires`, so the presence of this directory is the whole switch.
 #
@@ -23,7 +23,7 @@ mkdir -p "$ROOT/vendor"
 [ -d "$DEST" ] || git clone --depth 1 --branch "$VER" --recurse-submodules \
     https://github.com/Mbed-TLS/mbedtls.git "$DEST"
 
-# Static and position-independent: OpenEPL links a program statically, and the
+# Static and position-independent: Kiln links a program statically, and the
 # same objects have to go into a shared library when the target is one.
 cmake -S "$DEST" -B "$DEST/build" -DCMAKE_BUILD_TYPE=Release \
       -DENABLE_PROGRAMS=OFF -DENABLE_TESTING=OFF \

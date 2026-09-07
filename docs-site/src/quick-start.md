@@ -3,7 +3,7 @@
 ## From the IDE
 
 ```sh
-bin/openepl-studio
+bin/kiln-studio
 ```
 
 Studio opens on a welcome screen. Pick a project kind and it is created and
@@ -14,31 +14,31 @@ opened for you.
 ## From the command line
 
 ```sh
-openepl templates                 # what you can create
-openepl new console-app hello     # create a project
-openepl run hello/main.oir        # build it and run it
+kiln templates                 # what you can create
+kiln new console-app hello     # create a project
+kiln run hello/main.kiln        # build it and run it
 ```
 
-Every template builds and runs the moment it is created — `openepl new` is
+Every template builds and runs the moment it is created — `kiln new` is
 never a starting point you have to repair first.
 
 That last command prints:
 
 ```text
-Hello from OpenEPL.
+Hello from Kiln.
 six times seven is 42
 ```
 
 ## Writing it yourself
 
-Create `hello.oir`:
+Create `hello.kiln`:
 
 ```
 module hello
 target console
 
 sub main
-  call print_text("Hello from OpenEPL.")
+  call print_text("Hello from Kiln.")
 
   let answer = 6 * 7
   call print_text("six times seven is {answer}")
@@ -48,20 +48,20 @@ end
 Then:
 
 ```sh
-openepl run hello.oir
+kiln run hello.kiln
 ```
 
-`openepl build hello.oir` leaves a binary called `hello` next to the source
-instead of running it. It has no dependency on OpenEPL — copy it to another
+`kiln build hello.kiln` leaves a binary called `hello` next to the source
+instead of running it. It has no dependency on Kiln — copy it to another
 machine of the same platform and it runs.
 
 ## A program that waits
 
 `console-app` prints and stops. Some programs should not: they wait for
-something and act when it arrives. `examples/loopdemo.oir` is that shape.
+something and act when it arrives. `examples/loopdemo.kiln` is that shape.
 
 ```sh
-openepl run examples/loopdemo.oir
+kiln run examples/loopdemo.kiln
 ```
 
 ```text
@@ -79,13 +79,13 @@ that waits for something needs no window at all.
 
 ## In your editor
 
-`openepl lsp` is a language server, and every editor that speaks LSP can use
+`kiln lsp` is a language server, and every editor that speaks LSP can use
 it. You get errors underlined as you type, completion for commands, components
 and your own subroutines, the parameter list while you are typing a call, and
 go-to-definition on any name.
 
 ```sh
-openepl lsp        # started by your editor, not by you
+kiln lsp        # started by your editor, not by you
 ```
 
 [Editor setup](./editors.md) has
@@ -96,7 +96,7 @@ underlines is something that would genuinely fail to build.
 ## What the pieces mean
 
 - **`module hello`** names the compilation unit. Every file starts with one.
-- **`target console`** says what to build. Leave it out and OpenEPL infers it:
+- **`target console`** says what to build. Leave it out and Kiln infers it:
   a module with a form is a windowed program, anything else is a console one.
 - **`sub main`** is where a console program starts.
 - **`call`** invokes a command for its effect. When you want its result

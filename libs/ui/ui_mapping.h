@@ -1,4 +1,4 @@
-/* Shared OpenEPL-component → RmlUi mapping.
+/* Shared Kiln-component → RmlUi mapping.
  *
  * BOTH the runtime backend (`ui_rmlui.cpp`) and the designer canvas include
  * this. If either had its own copy, a component would render one way in the
@@ -10,17 +10,17 @@
  * Header-only: this is a handful of pure functions, and duplicating a build
  * rule to share them would be worse than the inlining.
  */
-#ifndef OPENEPL_UI_MAPPING_H
-#define OPENEPL_UI_MAPPING_H
+#ifndef KILN_UI_MAPPING_H
+#define KILN_UI_MAPPING_H
 
 #include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
 
-namespace openepl::ui {
+namespace kiln::ui {
 
-/// The RmlUi tag backing an OpenEPL component type. The component vocabulary is
+/// The RmlUi tag backing an Kiln component type. The component vocabulary is
 /// ours; this is the only place it meets the substrate's.
 inline const char* tag_for(const char* type_name) {
     if (std::strcmp(type_name, "button") == 0) return "button";
@@ -39,7 +39,7 @@ inline const char* tag_for(const char* type_name) {
     return "div";   // label, groupbox, form, listbox, spinner, grid
 }
 
-/// The class an OpenEPL component wears, or nullptr when it needs none.
+/// The class an Kiln component wears, or nullptr when it needs none.
 ///
 /// Several components share one substrate tag — a checkbox, a radio button, a
 /// listbox and a spinner are all `div` — so the class is the only thing telling
@@ -225,7 +225,7 @@ inline std::string grid_markup(const std::string& columns, const std::string& ro
     return out;
 }
 
-/// OpenEPL property names use underscores (`background_color`) to match the rest
+/// Kiln property names use underscores (`background_color`) to match the rest
 /// of the language and keep the lexer free of hyphen ambiguity; RCSS uses
 /// hyphens. The substrate's spelling stops here.
 inline std::string rcss_name(const char* property) {
@@ -236,14 +236,14 @@ inline std::string rcss_name(const char* property) {
     return s;
 }
 
-/// Geometry properties are bare numbers in OpenEPL and pixel lengths in RCSS.
+/// Geometry properties are bare numbers in Kiln and pixel lengths in RCSS.
 inline bool is_length_property(const char* p) {
     return std::strcmp(p, "left") == 0 || std::strcmp(p, "top") == 0 ||
            std::strcmp(p, "width") == 0 || std::strcmp(p, "height") == 0 ||
            std::strcmp(p, "border_radius") == 0;
 }
 
-/// `text` is an OpenEPL concept (element content), not an RCSS property.
+/// `text` is an Kiln concept (element content), not an RCSS property.
 inline bool is_text_property(const char* p) { return std::strcmp(p, "text") == 0; }
 
 /// Whether a property carries a colour: `color`, `background_color`,
@@ -328,7 +328,7 @@ inline void anchored_rect(unsigned mask, int dw, int dh,
     else if (b)       *top += dh;
 }
 
-/// Convert an OpenEPL property value to what RCSS expects.
+/// Convert an Kiln property value to what RCSS expects.
 inline std::string rcss_value(const char* property, const char* value) {
     std::string v(value ? value : "");
     const bool numeric = !v.empty() && v.find_first_not_of("-0123456789") == std::string::npos;
@@ -336,7 +336,7 @@ inline std::string rcss_value(const char* property, const char* value) {
     return v;
 }
 
-/// The seed stylesheet every OpenEPL document is built into.
+/// The seed stylesheet every Kiln document is built into.
 ///
 /// D21: a document created bare drops decorators silently while `SetProperty`
 /// still reports success. Always seed.
@@ -404,7 +404,7 @@ inline std::string control_styles(const std::string& scope = "") {
         p + "div.oe-label { font-size: " + FONT + "; color: " + TEXT + "; overflow: hidden; }" +
 
         /* --- push button -------------------------------------------------
-         * The neutral ("secondary") look is the default because OpenEPL has no
+         * The neutral ("secondary") look is the default because Kiln has no
          * property saying a button is the primary one. A program that DOES
          * declare `background_color` sets it inline, which outranks every rule
          * here, and its hover/press shades keep coming from the backend's
@@ -620,7 +620,7 @@ inline std::string control_styles(const std::string& scope = "") {
             " color: " + ON_ACCENT + "; }";
 }
 
-/// The seed document every OpenEPL form is built into.
+/// The seed document every Kiln form is built into.
 ///
 /// D21: a document created bare drops decorators silently while `SetProperty`
 /// still reports success. Always seed.
@@ -686,5 +686,5 @@ inline const FontCandidate* font_candidates(int* count) {
     return fonts;
 }
 
-} // namespace openepl::ui
+} // namespace kiln::ui
 #endif

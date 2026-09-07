@@ -1,4 +1,4 @@
 name: Static Library
 desc: A .a/.lib archive, linked directly into a host program.
 target: staticlib
-entry: main.oir
+entry: main.kiln

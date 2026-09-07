@@ -1,11 +1,11 @@
-/* OpenEPL UI backend — RmlUi implementation of the D10 interface.
+/* Kiln UI backend — RmlUi implementation of the D10 interface.
  *
  * This is the ONLY file that knows RmlUi exists. Everything above it speaks
- * `abi/openepl_ui.h`, which contains no substrate types — that is what keeps the
+ * `abi/kiln_ui.h`, which contains no substrate types — that is what keeps the
  * substrate swappable (D10). Swapping backends means replacing this file.
  *
  */
-/* abi/openepl_abi.h checks its slot layout with C11's `_Static_assert`, which
+/* abi/kiln_abi.h checks its slot layout with C11's `_Static_assert`, which
  * clang also takes in C++ and g++ does not. The Windows build of this file is
  * g++'s — it has to be, the vendored RmlUi archive is g++'s and the two
  * compilers disagree about C++ COMDAT sizes — so the C spelling is mapped to
@@ -37,12 +37,12 @@
 #include "RmlUi_Backend.h"
 #include "RmlUi_Renderer_GL3.h"
 #include "RmlUi_Include_GL3.h"
-#include "openepl_abi.h"   /* oe_malloc — runtime-owned allocation (D4) */
+#include "kiln_abi.h"   /* kn_malloc — runtime-owned allocation (D4) */
 #include "a11y_bridge.h"
 #include "ui_mapping.h"
 #include "ui_data.h"
 #include "a11y_model.h"
-#include "openepl_ui.h"
+#include "kiln_ui.h"
 
 namespace {
 
@@ -63,23 +63,23 @@ struct UiState {
     std::unordered_map<uint64_t, uint64_t> parent_of;  /* handle -> parent handle */
     std::unordered_map<uint64_t, std::string> type_of;  /* handle -> component type */
     Rml::ElementDocument* document = nullptr;
-    std::vector<Rml::Element*> widgets;   // index+1 == OpenEPL_Widget handle
+    std::vector<Rml::Element*> widgets;   // index+1 == Kiln_Widget handle
     std::string get_scratch;
     bool initialised = false;
 };
 UiState g;
 
-/* Frames drawn since oe_ui_run, for OPENEPL_UI_EXIT_AFTER_FRAMES. */
+/* Frames drawn since kn_ui_run, for KILN_UI_EXIT_AFTER_FRAMES. */
 int g_frames = 0;
 
-Rml::Element* resolve(OpenEPL_Widget w) {
+Rml::Element* resolve(Kiln_Widget w) {
     if (w == 0 || w > g.widgets.size()) return nullptr;
     return g.widgets[(size_t)w - 1];
 }
 
-OpenEPL_Widget publish(Rml::Element* e) {
+Kiln_Widget publish(Rml::Element* e) {
     g.widgets.push_back(e);
-    return (OpenEPL_Widget)g.widgets.size();
+    return (Kiln_Widget)g.widgets.size();
 }
 
 /* --- actions ----------------------------------------------------------
@@ -105,7 +105,7 @@ struct Action {
     std::string     text;
     std::string     shortcut;
     bool            enabled = true;
-    OpenEPL_EventFn on_execute = nullptr;
+    Kiln_EventFn on_execute = nullptr;
 };
 std::unordered_map<uint64_t, Action>   g_actions;
 std::unordered_map<uint64_t, uint64_t> g_action_of;   /* widget -> action handle */
@@ -115,16 +115,16 @@ std::unordered_map<uint64_t, uint64_t> g_action_of;   /* widget -> action handle
  * bindings wait here and are claimed when an action takes that name. */
 std::vector<std::pair<uint64_t, std::string>> g_pending_bindings;
 
-/* Disabled is an OpenEPL concept, not an RCSS property, and RmlUi's `disabled`
+/* Disabled is an Kiln concept, not an RCSS property, and RmlUi's `disabled`
  * attribute means nothing on a plain <button> element: the events still fire
  * and the hover shading still lights up. So the state is held here and every
  * listener asks — a control that answers the mouse while disabled is disabled
  * only in the source. */
 std::unordered_set<uint64_t> g_disabled;
 
-bool widget_disabled(OpenEPL_Widget w) { return g_disabled.count(w) > 0; }
+bool widget_disabled(Kiln_Widget w) { return g_disabled.count(w) > 0; }
 
-void set_widget_enabled(OpenEPL_Widget w, bool on) {
+void set_widget_enabled(Kiln_Widget w, bool on) {
     if (on) g_disabled.erase(w);
     else    g_disabled.insert(w);
     Rml::Element* e = resolve(w);
@@ -137,21 +137,21 @@ void set_widget_enabled(OpenEPL_Widget w, bool on) {
     if (auto* fc = rmlui_dynamic_cast<Rml::ElementFormControl*>(e)) fc->SetDisabled(!on);
 }
 
-/* Adapts an OpenEPL function-pointer handler to an RmlUi listener. Handlers are
+/* Adapts an Kiln function-pointer handler to an RmlUi listener. Handlers are
  * bound by pointer, never by name, so no user identifier ships (G8). */
 struct HandlerBridge : Rml::EventListener {
-    OpenEPL_EventFn fn;
-    OpenEPL_Widget  widget;
-    HandlerBridge(OpenEPL_EventFn f, OpenEPL_Widget w) : fn(f), widget(w) {}
+    Kiln_EventFn fn;
+    Kiln_Widget  widget;
+    HandlerBridge(Kiln_EventFn f, Kiln_Widget w) : fn(f), widget(w) {}
     void ProcessEvent(Rml::Event&) override {
         if (fn && !widget_disabled(widget)) fn();
     }
 };
 std::vector<HandlerBridge*> g_bridges;   // owned; freed at shutdown
 /* The form's `load`. RmlUi raises no such event — the window simply comes
- * up — so it is held here and called by oe_ui_run once everything the
+ * up — so it is held here and called by kn_ui_run once everything the
  * handler could touch exists and before the first frame is drawn. */
-OpenEPL_EventFn g_on_load = nullptr;
+Kiln_EventFn g_on_load = nullptr;
 
 /* Interactive visual states.
  *
@@ -163,12 +163,12 @@ OpenEPL_EventFn g_on_load = nullptr;
  * way its own system prefers. */
 struct StateStyler : Rml::EventListener {
     Rml::Element*  element;
-    OpenEPL_Widget widget;
+    Kiln_Widget widget;
     Rml::String base;      /* colour as authored            */
     Rml::String hover;     /* lightened                     */
     Rml::String active;    /* darkened                      */
 
-    StateStyler(Rml::Element* e, OpenEPL_Widget w, Rml::String b, Rml::String h, Rml::String a)
+    StateStyler(Rml::Element* e, Kiln_Widget w, Rml::String b, Rml::String h, Rml::String a)
         : element(e), widget(w), base(std::move(b)), hover(std::move(h)), active(std::move(a)) {}
 
     void ProcessEvent(Rml::Event& ev) override {
@@ -225,7 +225,7 @@ uint64_t action_named(const std::string& name) {
 
 /* Point a control at an action: it takes the caption and the enabled state now,
  * and follows every later change to them. */
-void bind_widget(OpenEPL_Widget w, uint64_t h) {
+void bind_widget(Kiln_Widget w, uint64_t h) {
     g_action_of[w] = h;
     auto* b = new ActionBridge(h);
     g_action_bridges.push_back(b);
@@ -241,8 +241,8 @@ void apply_action(uint64_t h) {
     if (it == g_actions.end()) return;
     for (const auto& kv : g_action_of) {
         if (kv.second != h) continue;
-        const OpenEPL_Widget w = (OpenEPL_Widget)kv.first;
-        if (!it->second.text.empty()) oe_ui_set(w, "text", it->second.text.c_str());
+        const Kiln_Widget w = (Kiln_Widget)kv.first;
+        if (!it->second.text.empty()) kn_ui_set(w, "text", it->second.text.c_str());
         set_widget_enabled(w, it->second.enabled);
     }
 }
@@ -252,7 +252,7 @@ void claim_pending(uint64_t h, const std::string& name) {
     if (name.empty()) return;
     for (size_t i = 0; i < g_pending_bindings.size();) {
         if (g_pending_bindings[i].second == name) {
-            const OpenEPL_Widget w = (OpenEPL_Widget)g_pending_bindings[i].first;
+            const Kiln_Widget w = (Kiln_Widget)g_pending_bindings[i].first;
             g_pending_bindings.erase(g_pending_bindings.begin() + (long)i);
             bind_widget(w, h);
         } else {
@@ -347,7 +347,7 @@ ShortcutListener g_shortcuts;
  * way the compiler emits it. */
 } // namespace
 extern "C" {
-struct OpenEPL_Resource {
+struct Kiln_Resource {
     const char*          name;
     const unsigned char* data;
     long long            size;
@@ -358,9 +358,9 @@ struct OpenEPL_Resource {
  * fails — so a Windows program always carries the table, empty when it names
  * nothing (cli/src/main.rs), and the declaration there is an ordinary extern. */
 #ifdef _WIN32
-extern const OpenEPL_Resource oe_embedded_resources[];
+extern const Kiln_Resource kn_embedded_resources[];
 #else
-__attribute__((weak)) extern const OpenEPL_Resource oe_embedded_resources[];
+__attribute__((weak)) extern const Kiln_Resource kn_embedded_resources[];
 #endif
 }
 namespace {
@@ -370,16 +370,16 @@ std::string file_name_of(const std::string& path) {
     return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
-const OpenEPL_Resource* find_resource(const std::string& path) {
-    if (!oe_embedded_resources) return nullptr;
-    for (const OpenEPL_Resource* r = oe_embedded_resources; r->name; r++) {
+const Kiln_Resource* find_resource(const std::string& path) {
+    if (!kn_embedded_resources) return nullptr;
+    for (const Kiln_Resource* r = kn_embedded_resources; r->name; r++) {
         if (path == r->name) return r;
     }
     /* The document is built from memory, so it has no URL for RmlUi to resolve
      * a source against and what arrives here may be joined, normalised, or
      * neither. The file name is what identifies a resource in every case. */
     const std::string base = file_name_of(path);
-    for (const OpenEPL_Resource* r = oe_embedded_resources; r->name; r++) {
+    for (const Kiln_Resource* r = kn_embedded_resources; r->name; r++) {
         if (base == file_name_of(r->name)) return r;
     }
     return nullptr;
@@ -388,7 +388,7 @@ const OpenEPL_Resource* find_resource(const std::string& path) {
 /* Serves embedded resources, and everything else off the disk.
  *
  * The fallback is not optional: fonts are loaded through this same interface,
- * and an interface that only knew about resources would leave every OpenEPL
+ * and an interface that only knew about resources would leave every Kiln
  * program with no text in it. */
 class EmbeddedFiles : public Rml::FileInterface {
     struct Slot {
@@ -400,7 +400,7 @@ class EmbeddedFiles : public Rml::FileInterface {
 
 public:
     Rml::FileHandle Open(const Rml::String& path) override {
-        if (const OpenEPL_Resource* r = find_resource(path)) {
+        if (const Kiln_Resource* r = find_resource(path)) {
             auto* s = new Slot{r->data, (size_t)r->size, 0, nullptr};
             return (Rml::FileHandle)s;
         }
@@ -461,7 +461,7 @@ EmbeddedFiles g_files;
  * here instead of being approximated with attributes further up.
  *
  * Indices cross here too. RmlUi counts options from 0 and says -1 for none;
- * OpenEPL counts from 1 and says 0. The conversion happens at this boundary
+ * Kiln counts from 1 and says 0. The conversion happens at this boundary
  * and nowhere else.
  */
 
@@ -507,16 +507,16 @@ Rml::Element* child_with_tag(Rml::Element* e, const char* tag) {
 
 /* --- combobox ---------------------------------------------------------- */
 
-Rml::ElementFormControlSelect* as_select(OpenEPL_Widget w) {
+Rml::ElementFormControlSelect* as_select(Kiln_Widget w) {
     return rmlui_dynamic_cast<Rml::ElementFormControlSelect*>(resolve(w));
 }
 
-void combo_select(OpenEPL_Widget w, int n) {
+void combo_select(Kiln_Widget w, int n) {
     g_wanted_selection[w] = n;
     if (auto* sel = as_select(w)) sel->SetSelection(n >= 1 ? n - 1 : -1);
 }
 
-void combo_set_items(OpenEPL_Widget w, const char* text) {
+void combo_set_items(Kiln_Widget w, const char* text) {
     auto* sel = as_select(w);
     if (!sel) return;
     sel->RemoveAll();
@@ -525,7 +525,7 @@ void combo_set_items(OpenEPL_Widget w, const char* text) {
     combo_select(w, it == g_wanted_selection.end() ? 0 : it->second);
 }
 
-std::string combo_items(OpenEPL_Widget w) {
+std::string combo_items(Kiln_Widget w) {
     auto* sel = as_select(w);
     if (!sel) return std::string();
     std::vector<std::string> items;
@@ -542,7 +542,7 @@ std::string combo_items(OpenEPL_Widget w) {
  * table beside the widget: the element already has to say which row is
  * highlighted, and a second copy of that answer is a second copy to keep true.
  */
-int list_selected(OpenEPL_Widget w) {
+int list_selected(Kiln_Widget w) {
     Rml::Element* e = resolve(w);
     if (!e) return 0;
     for (int i = 0; i < e->GetNumChildren(); i++) {
@@ -551,7 +551,7 @@ int list_selected(OpenEPL_Widget w) {
     return 0;
 }
 
-void list_select(OpenEPL_Widget w, int n) {
+void list_select(Kiln_Widget w, int n) {
     g_wanted_selection[w] = n;
     Rml::Element* e = resolve(w);
     if (!e) return;
@@ -559,9 +559,9 @@ void list_select(OpenEPL_Widget w, int n) {
 }
 
 struct ListItemClick : Rml::EventListener {
-    OpenEPL_Widget list;
+    Kiln_Widget list;
     int            index;   /* counts from 1, like every position */
-    ListItemClick(OpenEPL_Widget l, int i) : list(l), index(i) {}
+    ListItemClick(Kiln_Widget l, int i) : list(l), index(i) {}
     void ProcessEvent(Rml::Event&) override {
         if (widget_disabled(list)) return;
         list_select(list, index);
@@ -572,7 +572,7 @@ struct ListItemClick : Rml::EventListener {
 };
 std::vector<ListItemClick*> g_item_clicks;   /* owned; freed at shutdown */
 
-void list_set_items(OpenEPL_Widget w, const char* text) {
+void list_set_items(Kiln_Widget w, const char* text) {
     Rml::Element* e = resolve(w);
     if (!e || !g.document) return;
     while (e->GetNumChildren() > 0) e->RemoveChild(e->GetChild(0));
@@ -591,7 +591,7 @@ void list_set_items(OpenEPL_Widget w, const char* text) {
     list_select(w, it == g_wanted_selection.end() ? 0 : it->second);
 }
 
-std::string list_items(OpenEPL_Widget w) {
+std::string list_items(Kiln_Widget w) {
     Rml::Element* e = resolve(w);
     if (!e) return std::string();
     std::vector<std::string> items;
@@ -610,13 +610,13 @@ std::string list_items(OpenEPL_Widget w) {
 struct Range { int value = 50; };
 std::unordered_map<uint64_t, Range> g_ranges;
 
-void slider_apply(OpenEPL_Widget w) {
+void slider_apply(Kiln_Widget w) {
     auto* in = rmlui_dynamic_cast<Rml::ElementFormControlInput*>(resolve(w));
     if (!in) return;
     in->SetValue(std::to_string(g_ranges[w].value));
 }
 
-int slider_value(OpenEPL_Widget w) {
+int slider_value(Kiln_Widget w) {
     auto* in = rmlui_dynamic_cast<Rml::ElementFormControlInput*>(resolve(w));
     if (!in) return g_ranges[w].value;
     return (int)std::strtol(in->GetValue().c_str(), nullptr, 10);
@@ -636,7 +636,7 @@ std::unordered_map<uint64_t, Spin> g_spins;
 
 int clamp_int(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-void spin_apply(OpenEPL_Widget w) {
+void spin_apply(Kiln_Widget w) {
     Spin& s = g_spins[w];
     s.value = clamp_int(s.value, s.min, s.max);
     if (auto* in = rmlui_dynamic_cast<Rml::ElementFormControlInput*>(
@@ -646,7 +646,7 @@ void spin_apply(OpenEPL_Widget w) {
 
 /* Reads what the box actually holds, so a typed number is the answer rather
  * than the last one this library wrote. */
-int spin_value(OpenEPL_Widget w) {
+int spin_value(Kiln_Widget w) {
     Spin& s = g_spins[w];
     if (auto* in = rmlui_dynamic_cast<Rml::ElementFormControlInput*>(
             child_with_tag(resolve(w), "input"))) {
@@ -657,9 +657,9 @@ int spin_value(OpenEPL_Widget w) {
 }
 
 struct SpinStep : Rml::EventListener {
-    OpenEPL_Widget widget;
+    Kiln_Widget widget;
     int            direction;
-    SpinStep(OpenEPL_Widget w, int d) : widget(w), direction(d) {}
+    SpinStep(Kiln_Widget w, int d) : widget(w), direction(d) {}
     void ProcessEvent(Rml::Event&) override {
         if (widget_disabled(widget)) return;
         Spin& s = g_spins[widget];
@@ -682,7 +682,7 @@ std::vector<SpinStep*> g_spin_steps;   /* owned; freed at shutdown */
  *
  * `select` and `activate` hand over the row, so the handler pointer is called
  * through the signature the compiler emitted the thunk with, the same way
- * `tick` is in runtime/oe_component.c.
+ * `tick` is in runtime/kn_component.c.
  */
 typedef void (*RowFn)(int32_t);
 
@@ -692,8 +692,8 @@ struct Grid {
     const UiTable*  drawn_table = nullptr;
     int32_t         drawn_version = -1;
     int             drawn_selected = -1;
-    OpenEPL_EventFn on_select = nullptr;
-    OpenEPL_EventFn on_activate = nullptr;
+    Kiln_EventFn on_select = nullptr;
+    Kiln_EventFn on_activate = nullptr;
     /* One listener per row position, kept across redraws: a grid refilled
      * every tick must not grow a listener per row per frame. */
     std::vector<struct GridRowEvent*> rows;
@@ -703,18 +703,18 @@ std::unordered_map<uint64_t, Grid> g_grids;
 
 /* A wish for a row past the end is kept, not clamped: rows routinely arrive
  * after `selected = 2` in the form, and after them the wish comes true. */
-int grid_selected(OpenEPL_Widget w) {
+int grid_selected(Kiln_Widget w) {
     auto it = g_grids.find(w);
     if (it == g_grids.end()) return 0;
     const int rows = ui_table_row_count(ui_entry_table(it->second.entry));
     return it->second.wanted >= 1 && it->second.wanted <= rows ? it->second.wanted : 0;
 }
 
-void grid_fire(OpenEPL_EventFn fn, int row) {
+void grid_fire(Kiln_EventFn fn, int row) {
     if (fn) ((RowFn)fn)(row);
 }
 
-void grid_select(OpenEPL_Widget w, int n, bool announce) {
+void grid_select(Kiln_Widget w, int n, bool announce) {
     auto it = g_grids.find(w);
     if (it == g_grids.end()) return;
     it->second.wanted = n;
@@ -722,9 +722,9 @@ void grid_select(OpenEPL_Widget w, int n, bool announce) {
 }
 
 struct GridRowEvent : Rml::EventListener {
-    OpenEPL_Widget grid;
+    Kiln_Widget grid;
     int            index;   /* counts from 1 */
-    GridRowEvent(OpenEPL_Widget g, int i) : grid(g), index(i) {}
+    GridRowEvent(Kiln_Widget g, int i) : grid(g), index(i) {}
     void ProcessEvent(Rml::Event& ev) override {
         if (widget_disabled(grid)) return;
         if (ev.GetType() == "click") {
@@ -739,7 +739,7 @@ struct GridRowEvent : Rml::EventListener {
     }
 };
 /* Redraw a grid whose table or selection moved since it was last drawn. */
-void grid_sync(OpenEPL_Widget w, Grid& gr) {
+void grid_sync(Kiln_Widget w, Grid& gr) {
     Rml::Element* e = resolve(w);
     if (!e) return;
     const UiTable* t = ui_entry_table(gr.entry);
@@ -754,9 +754,9 @@ void grid_sync(OpenEPL_Widget w, Grid& gr) {
      * refills every tick would otherwise keep every text it ever drew. */
     char* columns = ui_table_columns(t);
     char* rows = ui_table_rows(t);
-    e->SetInnerRML(openepl::ui::grid_markup(columns ? columns : "", rows ? rows : "", sel));
-    oe_mfree(columns);
-    oe_mfree(rows);
+    e->SetInnerRML(kiln::ui::grid_markup(columns ? columns : "", rows ? rows : "", sel));
+    kn_mfree(columns);
+    kn_mfree(rows);
 
     Rml::Element* table = e->GetNumChildren() ? e->GetChild(0) : nullptr;
     if (!table) return;
@@ -781,7 +781,7 @@ bool scroll_grids() {
     for (auto& kv : g_grids) {
         Grid& gr = kv.second;
         if (!gr.scroll_to) continue;
-        Rml::Element* e = resolve((OpenEPL_Widget)kv.first);
+        Rml::Element* e = resolve((Kiln_Widget)kv.first);
         Rml::Element* table = e && e->GetNumChildren() ? e->GetChild(0) : nullptr;
         int index = 0;
         for (int i = 0; table && i < table->GetNumChildren(); i++) {
@@ -797,16 +797,16 @@ bool scroll_grids() {
 }
 
 void sync_grids() {
-    for (auto& kv : g_grids) grid_sync((OpenEPL_Widget)kv.first, kv.second);
+    for (auto& kv : g_grids) grid_sync((Kiln_Widget)kv.first, kv.second);
 }
 
 /* The grid holding the focus, or 0. Focus may sit on the grid itself or on a
  * row inside it, so the search walks up. */
-OpenEPL_Widget focused_grid() {
+Kiln_Widget focused_grid() {
     Rml::Element* f = g.context ? g.context->GetFocusElement() : nullptr;
     for (; f; f = f->GetParentNode()) {
         for (const auto& kv : g_grids) {
-            if (resolve((OpenEPL_Widget)kv.first) == f) return (OpenEPL_Widget)kv.first;
+            if (resolve((Kiln_Widget)kv.first) == f) return (Kiln_Widget)kv.first;
         }
     }
     return 0;
@@ -817,7 +817,7 @@ OpenEPL_Widget focused_grid() {
  * hook sends. */
 struct GridKeys : Rml::EventListener {
     void ProcessEvent(Rml::Event& ev) override {
-        const OpenEPL_Widget w = focused_grid();
+        const Kiln_Widget w = focused_grid();
         if (!w || widget_disabled(w)) return;
         const int key = ev.GetParameter<int>("key_identifier", 0);
         const int sel = grid_selected(w);
@@ -843,7 +843,7 @@ GridKeys g_grid_keys;
  * reason `action` states. */
 std::unordered_map<uint64_t, UiEntry*> g_datasources;
 
-UiEntry* entry_of(OpenEPL_Widget w) {
+UiEntry* entry_of(Kiln_Widget w) {
     auto g_it = g_grids.find(w);
     if (g_it != g_grids.end()) return g_it->second.entry;
     auto d_it = g_datasources.find(w);
@@ -852,7 +852,7 @@ UiEntry* entry_of(OpenEPL_Widget w) {
 
 /* The properties a grid and a datasource share: what a table holds. Returns
  * false for a property that is not one of them. */
-bool table_set(OpenEPL_Widget w, const char* prop, const char* value) {
+bool table_set(Kiln_Widget w, const char* prop, const char* value) {
     UiEntry* e = entry_of(w);
     if (!e) return false;
     if (std::strcmp(prop, "name") == 0)         { ui_entry_set_name(e, value); return true; }
@@ -862,7 +862,7 @@ bool table_set(OpenEPL_Widget w, const char* prop, const char* value) {
     return false;
 }
 
-bool table_get(OpenEPL_Widget w, const char* prop, std::string* out) {
+bool table_get(Kiln_Widget w, const char* prop, std::string* out) {
     UiEntry* e = entry_of(w);
     if (!e) return false;
     if (std::strcmp(prop, "name") == 0)    { *out = ui_entry_name(e); return true; }
@@ -875,7 +875,7 @@ bool table_get(OpenEPL_Widget w, const char* prop, std::string* out) {
 /* Handle a property that belongs to one of the controls above. Returns false
  * when the property is nobody's special case and the generic attribute/RCSS
  * path below should have it. */
-bool control_set(const std::string& type, OpenEPL_Widget w, const char* prop, const char* value) {
+bool control_set(const std::string& type, Kiln_Widget w, const char* prop, const char* value) {
     const int n = (int)std::strtol(value, nullptr, 10);
     /* `count` is what the control holds, not something a form gets to declare.
      * Swallowed rather than refused: it is a readable property, and an error
@@ -900,7 +900,7 @@ bool control_set(const std::string& type, OpenEPL_Widget w, const char* prop, co
     if (type == "memo" && std::strcmp(prop, "text") == 0) {
         if (auto* ta = rmlui_dynamic_cast<Rml::ElementFormControlTextArea*>(resolve(w))) {
             ta->SetValue(value);
-            openepl::a11y::set_label(w, value);
+            kiln::a11y::set_label(w, value);
             return true;
         }
         return false;
@@ -933,7 +933,7 @@ bool control_set(const std::string& type, OpenEPL_Widget w, const char* prop, co
 
 /* The read side of `control_set`. Returns false when the generic path should
  * answer instead. */
-bool control_get(const std::string& type, OpenEPL_Widget w, const char* prop, std::string* out) {
+bool control_get(const std::string& type, Kiln_Widget w, const char* prop, std::string* out) {
     if (type == "combobox") {
         if (std::strcmp(prop, "items") == 0)    { *out = combo_items(w); return true; }
         if (std::strcmp(prop, "selected") == 0) {
@@ -984,14 +984,14 @@ bool control_get(const std::string& type, OpenEPL_Widget w, const char* prop, st
     return false;
 }
 
-/* Properties that are OpenEPL concepts rather than RCSS properties. */
+/* Properties that are Kiln concepts rather than RCSS properties. */
 
 int env_int(const char* name, int fallback) {
     const char* v = std::getenv(name);
     return v ? std::atoi(v) : fallback;
 }
 
-bool ui_debug() { return std::getenv("OPENEPL_UI_DEBUG") != nullptr; }
+bool ui_debug() { return std::getenv("KILN_UI_DEBUG") != nullptr; }
 
 /* --- anchors ------------------------------------------------------------ *
  *
@@ -1009,7 +1009,7 @@ struct Placement {
     /* Only an axis the form actually wrote can be anchored: a control that
      * never had a `width` has nothing to stretch. */
     bool        has_left = false, has_top = false, has_width = false, has_height = false;
-    unsigned    mask = openepl::ui::ANCHOR_DEFAULT;
+    unsigned    mask = kiln::ui::ANCHOR_DEFAULT;
     std::string anchors = "left,top";   /* as written, for reading back */
 };
 std::unordered_map<uint64_t, Placement> g_placement;
@@ -1019,7 +1019,7 @@ int g_form_width = 0, g_form_height = 0;   /* the size the form declared */
  * delta apply_anchors last applied, not the window's current size. Zero until
  * the first frame, so a property set while the form is being built records
  * exactly what the form wrote even when the window was created larger than
- * the form declared (OPENEPL_UI_SIZE does that, and so may a manager). */
+ * the form declared (KILN_UI_SIZE does that, and so may a manager). */
 int g_applied_dw = 0, g_applied_dh = 0;
 void resize_delta(int* dw, int* dh) {
     *dw = g_applied_dw;
@@ -1031,7 +1031,7 @@ void visible_rect(const Placement& p, int* l, int* t, int* w, int* h) {
     int dw, dh;
     resize_delta(&dw, &dh);
     *l = p.left; *t = p.top; *w = p.width; *h = p.height;
-    openepl::ui::anchored_rect(p.mask, dw, dh, l, t, w, h);
+    kiln::ui::anchored_rect(p.mask, dw, dh, l, t, w, h);
 }
 
 /* Re-derive the base from a rectangle the program wants on screen NOW.
@@ -1041,13 +1041,13 @@ void visible_rect(const Placement& p, int* l, int* t, int* w, int* h) {
 void rebase(Placement& p, int l, int t, int w, int h) {
     int dw, dh;
     resize_delta(&dw, &dh);
-    openepl::ui::anchored_rect(p.mask, -dw, -dh, &l, &t, &w, &h);
+    kiln::ui::anchored_rect(p.mask, -dw, -dh, &l, &t, &w, &h);
     p.left = l; p.top = t; p.width = w; p.height = h;
 }
 
 /* A numeric left/top/width/height has been set on a control: keep the base
  * in step so a later resize starts from where the program just put it. */
-void record_geometry(OpenEPL_Widget w, const char* prop, int value) {
+void record_geometry(Kiln_Widget w, const char* prop, int value) {
     Placement& p = g_placement[w];
     int l, t, wd, ht;
     visible_rect(p, &l, &t, &wd, &ht);
@@ -1066,11 +1066,11 @@ void apply_anchors(int dw, int dh) {
     g_applied_dh = dh;
     for (auto& kv : g_placement) {
         const Placement& p = kv.second;
-        if (!(p.mask & (openepl::ui::ANCHOR_RIGHT | openepl::ui::ANCHOR_BOTTOM))) continue;
-        Rml::Element* e = resolve((OpenEPL_Widget)kv.first);
+        if (!(p.mask & (kiln::ui::ANCHOR_RIGHT | kiln::ui::ANCHOR_BOTTOM))) continue;
+        Rml::Element* e = resolve((Kiln_Widget)kv.first);
         if (!e) continue;
         int l = p.left, t = p.top, w = p.width, h = p.height;
-        openepl::ui::anchored_rect(p.mask, dw, dh, &l, &t, &w, &h);
+        kiln::ui::anchored_rect(p.mask, dw, dh, &l, &t, &w, &h);
         if (p.has_left)   e->SetProperty("left",   Rml::String(std::to_string(l) + "px"));
         if (p.has_top)    e->SetProperty("top",    Rml::String(std::to_string(t) + "px"));
         if (p.has_width)  e->SetProperty("width",  Rml::String(std::to_string(w) + "px"));
@@ -1088,7 +1088,7 @@ void apply_anchors(int dw, int dh) {
  * The three form properties are held together and applied from the set,
  * because a form writes them in whichever order its lines happen to be in
  * and `position = "manual"` must mean the same thing above `left` as below
- * it. After the window is up (oe_ui_run), `left`/`top` move a manual window
+ * it. After the window is up (kn_ui_run), `left`/`top` move a manual window
  * and `position` is ignored: a window that switched from centred to manual
  * mid-run would jump to a corner the form never asked to see.
  *
@@ -1102,7 +1102,7 @@ struct WindowPlace {
     int left = 0, top = 0;
 };
 WindowPlace g_window;
-bool g_running = false;   /* oe_ui_run has begun; the window is on screen */
+bool g_running = false;   /* kn_ui_run has begun; the window is on screen */
 
 void apply_window_position() {
     SDL_Window* win = SDL_GL_GetCurrentWindow();
@@ -1122,7 +1122,7 @@ int window_set(const char* prop, const char* value) {
         if (g_running) return 0;   /* ignored once the window exists; see above */
         if (std::strcmp(value, "default") != 0 && std::strcmp(value, "center") != 0 &&
             std::strcmp(value, "manual") != 0) {
-            oe_error_set(OE_ERR_INVALID_ARG, "position: expected default, center or manual");
+            kn_error_set(KN_ERR_INVALID_ARG, "position: expected default, center or manual");
             return 1;
         }
         g_window.mode = value;
@@ -1148,22 +1148,22 @@ bool window_get(const char* prop, std::string* out) {
 
 extern "C" {
 
-int oe_ui_init(const char* title, int width, int height) {
+int kn_ui_init(const char* title, int width, int height) {
     if (g.initialised) return 0;
     /* A headless run must not open a window: a test or an agent that
      * renders a frame to a file steals focus from whoever is working on
      * the machine otherwise. SDL's offscreen driver renders through EGL
      * with no window at all, and a caller who set SDL_VIDEODRIVER
-     * knows better than this default, as does OPENEPL_UI_WINDOW=1 — the
+     * knows better than this default, as does KILN_UI_WINDOW=1 — the
      * one test that reads the manager's own flags back needs a real window.
      * A Linux fact, so a Linux default: the offscreen driver draws through
      * EGL, which Windows has no build of, and a Windows program asked for a
      * frame count keeps its ordinary window and stops after that many. */
 #ifndef _WIN32
-    if (!std::getenv("SDL_VIDEODRIVER") && !std::getenv("OPENEPL_UI_WINDOW") && (std::getenv("OPENEPL_UI_EXIT_AFTER_FRAMES") || std::getenv("OPENEPL_UI_DUMP")))
+    if (!std::getenv("SDL_VIDEODRIVER") && !std::getenv("KILN_UI_WINDOW") && (std::getenv("KILN_UI_EXIT_AFTER_FRAMES") || std::getenv("KILN_UI_DUMP")))
         ui_setenv("SDL_VIDEODRIVER", "offscreen");
 #endif
-    /* OPENEPL_UI_SIZE sizes the window at creation rather than after: an
+    /* KILN_UI_SIZE sizes the window at creation rather than after: an
      * offscreen surface cannot grow, so a resize there paints nothing new.
      * The form still declares its own size, which is what anchors measure
      * against, so the first frame sees the difference as a resize. */
@@ -1171,13 +1171,13 @@ int oe_ui_init(const char* title, int width, int height) {
     g_form_height = height;
     {
         int nw = 0, nh = 0;
-        const char* sz = std::getenv("OPENEPL_UI_SIZE");
+        const char* sz = std::getenv("KILN_UI_SIZE");
         if (sz && std::sscanf(sz, "%dx%d", &nw, &nh) == 2 && nw > 0 && nh > 0) {
             width = nw;
             height = nh;
         }
     }
-    if (!Backend::Initialize(title ? title : "OpenEPL", width, height, true)) return 1;
+    if (!Backend::Initialize(title ? title : "Kiln", width, height, true)) return 1;
     Rml::SetSystemInterface(Backend::GetSystemInterface());
     Rml::SetRenderInterface(Backend::GetRenderInterface());
     /* Before Initialise, which installs the stdio interface itself if nothing
@@ -1190,7 +1190,7 @@ int oe_ui_init(const char* title, int width, int height) {
     /* Font list and family names come from the shared mapping, so the designer
      * and the built app resolve the same font. */
     int font_count = 0;
-    const auto* fonts = openepl::ui::font_candidates(&font_count);
+    const auto* fonts = kiln::ui::font_candidates(&font_count);
     std::string family = "sans-serif";
     for (int i = 0; i < font_count; i++) {
         if (!Rml::LoadFontFace(fonts[i].path)) continue;
@@ -1211,7 +1211,7 @@ int oe_ui_init(const char* title, int width, int height) {
     /* D21: forms are ALWAYS instantiated into a stylesheet-seeded document.
      * A bare CreateDocument() silently drops decorators while SetProperty still
      * returns true — the spike's most expensive finding. */
-    const std::string seed = openepl::ui::seed_document(width, height, family);
+    const std::string seed = kiln::ui::seed_document(width, height, family);
     g.document = g.context->LoadDocumentFromMemory(seed);
     if (!g.document) return 1;
     g.document->Show();
@@ -1228,31 +1228,31 @@ int oe_ui_init(const char* title, int width, int height) {
     return 0;
 }
 
-OpenEPL_Widget oe_ui_root(void) { return g.initialised ? 1 : 0; }
+Kiln_Widget kn_ui_root(void) { return g.initialised ? 1 : 0; }
 
-OpenEPL_Widget oe_ui_create(OpenEPL_Widget parent, const char* type_name) {
+Kiln_Widget kn_ui_create(Kiln_Widget parent, const char* type_name) {
     if (!g.initialised || !type_name) return 0;
     Rml::Element* p = parent ? resolve(parent) : g.document;
     if (!p) return 0;
-    Rml::ElementPtr child = g.document->CreateElement(openepl::ui::tag_for(type_name));
+    Rml::ElementPtr child = g.document->CreateElement(kiln::ui::tag_for(type_name));
     if (!child) return 0;
     // Some substrate elements need an attribute at creation (an <input> needs
     // its type before it will behave as a text box or a checkbox).
     const char* attr_value = nullptr;
-    if (const char* attr = openepl::ui::creation_attribute(type_name, &attr_value)) {
+    if (const char* attr = kiln::ui::creation_attribute(type_name, &attr_value)) {
         child->SetAttribute(attr, Rml::String(attr_value));
     }
     Rml::Element* raw = p->AppendChild(std::move(child));
     if (!raw) return 0;
-    OpenEPL_Widget h = publish(raw);
+    Kiln_Widget h = publish(raw);
     /* Buttons get interaction feedback; a control that does not visibly respond
      * to the mouse reads as broken regardless of whether its event fires. */
     if (std::strcmp(type_name, "button") == 0) g.interactive[h] = true;
     g.parent_of[h] = parent ? parent : 1;
     g.type_of[h] = type_name;
-    if (const char* cls = openepl::ui::class_for(type_name))
+    if (const char* cls = kiln::ui::class_for(type_name))
         raw->SetAttribute("class", Rml::String(cls));
-    if (const char* markup = openepl::ui::inner_markup(type_name)) raw->SetInnerRML(markup);
+    if (const char* markup = kiln::ui::inner_markup(type_name)) raw->SetInnerRML(markup);
     /* The arrows have to be wired at creation: a form that never assigns a
      * spinner property would otherwise get two buttons that do nothing. */
     if (std::strcmp(type_name, "spinner") == 0) {
@@ -1280,12 +1280,12 @@ OpenEPL_Widget oe_ui_create(OpenEPL_Widget parent, const char* type_name) {
         raw->SetProperty("tab-index", "auto");
     }
     // RmlUi's <progress> defaults to max=1, which makes any percentage look
-    // full; OpenEPL's `value` is a percentage.
+    // full; Kiln's `value` is a percentage.
     if (std::strcmp(type_name, "progressbar") == 0) raw->SetAttribute("max", Rml::String("100"));
     return h;
 }
 
-int oe_ui_set(OpenEPL_Widget w, const char* property, const char* value) {
+int kn_ui_set(Kiln_Widget w, const char* property, const char* value) {
     Rml::Element* e = resolve(w);
     if (!e || !property || !value) return 1;
 
@@ -1343,8 +1343,8 @@ int oe_ui_set(OpenEPL_Widget w, const char* property, const char* value) {
 
     if (std::strcmp(property, "anchors") == 0) {
         unsigned mask = 0;
-        if (w == 1 || !openepl::ui::parse_anchors(value, &mask)) {
-            oe_error_set(OE_ERR_INVALID_ARG,
+        if (w == 1 || !kiln::ui::parse_anchors(value, &mask)) {
+            kn_error_set(KN_ERR_INVALID_ARG,
                          "anchors: expected a comma-separated subset of left, top, right, bottom");
             return 1;
         }
@@ -1365,12 +1365,12 @@ int oe_ui_set(OpenEPL_Widget w, const char* property, const char* value) {
 
     // Attribute-backed properties (an editbox's value, a checkbox's checked
     // state, an image's source) are not RCSS styling.
-    if (const char* attr = openepl::ui::attribute_for(type.c_str(), property)) {
+    if (const char* attr = kiln::ui::attribute_for(type.c_str(), property)) {
         // Composite components route to the child that actually carries it.
         // `checked` and the radio group both belong to the inner <input>: set
         // on the wrapper they would be inert, and exclusion would not work.
         Rml::Element* target = e;
-        if (openepl::ui::is_composite(type.c_str()) &&
+        if (kiln::ui::is_composite(type.c_str()) &&
             (std::strcmp(property, "checked") == 0 || std::strcmp(property, "group") == 0)) {
             if (Rml::Element* box = child_with_tag(e, "input")) target = box;
         }
@@ -1385,8 +1385,8 @@ int oe_ui_set(OpenEPL_Widget w, const char* property, const char* value) {
         return 0;
     }
 
-    if (openepl::ui::is_text_property(property) && openepl::ui::text_is_content(type.c_str())) {
-        if (openepl::ui::is_composite(type.c_str())) {
+    if (kiln::ui::is_text_property(property) && kiln::ui::text_is_content(type.c_str())) {
+        if (kiln::ui::is_composite(type.c_str())) {
             for (int i = 0; i < e->GetNumChildren(); i++) {
                 if (e->GetChild(i)->GetTagName() == "span") {
                     e->GetChild(i)->SetInnerRML(value);
@@ -1397,11 +1397,11 @@ int oe_ui_set(OpenEPL_Widget w, const char* property, const char* value) {
         e->SetInnerRML(value);
         /* Keep the accessible name in step: a screen reader must announce the
          * current text, not whatever it was at construction. */
-        openepl::a11y::set_label(w, value);
+        kiln::a11y::set_label(w, value);
         return 0;
     }
 
-    const std::string v = openepl::ui::rcss_value(property, value);
+    const std::string v = kiln::ui::rcss_value(property, value);
 
     if (w == 1 && std::strcmp(property, "title") == 0) return 0;  /* window title: set at init */
     if (w == 1 && std::strcmp(property, "icon") == 0) {
@@ -1409,18 +1409,18 @@ int oe_ui_set(OpenEPL_Widget w, const char* property, const char* value) {
          * resource resolves in — so the icon a program shipped with wins over
          * whatever happens to sit at that path on the running machine. */
         SDL_Surface* icon = nullptr;
-        if (const OpenEPL_Resource* r = find_resource(value)) {
+        if (const Kiln_Resource* r = find_resource(value)) {
             icon = IMG_Load_RW(SDL_RWFromConstMem(r->data, (int)r->size), 1);
         } else if (value && *value) {
             icon = IMG_Load(value);
         }
         if (icon) {
             if (SDL_Window* win = SDL_GL_GetCurrentWindow()) SDL_SetWindowIcon(win, icon);
-            if (std::getenv("OPENEPL_UI_DEBUG"))
+            if (std::getenv("KILN_UI_DEBUG"))
                 std::fprintf(stderr, "ui: window icon %dx%d\n", icon->w, icon->h);
             SDL_FreeSurface(icon);
         } else if (value && *value) {
-            oe_error_set(OE_ERR_INVALID_ARG, "form icon could not be loaded");
+            kn_error_set(KN_ERR_INVALID_ARG, "form icon could not be loaded");
         }
         return 0;
     }
@@ -1428,24 +1428,24 @@ int oe_ui_set(OpenEPL_Widget w, const char* property, const char* value) {
     /* Refused here rather than handed on: the substrate's answer to `#44444`
      * is a syntax error on stderr and a SetProperty that still says yes, so
      * nothing a program can read would ever know. */
-    if (openepl::ui::is_colour_property(property) && !openepl::ui::is_hex_colour(value)) {
+    if (kiln::ui::is_colour_property(property) && !kiln::ui::is_hex_colour(value)) {
         char msg[160];
         std::snprintf(msg, sizeof msg, "%s: '%.32s' is not a colour (#rgb, #rrggbb or #rrggbbaa)",
                       property, value);
-        oe_error_set(OE_ERR_INVALID_ARG, msg);
+        kn_error_set(KN_ERR_INVALID_ARG, msg);
         return 1;
     }
 
     /* A control's geometry is also its anchor base (see Placement). Only a
      * bare number counts: `50%` is a length the stylesheet understands and
      * an anchor cannot add pixels to. */
-    if (w != 1 && openepl::ui::is_length_property(property) &&
+    if (w != 1 && kiln::ui::is_length_property(property) &&
         std::strcmp(property, "border_radius") != 0 && *value &&
         std::strspn(value, "-0123456789") == std::strlen(value)) {
         record_geometry(w, property, (int)std::strtol(value, nullptr, 10));
     }
 
-    bool ok = e->SetProperty(openepl::ui::rcss_name(property), v);
+    bool ok = e->SetProperty(kiln::ui::rcss_name(property), v);
 
     if (ok && std::strcmp(property, "background_color") == 0 && g.interactive.count(w)) {
         /* A declared fill carries its own outline. The stylesheet gives an
@@ -1463,13 +1463,13 @@ int oe_ui_set(OpenEPL_Widget w, const char* property, const char* value) {
     return ok ? 0 : 1;
 }
 
-const char* oe_ui_get(OpenEPL_Widget w, const char* property) {
+const char* kn_ui_get(Kiln_Widget w, const char* property) {
     Rml::Element* e = resolve(w);
     if (!e || !property) return nullptr;
 
     if (std::strcmp(property, "enabled") == 0) {
         const char* lit = widget_disabled(w) ? "false" : "true";
-        char* out = (char*)oe_malloc((long)std::strlen(lit) + 1);
+        char* out = (char*)kn_malloc((long)std::strlen(lit) + 1);
         if (out) std::strcpy(out, lit);
         return out;
     }
@@ -1486,11 +1486,11 @@ const char* oe_ui_get(OpenEPL_Widget w, const char* property) {
         /* As written, or the default a form that wrote nothing has. */
         const auto it = g_placement.find(w);
         value = it == g_placement.end() ? "left,top" : it->second.anchors;
-    } else if (const char* attr = openepl::ui::attribute_for(type.c_str(), property)) {
+    } else if (const char* attr = kiln::ui::attribute_for(type.c_str(), property)) {
         // Attribute-backed properties must be READ from the attribute too, or
         // an editbox reports its markup instead of what the user typed.
         Rml::Element* from = e;
-        if (openepl::ui::is_composite(type.c_str()) &&
+        if (kiln::ui::is_composite(type.c_str()) &&
             (std::strcmp(property, "checked") == 0 || std::strcmp(property, "group") == 0)) {
             if (Rml::Element* box = child_with_tag(e, "input")) from = box;
         }
@@ -1504,11 +1504,11 @@ const char* oe_ui_get(OpenEPL_Widget w, const char* property) {
         } else {
             value = from->GetAttribute<Rml::String>(attr, "");
         }
-    } else if (openepl::ui::is_text_property(property) &&
-               openepl::ui::text_is_content(type.c_str())) {
+    } else if (kiln::ui::is_text_property(property) &&
+               kiln::ui::text_is_content(type.c_str())) {
         value = e->GetInnerRML();
     } else {
-        const Rml::Property* p = e->GetProperty(openepl::ui::rcss_name(property));
+        const Rml::Property* p = e->GetProperty(kiln::ui::rcss_name(property));
         if (!p) return nullptr;
         value = p->ToString();
     }
@@ -1516,21 +1516,21 @@ const char* oe_ui_get(OpenEPL_Widget w, const char* property) {
     /* Return a runtime-owned copy rather than a shared scratch buffer, so two
      * reads in one expression — concat(a.text, b.text) — cannot alias. Freed
      * with all other runtime data at shutdown (D4). */
-    char* out = (char*)oe_malloc((long)value.size() + 1);
+    char* out = (char*)kn_malloc((long)value.size() + 1);
     if (!out) return nullptr;
     std::memcpy(out, value.c_str(), value.size() + 1);
     return out;
 }
 
-int32_t oe_ui_get_int(OpenEPL_Widget w, const char* property) {
+int32_t kn_ui_get_int(Kiln_Widget w, const char* property) {
     /* A truth value does not read as a number: `strtol("true")` is 0, which is
      * the wrong answer rather than a missing one. */
     if (std::strcmp(property, "enabled") == 0) return widget_disabled(w) ? 0 : 1;
-    const char* text = oe_ui_get(w, property);
+    const char* text = kn_ui_get(w, property);
     return text ? (int32_t)std::strtol(text, nullptr, 10) : 0;
 }
 
-int oe_ui_on(OpenEPL_Widget w, const char* event, OpenEPL_EventFn handler) {
+int kn_ui_on(Kiln_Widget w, const char* event, Kiln_EventFn handler) {
     Rml::Element* e = resolve(w);
     if (!e || !event || !handler) return 1;
     /* A grid's events carry the row, so they are raised by this file with the
@@ -1550,35 +1550,35 @@ int oe_ui_on(OpenEPL_Widget w, const char* event, OpenEPL_EventFn handler) {
     return 0;
 }
 
-/* --- the library's non-visual components (abi/openepl_abi.h) ------------
+/* --- the library's non-visual components (abi/kiln_abi.h) ------------
  *
  * `action` and `datasource`, addressed through these rather than through the
  * widget interface because neither has a rectangle. The five entry points
- * are the same five `timer` implements in runtime/oe_component.c.
+ * are the same five `timer` implements in runtime/kn_component.c.
  */
-int64_t oe_ui_component_create(const char* type_name) {
+int64_t kn_ui_component_create(const char* type_name) {
     if (type_name && std::strcmp(type_name, "datasource") == 0) {
-        const OpenEPL_Widget h = publish(nullptr);
+        const Kiln_Widget h = publish(nullptr);
         g_datasources[h] = ui_entry_new(UI_ENTRY_DATASOURCE);
-        oe_error_clear();
+        kn_error_clear();
         return (int64_t)h;
     }
     if (!type_name || std::strcmp(type_name, "action") != 0) {
-        oe_error_set(OE_ERR_INVALID_ARG, "ui declares no such non-visual component");
+        kn_error_set(KN_ERR_INVALID_ARG, "ui declares no such non-visual component");
         return 0;
     }
     /* A widget slot is reserved for the action so the two kinds of component
      * keep ONE numbering, which is what the compiler assumed when it handed a
      * subroutine the handle to write `save.enabled` through. */
-    const OpenEPL_Widget h = publish(nullptr);
+    const Kiln_Widget h = publish(nullptr);
     g_actions[h] = Action{};
-    oe_error_clear();
+    kn_error_clear();
     return (int64_t)h;
 }
 
-int32_t oe_ui_component_set(int64_t h, const char* prop, const char* value) {
+int32_t kn_ui_component_set(int64_t h, const char* prop, const char* value) {
     if (prop && value && g_datasources.count((uint64_t)h))
-        return table_set((OpenEPL_Widget)h, prop, value) ? 0 : 1;
+        return table_set((Kiln_Widget)h, prop, value) ? 0 : 1;
     auto it = g_actions.find((uint64_t)h);
     if (it == g_actions.end() || !prop || !value) return 1;
     Action& a = it->second;
@@ -1596,11 +1596,11 @@ int32_t oe_ui_component_set(int64_t h, const char* prop, const char* value) {
     return 0;
 }
 
-const char* oe_ui_component_get(int64_t h, const char* prop) {
+const char* kn_ui_component_get(int64_t h, const char* prop) {
     std::string v;
     if (prop && g_datasources.count((uint64_t)h)) {
-        if (!table_get((OpenEPL_Widget)h, prop, &v)) return nullptr;
-        char* out = (char*)oe_malloc((long)v.size() + 1);
+        if (!table_get((Kiln_Widget)h, prop, &v)) return nullptr;
+        char* out = (char*)kn_malloc((long)v.size() + 1);
         if (out) std::memcpy(out, v.c_str(), v.size() + 1);
         return out;
     }
@@ -1613,15 +1613,15 @@ const char* oe_ui_component_get(int64_t h, const char* prop) {
     else if (std::strcmp(prop, "enabled") == 0)  v = a.enabled ? "true" : "false";
     else return nullptr;
     /* Runtime-owned, like every other text result, so a caller may hold it. */
-    char* out = (char*)oe_malloc((long)v.size() + 1);
+    char* out = (char*)kn_malloc((long)v.size() + 1);
     if (out) std::memcpy(out, v.c_str(), v.size() + 1);
     return out;
 }
 
-int32_t oe_ui_component_get_int(int64_t h, const char* prop) {
+int32_t kn_ui_component_get_int(int64_t h, const char* prop) {
     if (prop && g_datasources.count((uint64_t)h)) {
         std::string v;
-        return table_get((OpenEPL_Widget)h, prop, &v) ? (int32_t)std::strtol(v.c_str(), nullptr, 10) : 0;
+        return table_get((Kiln_Widget)h, prop, &v) ? (int32_t)std::strtol(v.c_str(), nullptr, 10) : 0;
     }
     auto it = g_actions.find((uint64_t)h);
     if (it == g_actions.end() || !prop) return 0;
@@ -1629,7 +1629,7 @@ int32_t oe_ui_component_get_int(int64_t h, const char* prop) {
     return 0;
 }
 
-int32_t oe_ui_component_on(int64_t h, const char* event, OpenEPL_EventFn handler) {
+int32_t kn_ui_component_on(int64_t h, const char* event, Kiln_EventFn handler) {
     auto it = g_actions.find((uint64_t)h);
     if (it == g_actions.end() || !event || !handler) return 1;
     if (std::strcmp(event, "execute") != 0) return 1;
@@ -1637,25 +1637,25 @@ int32_t oe_ui_component_on(int64_t h, const char* event, OpenEPL_EventFn handler
     return 0;
 }
 
-int oe_ui_set_a11y(OpenEPL_Widget w, int32_t role, const char* name) {
+int kn_ui_set_a11y(Kiln_Widget w, int32_t role, const char* name) {
     Rml::Element* e = resolve(w);
     if (!e) return 1;
     /* Publish into the substrate-free model the AccessKit bridge serves. The
      * model is the thread boundary: adapter callbacks read it, never widgets. */
-    openepl::a11y::Node n;
+    kiln::a11y::Node n;
     n.id = w;
     n.parent = (w == 1) ? 0 : (g.parent_of.count(w) ? g.parent_of[w] : 1);
     n.role = role;
     n.label = name ? name : "";
     n.clickable = g.interactive.count(w) > 0;
-    openepl::a11y::put_node(n);
+    kiln::a11y::put_node(n);
     return 0;
 }
 
 /* One turn of the window: pump input, lay out, publish accessibility, draw.
  *
  * This is a runtime event SOURCE, not a loop of its own. The loop belongs to
- * the runtime (abi/openepl_abi.h), so a window and a timer can be alive in the
+ * the runtime (abi/kiln_abi.h), so a window and a timer can be alive in the
  * same program — which they cannot be when whichever library is linked owns the
  * only loop there is. Registered with a period of 0: a window wants every turn
  * it can get, and deliberately does not power-save, or an app whose window is
@@ -1677,23 +1677,23 @@ static void announce_window_size(SDL_Window* win, int w, int h) {
 }
 
 static int32_t ui_pump(void *) {
-    const int max_frames = env_int("OPENEPL_UI_EXIT_AFTER_FRAMES", 0);
-    const char* dump_path = std::getenv("OPENEPL_UI_DUMP");
+    const int max_frames = env_int("KILN_UI_EXIT_AFTER_FRAMES", 0);
+    const char* dump_path = std::getenv("KILN_UI_DUMP");
 
     if (max_frames == 0 && !Backend::ProcessEvents(g.context, nullptr, false)) {
         /* The window closed. That ends the PROGRAM, not just this source: a
          * windowless process still running its timers is not what closing a
          * window has ever meant. */
-        oe_loop_quit(0);
+        kn_loop_quit(0);
         return 1;
     }
     /* Headless hook: a window manager's resize cannot be scripted, a size can.
-     * Same shape as the designer's OPENEPL_DESIGNER_WELCOME_SIZE. */
+     * Same shape as the designer's KILN_DESIGNER_WELCOME_SIZE. */
     static bool sized_once = false;
     if (!sized_once) {
         sized_once = true;
         int nw = 0, nh = 0;
-        const char* sz = std::getenv("OPENEPL_UI_SIZE");
+        const char* sz = std::getenv("KILN_UI_SIZE");
         if (sz && std::sscanf(sz, "%dx%d", &nw, &nh) == 2 && nw > 0 && nh > 0) {
             if (SDL_Window* win = SDL_GL_GetCurrentWindow()) {
                 SDL_SetWindowSize(win, nw, nh);
@@ -1728,20 +1728,20 @@ static int32_t ui_pump(void *) {
         if (Rml::Element* e = g.widgets[i]) {
             auto off = e->GetAbsoluteOffset();
             auto size = e->GetBox().GetSize();
-            openepl::a11y::set_bounds((uint64_t)i + 1, off.x, off.y, size.x, size.y);
+            kiln::a11y::set_bounds((uint64_t)i + 1, off.x, off.y, size.x, size.y);
         }
     }
-    openepl::a11y::bridge_publish();
+    kiln::a11y::bridge_publish();
 
     /* An assistive technology may have asked to activate a control. The
      * request arrived on the adapter thread and was queued; dispatch it
      * here, on the main thread, where touching widgets is safe. */
-    for (uint64_t id : openepl::a11y::take_actions()) {
+    for (uint64_t id : kiln::a11y::take_actions()) {
         if (Rml::Element* target = resolve(id)) {
-            if (std::getenv("OPENEPL_A11Y_TRACE"))
-                std::fprintf(stderr, "openepl-a11y: dispatching click to widget %llu\n",
+            if (std::getenv("KILN_A11Y_TRACE"))
+                std::fprintf(stderr, "kiln-a11y: dispatching click to widget %llu\n",
                              (unsigned long long)id);
-            openepl::a11y::set_focus(id);
+            kiln::a11y::set_focus(id);
             target->DispatchEvent("click", Rml::Dictionary());
         }
     }
@@ -1752,20 +1752,20 @@ static int32_t ui_pump(void *) {
     /* A frame-limited run counts frames and a timer counts time: with no
      * vsync (the offscreen driver has none) eight frames take a millisecond
      * and a 20 ms timer never fires. Pace headless frames as a display would;
-     * OPENEPL_UI_FRAME_MS=0 for a run that counts frames as a lifetime. */
-    if (max_frames > 0) SDL_Delay(env_int("OPENEPL_UI_FRAME_MS", 16));
+     * KILN_UI_FRAME_MS=0 for a run that counts frames as a lifetime. */
+    if (max_frames > 0) SDL_Delay(env_int("KILN_UI_FRAME_MS", 16));
     if (max_frames > 0 && ++g_frames >= max_frames) {
         /* Test hook: print the accessibility tree. Substrate-independent
          * and needs no accessibility bus, so it works in CI. */
-        if (const char* d = std::getenv("OPENEPL_UI_DUMP_A11Y")) {
+        if (const char* d = std::getenv("KILN_UI_DUMP_A11Y")) {
             if (*d && d[0] != '0') {
-                for (const auto& n : openepl::a11y::snapshot()) {
+                for (const auto& n : kiln::a11y::snapshot()) {
                     std::printf("a11y: id=%llu parent=%llu role=%d bounds=%.0f,%.0f,%.0fx%.0f name=\"%s\"%s\n",
                                 (unsigned long long)n.id, (unsigned long long)n.parent,
                                 n.role, n.x, n.y, n.w, n.h, n.label.c_str(),
                                 n.clickable ? " clickable" : "");
                 }
-                std::printf("a11y: adapter_active=%d\n", (int)openepl::a11y::bridge_active());
+                std::printf("a11y: adapter_active=%d\n", (int)kiln::a11y::bridge_active());
             }
         }
         auto* gl3 = static_cast<RenderInterface_GL3*>(Backend::GetRenderInterface());
@@ -1780,19 +1780,19 @@ static int32_t ui_pump(void *) {
                 std::fclose(f);
             }
         }
-        oe_loop_quit(0);
+        kn_loop_quit(0);
         return 1;
     }
     Backend::PresentFrame();
     return 0;
 }
 
-int oe_ui_run(void) {
+int kn_ui_run(void) {
     if (!g.initialised) return 1;
     g_running = true;   /* from here on, the form's `position` is settled */
 
-    const char* synth_click = std::getenv("OPENEPL_UI_SYNTH_CLICK");
-    const char* mouse_at = std::getenv("OPENEPL_UI_MOUSE");   /* "x,y" — drives hover */
+    const char* synth_click = std::getenv("KILN_UI_SYNTH_CLICK");
+    const char* mouse_at = std::getenv("KILN_UI_MOUSE");   /* "x,y" — drives hover */
 
     if (synth_click) {
         /* Targets a widget HANDLE, not an element id — component ids are
@@ -1803,7 +1803,7 @@ int oe_ui_run(void) {
         sync_grids();
         g.context->Update();
         char* after = nullptr;
-        OpenEPL_Widget target = (OpenEPL_Widget)std::strtoull(synth_click, &after, 10);
+        Kiln_Widget target = (Kiln_Widget)std::strtoull(synth_click, &after, 10);
         Rml::Element* e = resolve(target);
         /* `5.3` clicks the third part of widget 5 — a listbox row, a spinner
          * arrow — and `5.1.3` the third part of that part, which is how a grid
@@ -1817,19 +1817,19 @@ int oe_ui_run(void) {
             const int nth = (int)std::strtol(after + 1, &after, 10);
             e = (nth >= 1 && nth <= e->GetNumChildren()) ? e->GetChild(nth - 1) : nullptr;
         }
-        /* `OPENEPL_UI_SYNTH_EVENT` names what is dispatched, for the events a
+        /* `KILN_UI_SYNTH_EVENT` names what is dispatched, for the events a
          * click cannot stand in for — a grid's double-click. */
-        const char* synth_event = std::getenv("OPENEPL_UI_SYNTH_EVENT");
+        const char* synth_event = std::getenv("KILN_UI_SYNTH_EVENT");
         if (e)
             e->DispatchEvent(synth_event ? synth_event : "click", Rml::Dictionary());
         else
-            std::fprintf(stderr, "openepl-ui: no widget handle %s to click\n", synth_click);
+            std::fprintf(stderr, "kiln-ui: no widget handle %s to click\n", synth_click);
     }
 
     /* A shortcut cannot be verified by looking at a frame, so there is a hook
      * to press one — dispatched as a real keydown, through the same listener a
      * keyboard reaches. */
-    if (const char* key = std::getenv("OPENEPL_UI_SYNTH_KEY")) {
+    if (const char* key = std::getenv("KILN_UI_SYNTH_KEY")) {
         std::string spec;
         for (const char* c = key; *c; c++) spec += (char)tolower((unsigned char)*c);
         Rml::Dictionary p;
@@ -1851,7 +1851,7 @@ int oe_ui_run(void) {
             g.context->ProcessMouseMove(mx, my, 0);
     }
 
-    openepl::a11y::bridge_init();
+    kiln::a11y::bridge_init();
     {
         /* Report the window's screen position so ATs can map node bounds to
          * screen coordinates. Returns 0,0 under Wayland, where a client cannot
@@ -1863,27 +1863,27 @@ int oe_ui_run(void) {
             SDL_GetWindowPosition(win, &wx, &wy);
             SDL_GetWindowSize(win, &ww, &wh);
         }
-        openepl::a11y::bridge_set_window_bounds((float)wx, (float)wy, (float)ww, (float)wh);
+        kiln::a11y::bridge_set_window_bounds((float)wx, (float)wy, (float)ww, (float)wh);
     }
 
     /* `load` before the first frame, so a handler that fills a list or sets a
      * caption is never seen half-done — and after the window exists, so one
      * that reads the form's size gets the real one. */
     if (g_on_load) {
-        OpenEPL_EventFn fn = g_on_load;
+        Kiln_EventFn fn = g_on_load;
         g_on_load = nullptr;   /* once per run, even if the loop is re-entered */
         fn();
     }
 
     g_frames = 0;
-    if (!oe_loop_add(ui_pump, nullptr, 0)) return 1;
-    return oe_loop_run();
+    if (!kn_loop_add(ui_pump, nullptr, 0)) return 1;
+    return kn_loop_run();
 }
 
-void oe_ui_shutdown(void) {
+void kn_ui_shutdown(void) {
     if (!g.initialised) return;
-    openepl::a11y::bridge_shutdown();
-    openepl::a11y::clear();
+    kiln::a11y::bridge_shutdown();
+    kiln::a11y::clear();
     Rml::Shutdown();
     Backend::Shutdown();
     for (auto* b : g_bridges) delete b;

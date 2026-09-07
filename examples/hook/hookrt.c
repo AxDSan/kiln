@@ -3,10 +3,10 @@
  *
  * Built to `libhookrt.so` (or `hookrt.dll`). It stands in for "the application"
  * in the worked hook: it owns a function everyone calls through a slot, and the
- * install call that redirects that slot. The OpenEPL library (`hook.oir`) reaches
+ * install call that redirects that slot. The Kiln library (`hook.kiln`) reaches
  * these three exports through `dll` declarations; the host program links this
  * library and makes the calls. Because there is one copy of the slot in the one
- * loaded `libhookrt`, a detour the OpenEPL library installs is seen by the host —
+ * loaded `libhookrt`, a detour the Kiln library installs is seen by the host —
  * which is the whole point of an in-process hook.
  */
 
@@ -26,7 +26,7 @@ int hookrt_call(int x) { return slot(x); }
 /* How a detour reaches the un-hooked original: through the saved trampoline. */
 int hookrt_original(int x) { return trampoline(x); }
 
-/* Install a detour. The detour arrives as a `void *` — that is how OpenEPL's
+/* Install a detour. The detour arrives as a `void *` — that is how Kiln's
  * `ptr` marshals, and `address of` hands over exactly a function pointer of this
  * shape. The current slot becomes the trampoline; the slot becomes the detour. */
 void hookrt_install(void *detour) {

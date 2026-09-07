@@ -1,17 +1,17 @@
 #!/bin/bash
-# Build a relocatable OpenEPL release bundle.
+# Build a relocatable Kiln release bundle.
 #
-#   tools/package.sh            -> dist/openepl-<version>-linux-x86_64{,.tar.gz}
+#   tools/package.sh            -> dist/kiln-<version>-linux-x86_64{,.tar.gz}
 #   tools/package.sh --no-tar   -> leave the tree, skip the archive
 #
-# The bundle mirrors the repository layout on purpose: `openepl` finds its
-# runtime by walking up from its own executable, so `bin/openepl` resolving to
+# The bundle mirrors the repository layout on purpose: `kiln` finds its
+# runtime by walking up from its own executable, so `bin/kiln` resolving to
 # `<root>/runtime` is what makes the tree relocatable with no extra code and no
 # environment variables.
 #
 # NOTE ON THE WORD "RELEASE": this packages the toolchain and the IDE. The
 # hardened profile for programs *users* build is a different thing entirely, and
-# it is theirs to ask for: `openepl build --release`.
+# it is theirs to ask for: `kiln build --release`.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,10 +23,10 @@ cd "$ROOT"
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 TRIPLE="linux-x86_64"
-NAME="openepl-${VERSION}-${TRIPLE}"
+NAME="kiln-${VERSION}-${TRIPLE}"
 OUT="$ROOT/dist/$NAME"
 
-echo "==> OpenEPL $VERSION -> dist/$NAME"
+echo "==> Kiln $VERSION -> dist/$NAME"
 
 # --- prerequisites --------------------------------------------------------
 # Fail early and by name. A half-built bundle that fails at the link step is
@@ -50,30 +50,30 @@ echo "==> studio"
 # A clean dist: every earlier version's tree and archives for THIS platform
 # go, so dist/ holds only what this build produced — no stale bundle a
 # release upload or a `ls dist` could pick up by mistake.
-rm -rf "$ROOT"/dist/openepl-*-linux-x86_64 "$ROOT"/dist/openepl-*-linux-x86_64.tar.gz \
-       "$ROOT"/dist/openepl-*-linux-x86_64.zip "$ROOT"/dist/openepl-*-linux-x86_64.*.sha256 \
-       "$ROOT"/dist/openepl-*-linux-x86_64.tar.gz.sha256 "$ROOT"/dist/openepl-*-linux-x86_64.zip.sha256
+rm -rf "$ROOT"/dist/kiln-*-linux-x86_64 "$ROOT"/dist/kiln-*-linux-x86_64.tar.gz \
+       "$ROOT"/dist/kiln-*-linux-x86_64.zip "$ROOT"/dist/kiln-*-linux-x86_64.*.sha256 \
+       "$ROOT"/dist/kiln-*-linux-x86_64.tar.gz.sha256 "$ROOT"/dist/kiln-*-linux-x86_64.zip.sha256
 mkdir -p "$OUT"/{bin,licenses}
 
-install -m755 target/release/openepl "$OUT/bin/openepl"
-install -m755 designer/openepl-designer "$OUT/bin/openepl-studio"
-strip "$OUT/bin/openepl" "$OUT/bin/openepl-studio" 2>/dev/null || true
+install -m755 target/release/kiln "$OUT/bin/kiln"
+install -m755 designer/kiln-designer "$OUT/bin/kiln-studio"
+strip "$OUT/bin/kiln" "$OUT/bin/kiln-studio" 2>/dev/null || true
 
 # The binary reports the version it was compiled with; the archive is named
 # after Cargo.toml. A stale target/ makes them disagree, and a bundle whose
-# `openepl version` contradicts its own file name is not one to ship.
-REPORTED="$("$OUT/bin/openepl" version | sed -n 's/^openepl //p')"
+# `kiln version` contradicts its own file name is not one to ship.
+REPORTED="$("$OUT/bin/kiln" version | sed -n 's/^kiln //p')"
 if [ "$REPORTED" != "$VERSION" ]; then
-    echo "bin/openepl reports $REPORTED but Cargo.toml says $VERSION" >&2
+    echo "bin/kiln reports $REPORTED but Cargo.toml says $VERSION" >&2
     exit 1
 fi
 
-# The runtime, ABI and support libraries ship as SOURCE: `openepl build`
+# The runtime, ABI and support libraries ship as SOURCE: `kiln build`
 # compiles and links them into each program, which is what makes dead-stripping
 # per-command possible.
 # `kits/` travels too, so the kits this repository ships are present in an
 # install. They are not on the bundled search path — that is `libs/` — so a
-# user adopts one with `openepl kit add <install>/kits/<name>`, the same way
+# user adopts one with `kiln kit add <install>/kits/<name>`, the same way
 # they would adopt anyone else's.
 for d in runtime abi libs kits templates examples editors assets; do
     cp -r "$d" "$OUT/$d"
@@ -82,6 +82,33 @@ done
 # Only user-facing documentation ships.
 mkdir -p "$OUT/docs"
 cp docs/editors.md "$OUT/docs/editors.md"
+
+# The handbook travels with the bundle, twice over, because it has two readers.
+#
+#   docs/book/  the mdBook, for a browser. Its search index is loaded with a
+#               <script> tag rather than fetch(), so it works from a file://
+#               URL with no server — which is the whole point of shipping it.
+#   docs/src/   the same pages as Markdown, for Studio's own help viewer. It
+#               renders them itself; RmlUi is not a browser and cannot open the
+#               HTML. One source, two renderings, no third copy to drift.
+#
+# Building here rather than committing book/ keeps the generated reference
+# honest: it is whatever `tools/gen-docs.sh` last produced from the toolchain.
+if ! command -v mdbook >/dev/null 2>&1; then
+    echo "mdbook is not installed; the bundle would ship without its handbook" >&2
+    echo "install it with: cargo install mdbook" >&2
+    exit 1
+fi
+mdbook build docs-site >/dev/null
+cp -r docs-site/book "$OUT/docs/book"
+mkdir -p "$OUT/docs/src"
+cp docs-site/src/*.md "$OUT/docs/src/"
+cp -r docs-site/src/assets "$OUT/docs/src/assets"
+
+# editors.md is an mdBook include of the copy in docs/, and Studio's viewer
+# expands includes by reading relative to the page. Flattening it here means
+# the viewer does not need to know where the bundle put docs/editors.md.
+cp docs/editors.md "$OUT/docs/src/editors.md"
 
 # GUI programs link the vendored UI stack, so a user building outside this
 # repository needs its headers and static libraries too.

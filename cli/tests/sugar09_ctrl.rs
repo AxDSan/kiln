@@ -18,7 +18,7 @@ fn repo() -> PathBuf {
 }
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_sugar09c_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_sugar09c_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -27,15 +27,15 @@ fn scratch(tag: &str) -> PathBuf {
 /// Compile `src`; return the built binary's path, or the compiler's stderr.
 fn build(tag: &str, src: &str) -> Result<PathBuf, String> {
     let dir = scratch(tag);
-    let srcpath = dir.join("prog.oir");
+    let srcpath = dir.join("prog.kiln");
     std::fs::write(&srcpath, src).expect("write program source");
     let bin = dir.join("prog");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", srcpath.to_str().unwrap(), "-o"])
         .arg(&bin)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     if out.status.success() {
         Ok(bin)
     } else {
@@ -71,15 +71,15 @@ fn build_fails(tag: &str, src: &str) -> String {
 /// no code, and only the IR can say that.
 fn emit(tag: &str, src: &str, extra: &[&str]) -> String {
     let dir = scratch(tag);
-    let srcpath = dir.join("prog.oir");
+    let srcpath = dir.join("prog.kiln");
     std::fs::write(&srcpath, src).expect("write program source");
     let mut args: Vec<&str> = vec!["emit", srcpath.to_str().unwrap()];
     args.extend_from_slice(extra);
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(&args)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl emit");
+        .expect("run kiln emit");
     assert!(
         out.status.success(),
         "emit failed:\n{}",
@@ -336,7 +336,7 @@ end
 #[test]
 fn a_release_build_still_checks_what_it_drops() {
     let dir = scratch("assert_check");
-    let srcpath = dir.join("prog.oir");
+    let srcpath = dir.join("prog.kiln");
     std::fs::write(
         &srcpath,
         r#"module m
@@ -349,11 +349,11 @@ end
 "#,
     )
     .expect("write program source");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["emit", srcpath.to_str().unwrap(), "--release"])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl emit");
+        .expect("run kiln emit");
     assert!(!out.status.success(), "a release build accepted a broken assert");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -367,7 +367,7 @@ end
 // ---------------------------------------------------------------------------
 
 /// An enum's members are ints numbered from **1**, in declaration order — the
-/// same place every position in OpenEPL counts from. They are reached only
+/// same place every position in Kiln counts from. They are reached only
 /// through the enum's name, so two enums may both have a `red`, and the name
 /// written as a type is `int`: a parameter typed by the enum takes its members
 /// and takes a plain int, because that is what they are.

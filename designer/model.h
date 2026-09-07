@@ -1,17 +1,17 @@
-/* The designer's document model: what `openepl inspect` reported, plus edits.
+/* The designer's document model: what `kiln inspect` reported, plus edits.
  *
  * Deliberately dumb — a list of components with string properties. The compiler
  * owns all meaning; the designer only moves text around.
  */
-#ifndef OPENEPL_DESIGNER_MODEL_H
-#define OPENEPL_DESIGNER_MODEL_H
+#ifndef KILN_DESIGNER_MODEL_H
+#define KILN_DESIGNER_MODEL_H
 
 #include <functional>
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace openepl::designer {
+namespace kiln::designer {
 
 struct Component {
     std::string id;
@@ -58,8 +58,8 @@ struct Component {
 };
 
 struct Model {
-    std::string path;                 // the .oir being edited
-    /// The project.oeproj this file belongs to, or "" for a loose file. Set
+    std::string path;                 // the .kiln being edited
+    /// The project.kproj this file belongs to, or "" for a loose file. Set
     /// when the model was opened THROUGH a project; the file is what is
     /// edited and saved, the project is what is remembered.
     std::string project;
@@ -151,13 +151,13 @@ struct Model {
     }
 };
 
-/// Load by running `openepl inspect` — never by parsing.oir here.
+/// Load by running `kiln inspect` — never by parsing.kiln here.
 ///
-/// `path` may also be a `project.oeproj` or a directory holding one; the
-/// entry is then resolved through `openepl project`, and `out.path` is that
+/// `path` may also be a `project.kproj` or a directory holding one; the
+/// entry is then resolved through `kiln project`, and `out.path` is that
 /// entry. A save splices into `out.path`, so it must never be the project
 /// file.
-bool load_model(const std::string& openepl_bin, const std::string& path, Model& out,
+bool load_model(const std::string& kiln_bin, const std::string& path, Model& out,
                 std::string& error);
 
 /// Decides whether a property value must be written as a quoted text literal.
@@ -186,7 +186,7 @@ bool rename_id(Model& m, const std::string& old_id, const std::string& new_id, s
 std::string rename_references(const std::string& line, const std::string& old_id,
                               const std::string& new_id);
 
-/// Render the model's `form … end` block as .oir source.
+/// Render the model's `form … end` block as .kiln source.
 std::string emit_form(const Model& m, const NeedsQuotes& needs_quotes);
 
 /// Render one module-level component as a top-level `<type> <id> … end` block.
@@ -203,5 +203,5 @@ std::string emit_module_component(const Component& c, const NeedsQuotes& needs_q
 bool save_model(Model& m, const std::vector<std::string>& new_subs,
                 const NeedsQuotes& needs_quotes, std::string& error);
 
-} // namespace openepl::designer
+} // namespace kiln::designer
 #endif

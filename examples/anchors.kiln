@@ -1,0 +1,45 @@
+# Anchors: which edges of the window a control keeps its distance from.
+#
+# The form is 400x300. Resize the window and the OK button stays in the
+# bottom-right corner while the name box stretches with the width; the label
+# has the default anchors (left,top) and stays where it was drawn.
+#
+#   kiln run examples/anchors.kiln
+module anchors
+use ui
+
+form win
+  title  = "Anchors"
+  width  = 400
+  height = 300
+
+  button ok_button
+    text    = "OK"
+    left    = 250
+    top     = 230
+    width   = 120
+    height  = 36
+    color   = "#ffffff"
+    anchors = "right,bottom"
+    on click: on_ok
+  end
+
+  editbox name_box
+    text    = "stretches with the window"
+    left    = 20
+    top     = 44
+    width   = 360
+    height  = 26
+    anchors = "left,right"
+  end
+
+  label caption
+    text = "Resize the window."
+    left = 20
+    top  = 20
+  end
+end
+
+sub on_ok
+  call print_text("ok at {ok_button.left}")
+end

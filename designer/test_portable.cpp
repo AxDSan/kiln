@@ -53,7 +53,7 @@ static void sleep_ms(int ms) {
 }
 
 int main(int argc, char** argv) {
-    using namespace openepl::sys;
+    using namespace kiln::sys;
 
     // --- the child roles -------------------------------------------------
     if (argc > 1 && std::strcmp(argv[1], "--echo") == 0) {
@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
     check("temp_dir exists", exists(temp_dir()));
     check("cache_dir is somewhere", !cache_dir().empty());
 
-    const std::string scratch = temp_dir() + "/openepl_portable_test";
+    const std::string scratch = temp_dir() + "/kiln_portable_test";
     make_dirs(scratch + "/a/b");
     check("make_dirs makes every level", exists(scratch + "/a/b"));
     check("XDG_DATA_HOME wins for data_dir", [&] {
@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
 #else
         setenv("XDG_DATA_HOME", scratch.c_str(), 1);
 #endif
-        return data_dir() == scratch + "/openepl";
+        return data_dir() == scratch + "/kiln";
     }());
     check("file_uri has three slashes before a drive letter, two otherwise",
           file_uri(self).rfind(is_root_dir(self.substr(0, 3)) ? "file:///" : "file://", 0) == 0);

@@ -21,7 +21,7 @@ fn repo() -> PathBuf {
 }
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_sugar09_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_sugar09_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -30,15 +30,15 @@ fn scratch(tag: &str) -> PathBuf {
 /// Compile `src`; return the built binary's path, or the compiler's stderr.
 fn build(tag: &str, src: &str) -> Result<PathBuf, String> {
     let dir = scratch(tag);
-    let srcpath = dir.join("prog.oir");
+    let srcpath = dir.join("prog.kiln");
     std::fs::write(&srcpath, src).expect("write program source");
     let bin = dir.join("prog");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", srcpath.to_str().unwrap(), "-o"])
         .arg(&bin)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     if out.status.success() {
         Ok(bin)
     } else {

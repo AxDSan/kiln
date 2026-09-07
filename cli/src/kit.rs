@@ -17,10 +17,10 @@
 //! A kit is found in one of three places, and the first match wins:
 //!
 //!   1. `kits/` in the project (walking up from the working directory),
-//!   2. `~/.openepl/kits/`, where `openepl kit add` unpacks,
+//!   2. `~/.kiln/kits/`, where `kiln kit add` unpacks,
 //!   3. the bundled `libs/`.
 //!
-//! `openepl kits` prints which one won and from where. A resolution people
+//! `kiln kits` prints which one won and from where. A resolution people
 //! cannot inspect is a resolution they cannot debug, and "it worked on my
 //! machine" is nearly always a shadowing question.
 
@@ -142,17 +142,17 @@ fn project_kits_dir() -> Option<PathBuf> {
     }
 }
 
-/// `~/.openepl/kits`. An unset `HOME` skips the tier rather than guessing.
+/// `~/.kiln/kits`. An unset `HOME` skips the tier rather than guessing.
 pub fn user_kits_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".openepl").join("kits"))
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".kiln").join("kits"))
 }
 
 /// A directory is a kit when it holds the metadata TU the compiler dlopens
-/// (`*_libinfo.c`) or any declaration bundle (`*.oed`). That is the same test
+/// (`*_libinfo.c`) or any declaration bundle (`*.kdecl`). That is the same test
 /// `use` and the loader apply, so nothing can be listed that cannot then be
 /// used, and a declaration-only kit — one that ships `dll`/`record`/`const`
 /// lines and no C — is a first-class kit. A kit that splits its declarations
-/// over several `.oed` files counts on the first one found.
+/// over several `.kdecl` files counts on the first one found.
 fn is_kit_dir(dir: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return false;
@@ -160,7 +160,7 @@ fn is_kit_dir(dir: &Path) -> bool {
     entries.flatten().any(|e| {
         e.file_name()
             .to_str()
-            .is_some_and(|n| n.ends_with(".oed") || n.ends_with("_libinfo.c"))
+            .is_some_and(|n| n.ends_with(".kdecl") || n.ends_with("_libinfo.c"))
     })
 }
 
@@ -195,7 +195,7 @@ fn non_empty(s: String) -> Option<String> {
     }
 }
 
-/// `openepl kits` — what is installed, at which version, and from where.
+/// `kiln kits` — what is installed, at which version, and from where.
 ///
 /// Line-based like `inspect` and `templates`, with the kit name repeated on
 /// every line so the fields can be read in any order and an unknown line kind
@@ -217,8 +217,8 @@ pub fn cmd_list(repo_root: &Path) -> i32 {
                 k.dir.join(icon).display()
             );
         }
-        // A kit's declaration bundle, read through the ONE `.oed` reader the
-        // loader uses — so what `openepl kits` says a kit declares and what a
+        // A kit's declaration bundle, read through the ONE `.kdecl` reader the
+        // loader uses — so what `kiln kits` says a kit declares and what a
         // program gets from `use` can never disagree. A bundle that will not
         // parse is simply not listed here; the build is where that error is
         // worth stopping for.
@@ -239,30 +239,30 @@ pub fn cmd_list(repo_root: &Path) -> i32 {
     0
 }
 
-/// `openepl kit add <path-or-tarball>` — unpack into `~/.openepl/kits/`.
+/// `kiln kit add <path-or-tarball>` — unpack into `~/.kiln/kits/`.
 pub fn cmd_add(args: &[String]) -> i32 {
     let mut src: Option<PathBuf> = None;
     for a in args {
         if a.starts_with('-') {
-            eprintln!("openepl: unknown flag `{a}`");
+            eprintln!("kiln: unknown flag `{a}`");
             return 2;
         }
         if src.is_some() {
-            eprintln!("openepl: unexpected argument `{a}`");
+            eprintln!("kiln: unexpected argument `{a}`");
             return 2;
         }
         src = Some(PathBuf::from(a));
     }
     let Some(src) = src else {
-        eprintln!("openepl: usage: openepl kit add <path-or-tarball>");
+        eprintln!("kiln: usage: kiln kit add <path-or-tarball>");
         return 2;
     };
     if !src.exists() {
-        eprintln!("openepl: {} does not exist", src.display());
+        eprintln!("kiln: {} does not exist", src.display());
         return 1;
     }
     let Some(dest_root) = user_kits_dir() else {
-        eprintln!("openepl: HOME is not set, so there is nowhere to install a kit");
+        eprintln!("kiln: HOME is not set, so there is nowhere to install a kit");
         return 1;
     };
 
@@ -270,13 +270,13 @@ pub fn cmd_add(args: &[String]) -> i32 {
     // unpacking is it known what is inside — the kit may sit at the top level
     // or one directory down, and refusing to guess before looking is what makes
     // both layouts work.
-    let scratch = std::env::temp_dir().join(format!("openepl-kit-add-{}", std::process::id()));
+    let scratch = std::env::temp_dir().join(format!("kiln-kit-add-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&scratch);
     let found = if src.is_dir() {
         find_kit_root(&src)
     } else {
         if let Err(e) = std::fs::create_dir_all(&scratch) {
-            eprintln!("openepl: cannot create {}: {e}", scratch.display());
+            eprintln!("kiln: cannot create {}: {e}", scratch.display());
             return 1;
         }
         let status = Command::new("tar")
@@ -288,12 +288,12 @@ pub fn cmd_add(args: &[String]) -> i32 {
         match status {
             Ok(s) if s.success() => {}
             Ok(_) => {
-                eprintln!("openepl: tar failed to unpack {}", src.display());
+                eprintln!("kiln: tar failed to unpack {}", src.display());
                 let _ = std::fs::remove_dir_all(&scratch);
                 return 1;
             }
             Err(e) => {
-                eprintln!("openepl: cannot run tar: {e}");
+                eprintln!("kiln: cannot run tar: {e}");
                 let _ = std::fs::remove_dir_all(&scratch);
                 return 1;
             }
@@ -303,7 +303,7 @@ pub fn cmd_add(args: &[String]) -> i32 {
 
     let Some(kit_dir) = found else {
         eprintln!(
-            "openepl: {} contains no kit — a kit directory holds a *_libinfo.c metadata source",
+            "kiln: {} contains no kit — a kit directory holds a *_libinfo.c metadata source",
             src.display()
         );
         let _ = std::fs::remove_dir_all(&scratch);
@@ -314,7 +314,7 @@ pub fn cmd_add(args: &[String]) -> i32 {
         .and_then(|n| n.to_str())
         .map(str::to_string)
     else {
-        eprintln!("openepl: cannot name the kit in {}", src.display());
+        eprintln!("kiln: cannot name the kit in {}", src.display());
         let _ = std::fs::remove_dir_all(&scratch);
         return 1;
     };
@@ -323,7 +323,7 @@ pub fn cmd_add(args: &[String]) -> i32 {
     let replaced = dest.exists();
     if replaced {
         if let Err(e) = std::fs::remove_dir_all(&dest) {
-            eprintln!("openepl: cannot replace {}: {e}", dest.display());
+            eprintln!("kiln: cannot replace {}: {e}", dest.display());
             let _ = std::fs::remove_dir_all(&scratch);
             return 1;
         }
@@ -331,7 +331,7 @@ pub fn cmd_add(args: &[String]) -> i32 {
     let result = std::fs::create_dir_all(&dest_root).and_then(|_| copy_tree(&kit_dir, &dest));
     let _ = std::fs::remove_dir_all(&scratch);
     if let Err(e) = result {
-        eprintln!("openepl: cannot install into {}: {e}", dest.display());
+        eprintln!("kiln: cannot install into {}: {e}", dest.display());
         return 1;
     }
 
@@ -401,7 +401,7 @@ pub fn overlay_root(repo_root: &Path, uses: &[String]) -> Result<PathBuf, String
         return Ok(repo_root.to_path_buf());
     }
 
-    let stage = std::env::temp_dir().join(format!("openepl-kits-{}", std::process::id()));
+    let stage = std::env::temp_dir().join(format!("kiln-kits-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&stage);
     std::fs::create_dir_all(stage.join("libs"))
         .map_err(|e| format!("cannot stage kit root {}: {e}", stage.display()))?;

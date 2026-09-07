@@ -1,23 +1,23 @@
-//! `openepl` — the command-line toolchain.
+//! `kiln` — the command-line toolchain.
 //!
 //! Subcommands:
-//!   openepl build <in.oir> [-o <out>]   parse -> lower -> clang -> native binary
-//!   openepl run   <in.oir> [-o <out>]   build, then execute it
+//!   kiln build <in.kiln> [-o <out>]   parse -> lower -> clang -> native binary
+//!   kiln run   <in.kiln> [-o <out>]   build, then execute it
 //!     …either with --release            optimised, hardened and stripped
-//!   openepl emit  <in.oir>              print the generated LLVM IR to stdout
-//!   openepl lsp                         language server (stdio) for editors
-//!   openepl commands                    list available commands and components
-//!   openepl inspect <in.oir>            dump the form model, one fact per line
-//!   openepl templates                   list project templates
-//!   openepl new <tmpl> <dir>            create a project from a template
+//!   kiln emit  <in.kiln>              print the generated LLVM IR to stdout
+//!   kiln lsp                         language server (stdio) for editors
+//!   kiln commands                    list available commands and components
+//!   kiln inspect <in.kiln>            dump the form model, one fact per line
+//!   kiln templates                   list project templates
+//!   kiln new <tmpl> <dir>            create a project from a template
 //!     [--name <module>] [--title <text>]  (the title defaults to "Untitled App")
-//!   openepl kits                        list resolved kits and where they came from
-//!   openepl kit add <path>              install a kit into ~/.openepl/kits
-//!   openepl project <file-or-dir>       dump a project file's resolved fields
-//!   openepl version                     the toolchain and ABI versions
+//!   kiln kits                        list resolved kits and where they came from
+//!   kiln kit add <path>              install a kit into ~/.kiln/kits
+//!   kiln project <file-or-dir>       dump a project file's resolved fields
+//!   kiln version                     the toolchain and ABI versions
 //!
-//! `build`, `run`, `emit` and `inspect` take a `project.oeproj`, or a directory
-//! holding one, in place of the `.oir`; the entry file comes from the project.
+//! `build`, `run`, `emit` and `inspect` take a `project.kproj`, or a directory
+//! holding one, in place of the `.kiln`; the entry file comes from the project.
 //!
 //! The pipeline lowers a module to LLVM IR, then has `clang` assemble it and
 //! link the runtime sources, producing an ordinary native executable.
@@ -37,14 +37,14 @@ mod templates;
 
 use std::collections::HashMap;
 
-use openepl_backend::lower_module_from;
-use openepl_ir::registry::Registry;
-use openepl_ir::validate::{validate_with, Hints};
-use openepl_ir::{parse_with, Module, ParseOptions, Target};
+use kiln_backend::lower_module_from;
+use kiln_ir::registry::Registry;
+use kiln_ir::validate::{validate_with, Hints};
+use kiln_ir::{parse_with, Module, ParseOptions, Target};
 
 fn main() {
     // Die quietly when a reader goes away, the way every other command-line
-    // tool does: `openepl commands | head` should not print a panic.
+    // tool does: `kiln commands | head` should not print a panic.
     #[cfg(unix)]
     unsafe {
         libc_signal_default();
@@ -84,39 +84,39 @@ fn run(args: &[String]) -> i32 {
         "commands" => match find_repo_root() {
             Some(root) => cmd_commands(&root, rest),
             None => {
-                eprintln!("openepl: could not locate the OpenEPL runtime");
+                eprintln!("kiln: could not locate the Kiln runtime");
                 1
             }
         },
         "kits" => match find_repo_root() {
             Some(root) => kit::cmd_list(&root),
             None => {
-                eprintln!("openepl: could not locate the OpenEPL libraries");
+                eprintln!("kiln: could not locate the Kiln libraries");
                 1
             }
         },
         "kit" => match rest.split_first() {
             Some((verb, kit_args)) if verb == "add" => kit::cmd_add(kit_args),
             Some((verb, _)) => {
-                eprintln!("openepl: unknown `kit` verb `{verb}` — expected `add`");
+                eprintln!("kiln: unknown `kit` verb `{verb}` — expected `add`");
                 2
             }
             None => {
-                eprintln!("openepl: usage: openepl kit add <path-or-tarball>");
+                eprintln!("kiln: usage: kiln kit add <path-or-tarball>");
                 2
             }
         },
         "templates" => match find_repo_root() {
             Some(root) => templates::cmd_list(&root),
             None => {
-                eprintln!("openepl: could not locate the OpenEPL templates directory");
+                eprintln!("kiln: could not locate the Kiln templates directory");
                 1
             }
         },
         "new" => match find_repo_root() {
             Some(root) => templates::cmd_new(&root, rest),
             None => {
-                eprintln!("openepl: could not locate the OpenEPL templates directory");
+                eprintln!("kiln: could not locate the Kiln templates directory");
                 1
             }
         },
@@ -130,7 +130,7 @@ fn run(args: &[String]) -> i32 {
             0
         }
         other => {
-            eprintln!("openepl: unknown subcommand `{other}`\n");
+            eprintln!("kiln: unknown subcommand `{other}`\n");
             usage();
             2
         }
@@ -139,46 +139,47 @@ fn run(args: &[String]) -> i32 {
 
 fn usage() {
     eprintln!(
-        "openepl — the OpenEPL toolchain\n\n\
+        "kiln — the Kiln toolchain\n\n\
          USAGE:\n  \
-         openepl build <in.oir> [-o <out>]   compile to a native binary\n  \
-         openepl run   <in.oir> [-o <out>]   compile and run\n  \
-         openepl build|run --release         …optimised, hardened and stripped\n  \
-         openepl build --emit-ir             …keeping the .ll it handed clang\n  \
-         openepl build --os windows          …for Windows x86-64 (needs mingw-w64)\n  \
-         openepl build --target sharedlib    …a library, with its C header beside it\n  \
+         kiln build <in.kiln> [-o <out>]   compile to a native binary\n  \
+         kiln run   <in.kiln> [-o <out>]   compile and run\n  \
+         kiln build|run --release         …optimised, hardened and stripped\n  \
+         kiln build --emit-ir             …keeping the .ll it handed clang\n  \
+         kiln build --os windows          …for Windows x86-64 (needs mingw-w64)\n  \
+         kiln build --target sharedlib    …a library, with its C header beside it\n  \
            [--header <path>]                 where the header goes (default <module>.h)\n  \
-         openepl emit  <in.oir>              print generated LLVM IR\n  \
-         openepl inspect <in.oir>            dump the form model (for the designer)\n  \
-         openepl lsp                         language server over stdio (see docs/editors.md)\n  \
-         openepl commands [--use <lib>]      list the commands and components available\n  \
-         openepl templates                   list the available project templates\n  \
-         openepl new <template> <dir>        create a project from a template\n  \
+         kiln emit  <in.kiln>              print generated LLVM IR\n  \
+         kiln debug <program>             read a built program's debug information\n  \
+         kiln inspect <in.kiln>            dump the form model (for the designer)\n  \
+         kiln lsp                         language server over stdio (see docs/editors.md)\n  \
+         kiln commands [--use <lib>]      list the commands and components available\n  \
+         kiln templates                   list the available project templates\n  \
+         kiln new <template> <dir>        create a project from a template\n  \
            [--name <module>] [--title <text>]  the caption defaults to \"Untitled App\"\n  \
-         openepl kits                        list the kits found, and from where\n  \
-         openepl kit add <path>              install a kit into ~/.openepl/kits\n  \
-         openepl project <file-or-dir>       dump a project file's resolved fields\n  \
-         openepl project <file-or-dir> set <key>=<value>...\n  \
+         kiln kits                        list the kits found, and from where\n  \
+         kiln kit add <path>              install a kit into ~/.kiln/kits\n  \
+         kiln project <file-or-dir>       dump a project file's resolved fields\n  \
+         kiln project <file-or-dir> set <key>=<value>...\n  \
            the only writer of a project file: name, main, target, kits, version\n  \
-         openepl version                     print the toolchain and ABI versions\n\n\
-         Wherever <in.oir> is accepted, a project.oeproj or its directory is too.\n"
+         kiln version                     print the toolchain and ABI versions\n\n\
+         Wherever <in.kiln> is accepted, a project.kproj or its directory is too.\n"
     );
 }
 
-/// `openepl version` — two lines, each one fact, so Studio reads the first
+/// `kiln version` — two lines, each one fact, so Studio reads the first
 /// and a library author checking compatibility reads the second.
 ///
 /// The ABI number is read out of the header that defines it rather than
 /// restated here: a version this command reports and a version the loader
 /// checks have to be the same number, and the header is where both live.
 fn version_text() -> String {
-    const ABI_HEADER: &str = include_str!("../../abi/openepl_abi.h");
+    const ABI_HEADER: &str = include_str!("../../abi/kiln_abi.h");
     let abi = ABI_HEADER
         .lines()
-        .find_map(|l| l.strip_prefix("#define OPENEPL_ABI_VERSION"))
+        .find_map(|l| l.strip_prefix("#define KILN_ABI_VERSION"))
         .map(str::trim)
         .unwrap_or("?");
-    format!("openepl {}\nabi {abi}\n", env!("CARGO_PKG_VERSION"))
+    format!("kiln {}\nabi {abi}\n", env!("CARGO_PKG_VERSION"))
 }
 
 /// What a build/emit invocation was asked to do.
@@ -191,7 +192,7 @@ struct Io {
     release: bool,
     /// Keep the `.ll` the build handed clang. Off by default: it is an
     /// intermediate, and leaving one beside every binary litters a project
-    /// directory with files nobody asked for. `openepl emit` prints the IR
+    /// directory with files nobody asked for. `kiln emit` prints the IR
     /// for anyone who wants to read it.
     emit_ir: bool,
     /// The operating system the output is for.
@@ -202,7 +203,7 @@ struct Io {
     /// Where the output goes when the input came through a project file: the
     /// project's directory and name. Naming it after the entry would call
     /// every program `main`, and putting it in the working directory would
-    /// collide with the project directory itself for `openepl build <dir>`.
+    /// collide with the project directory itself for `kiln build <dir>`.
     project_output: Option<PathBuf>,
 }
 
@@ -221,7 +222,7 @@ enum Os {
 
 impl Os {
     /// The machine this toolchain is running on: the default, and the only
-    /// one whose output `openepl run` can execute.
+    /// one whose output `kiln run` can execute.
     fn host() -> Os {
         Os::Linux
     }
@@ -270,9 +271,9 @@ const MINGW_OBJDUMP: &str = "x86_64-w64-mingw32-objdump";
 /// references it too, and one nothing references is dead-stripped.
 const EMPTY_RESOURCE_TABLE: &str = "\n; No resources to embed; the table is defined anyway because a PE link has no\n\
      ; weak undefined symbol for libs/ui to read as \"none\".\n\
-     @oe_embedded_resources = constant [1 x { ptr, ptr, i64 }] [{ ptr, ptr, i64 } zeroinitializer]\n";
+     @kn_embedded_resources = constant [1 x { ptr, ptr, i64 }] [{ ptr, ptr, i64 } zeroinitializer]\n";
 
-/// Parse `<in.oir> [-o out] [--target kind] [--os name] [--release]` from an
+/// Parse `<in.kiln> [-o out] [--target kind] [--os name] [--release]` from an
 /// argument slice.
 ///
 /// The input may be a project file or its directory. Resolved here, in the one
@@ -338,7 +339,7 @@ fn parse_io_args(rest: &[String]) -> Result<Io, String> {
         }
         i += 1;
     }
-    let input = input.ok_or("no input .oir file given")?;
+    let input = input.ok_or("no input .kiln file given")?;
     Ok(Io {
         input,
         output,
@@ -355,7 +356,7 @@ fn cmd_emit(rest: &[String]) -> i32 {
     let io = match parse_io(rest) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             return 2;
         }
     };
@@ -365,7 +366,7 @@ fn cmd_emit(rest: &[String]) -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             1
         }
     }
@@ -387,13 +388,13 @@ fn cmd_commands(repo_root: &Path, args: &[String]) -> i32 {
                 match args.get(i) {
                     Some(v) => uses.push(v.clone()),
                     None => {
-                        eprintln!("openepl: `--use` needs a library name");
+                        eprintln!("kiln: `--use` needs a library name");
                         return 2;
                     }
                 }
             }
             s => {
-                eprintln!("openepl: unexpected argument `{s}`");
+                eprintln!("kiln: unexpected argument `{s}`");
                 return 2;
             }
         }
@@ -401,19 +402,19 @@ fn cmd_commands(repo_root: &Path, args: &[String]) -> i32 {
     }
 
     // Metadata only: listing what exists must not require the ability to link
-    // it, or `openepl commands --use ui` would fail on any machine that has not
+    // it, or `kiln commands --use ui` would fail on any machine that has not
     // vendored the UI stack.
     let root = match kit::overlay_root(repo_root, &uses) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             return 1;
         }
     };
     let plan = match libload::load_metadata(&root, &uses) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             return 1;
         }
     };
@@ -433,6 +434,19 @@ fn cmd_commands(repo_root: &Path, args: &[String]) -> i32 {
             Some(r) => println!("command: {name}({params}) -> {}", r.as_str()),
             None => println!("command: {name}({params})"),
         }
+        // ADDED lines, on the same rule the component listing states below: a
+        // reader that predates them must still see exactly what it saw before.
+        // Most commands carry neither, and print neither.
+        if let Some(doc) = plan.registry.doc(name) {
+            if !doc.summary.is_empty() {
+                println!("doc: {name} {}", doc.summary);
+            }
+            // One line per line, because an example is several and this
+            // listing is line-oriented. Order is the example's own.
+            for line in doc.example.lines() {
+                println!("example: {name} {line}");
+            }
+        }
     }
 
     let mut components: Vec<&str> = plan.registry.component_names().collect();
@@ -448,8 +462,8 @@ fn cmd_commands(repo_root: &Path, args: &[String]) -> i32 {
         // against files a kit's visual control under the System tray, so the
         // kind has to travel with the listing.
         let kind = match desc.kind {
-            openepl_ir::registry::ComponentKind::Visual => "visual",
-            openepl_ir::registry::ComponentKind::NonVisual => "nonvisual",
+            kiln_ir::registry::ComponentKind::Visual => "visual",
+            kiln_ir::registry::ComponentKind::NonVisual => "nonvisual",
         };
         println!("kind: {type_name} {kind}");
         for p in &desc.properties {
@@ -465,7 +479,7 @@ fn cmd_commands(repo_root: &Path, args: &[String]) -> i32 {
         }
     }
 
-    // Foreign declarations and constants a kit contributes through an `.oed`
+    // Foreign declarations and constants a kit contributes through an `.kdecl`
     // bundle. `dll:` and `const:` are ADDED line kinds, read by prefix like the
     // others, so a reader that predates them is unaffected. A `dll` reads as a
     // signature the same way a command does; a `const` reports its type.
@@ -521,7 +535,7 @@ fn cmd_commands(repo_root: &Path, args: &[String]) -> i32 {
 /// Dump a module's form model as plain lines, for the designer to read.
 ///
 /// This is the designer's ONLY way to learn a file's contents: the Rust parser
-/// stays the single reader of `.oir`. If the designer ever parsed the text
+/// stays the single reader of `.kiln`. If the designer ever parsed the text
 /// itself there would be two grammars to keep in step, and they would drift
 ///.
 ///
@@ -530,7 +544,7 @@ fn cmd_inspect(rest: &[String]) -> i32 {
     let io = match parse_io(rest) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             return 2;
         }
     };
@@ -538,14 +552,14 @@ fn cmd_inspect(rest: &[String]) -> i32 {
     let src = match std::fs::read_to_string(&input) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("openepl: cannot read {}: {e}", input.display());
+            eprintln!("kiln: cannot read {}: {e}", input.display());
             return 1;
         }
     };
-    let module = match openepl_ir::parse(&src) {
+    let module = match kiln_ir::parse(&src) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             return 1;
         }
     };
@@ -600,7 +614,7 @@ fn cmd_inspect(rest: &[String]) -> i32 {
 }
 
 /// The `prop:` and `handler:` lines of a form or component, keyed by its id.
-fn print_members(id: &str, props: &[(String, openepl_ir::Expr)], handlers: &[(String, String)]) {
+fn print_members(id: &str, props: &[(String, kiln_ir::Expr)], handlers: &[(String, String)]) {
     for (name, value) in props {
         println!("prop: {id} {name} {}", escape_value(&literal_text(value)));
     }
@@ -624,7 +638,7 @@ fn print_members(id: &str, props: &[(String, openepl_ir::Expr)], handlers: &[(St
 /// parser consumed — and the designer would append it as new on save rather
 /// than splice at a guess.
 fn module_component_spans(src: &str, module: &Module) -> Vec<Option<(usize, usize)>> {
-    use openepl_ir::lexer::{lex, Tok};
+    use kiln_ir::lexer::{lex, Tok};
     let toks = match lex(src) {
         Ok(t) => t,
         Err(_) => return module.components().map(|_| None).collect(),
@@ -656,14 +670,14 @@ fn module_component_spans(src: &str, module: &Module) -> Vec<Option<(usize, usiz
 }
 
 /// Render a property literal as the designer should display and re-emit it.
-fn literal_text(e: &openepl_ir::Expr) -> String {
-    use openepl_ir::Expr;
+fn literal_text(e: &kiln_ir::Expr) -> String {
+    use kiln_ir::Expr;
     match e {
         Expr::TextLit(s) => s.clone(),
         Expr::IntLit(v) => v.to_string(),
         // A property written as a bit pattern (`0xFF`) is shown as the number
         // it is: the designer re-emits what it is shown, and it writes decimal.
-        Expr::BitsLit(v) => openepl_ir::sema::bits_value(*v).to_string(),
+        Expr::BitsLit(v) => kiln_ir::sema::bits_value(*v).to_string(),
         Expr::DoubleLit(v) => v.to_string(),
         Expr::BoolLit(b) => b.to_string(),
         _ => String::new(),
@@ -694,7 +708,7 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
     let io = match parse_io(rest) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             return 2;
         }
     };
@@ -703,12 +717,12 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
         // Before any compiling: the one-line answer beats the same fact
         // arriving as a clang error after the IR has been generated.
         if let Err(e) = mingw_available() {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             return 1;
         }
         if then_run {
             eprintln!(
-                "openepl: cannot run a Windows program here — build it, then run it under \
+                "kiln: cannot run a Windows program here — build it, then run it under \
                  wine or on Windows"
             );
             return 2;
@@ -717,15 +731,15 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
     let (mut ll, mut plan, target, module) = match compile(&input, io.target, io.os, io.release) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             return 1;
         }
     };
 
     // A shared library that declares `dll_attach`/`dll_detach` gets a platform
     // loader entry — `DllMain` on Windows, an ELF constructor on Linux. The
-    // shim lives in runtime/oe_dllmain.c, which compiles to nothing unless
-    // OE_DLLMAIN is defined, so turning it on for this one target leaves every
+    // shim lives in runtime/kn_dllmain.c, which compiles to nothing unless
+    // KN_DLLMAIN is defined, so turning it on for this one target leaves every
     // other build (and the ordinary hook-less sharedlib) exactly as it was.
     // The macros carry the two facts the C cannot know for itself: the module's
     // `<module>_init` symbol, and which of the two hooks the module defined.
@@ -733,15 +747,15 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
         let has_attach = module.subs().any(|s| s.name == "dll_attach");
         let has_detach = module.subs().any(|s| s.name == "dll_detach");
         if has_attach || has_detach {
-            plan.build.defines.push("OE_DLLMAIN".into());
+            plan.build.defines.push("KN_DLLMAIN".into());
             plan.build
                 .defines
-                .push(format!("OE_MODULE_INIT={}_init", module.name));
+                .push(format!("KN_MODULE_INIT={}_init", module.name));
             if has_attach {
-                plan.build.defines.push("OE_HAS_ATTACH".into());
+                plan.build.defines.push("KN_HAS_ATTACH".into());
             }
             if has_detach {
-                plan.build.defines.push("OE_HAS_DETACH".into());
+                plan.build.defines.push("KN_HAS_DETACH".into());
             }
         }
     }
@@ -761,7 +775,7 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
                 }
             }
             Err(e) => {
-                eprintln!("openepl: {e}");
+                eprintln!("kiln: {e}");
                 return 1;
             }
         }
@@ -769,7 +783,7 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
 
     let ll_path = out_bin.with_extension("ll");
     if let Err(e) = std::fs::write(&ll_path, &ll) {
-        eprintln!("openepl: cannot write {}: {e}", ll_path.display());
+        eprintln!("kiln: cannot write {}: {e}", ll_path.display());
         return 1;
     }
 
@@ -787,9 +801,9 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
     if let Err(code) = linked {
         return code;
     }
-    eprintln!("openepl: wrote {}", out_bin.display());
+    eprintln!("kiln: wrote {}", out_bin.display());
     if io.emit_ir {
-        eprintln!("openepl: wrote {}", ll_path.display());
+        eprintln!("kiln: wrote {}", ll_path.display());
     }
 
     // A library is only usable with its prototypes, so they come out of the
@@ -800,12 +814,12 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
             .header
             .unwrap_or_else(|| header::default_path(&out_bin, &module.name));
         if let Err(e) = std::fs::write(&header_path, header::render(&module)) {
-            eprintln!("openepl: cannot write {}: {e}", header_path.display());
+            eprintln!("kiln: cannot write {}: {e}", header_path.display());
             return 1;
         }
-        eprintln!("openepl: wrote {}", header_path.display());
+        eprintln!("kiln: wrote {}", header_path.display());
         if io.os == Os::Windows && target == Target::SharedLib {
-            eprintln!("openepl: wrote {}", implib_path(&out_bin).display());
+            eprintln!("kiln: wrote {}", implib_path(&out_bin).display());
         }
     }
 
@@ -814,7 +828,7 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
         match status {
             Ok(s) => s.code().unwrap_or(1),
             Err(e) => {
-                eprintln!("openepl: failed to run {}: {e}", out_bin.display());
+                eprintln!("kiln: failed to run {}: {e}", out_bin.display());
                 1
             }
         }
@@ -860,8 +874,8 @@ fn compile_with(
     let target = module.target();
 
     let repo_root = find_repo_root().ok_or_else(|| {
-        "could not locate the OpenEPL runtime (runtime/openepl_core.h); \
-         set OPENEPL_RUNTIME_DIR or run from the repo root"
+        "could not locate the Kiln runtime (runtime/kiln_core.h); \
+         set KILN_RUNTIME_DIR or run from the repo root"
             .to_string()
     })?;
 
@@ -948,7 +962,7 @@ fn validate_hinted(
     module: &Module,
     registry: &Registry,
     repo_root: &Path,
-) -> Result<(), Vec<openepl_ir::validate::ValidateError>> {
+) -> Result<(), Vec<kiln_ir::validate::ValidateError>> {
     let Err(errs) = validate_with(module, registry, &Hints::default()) else {
         return Ok(());
     };
@@ -1006,7 +1020,7 @@ fn embed_resources(module: &Module, input: &Path) -> Result<Option<String>, Stri
     for form in module.forms() {
         // The form's own icon rides the same path as an image's source: a
         // window icon that only exists on the author's disk is not shipped.
-        let mut wanted: Vec<(&str, &openepl_ir::Expr)> = form
+        let mut wanted: Vec<(&str, &kiln_ir::Expr)> = form
             .properties
             .iter()
             .filter(|(name, _)| name == "icon")
@@ -1084,7 +1098,7 @@ fn embed_resources(module: &Module, input: &Path) -> Result<Option<String>, Stri
         .collect();
     rows.push("{ ptr, ptr, i64 } zeroinitializer".to_string());
     out.push_str(&format!(
-        "@oe_embedded_resources = constant [{} x {{ ptr, ptr, i64 }}] [{}]\n",
+        "@kn_embedded_resources = constant [{} x {{ ptr, ptr, i64 }}] [{}]\n",
         rows.len(),
         rows.join(", ")
     ));
@@ -1203,7 +1217,7 @@ fn clang_link(
     match libload::pkg_config_flags(&cfg.pkg_config, "--cflags") {
         Ok(flags) => common.extend(flags),
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             return Err(1);
         }
     }
@@ -1222,9 +1236,9 @@ fn clang_link(
         // The process-entry object provides `main`, which calls `ECodeStart`.
         // A library has no `ECodeStart`, so linking it in leaves an undefined
         // symbol and the `.so` fails to dlopen — a file with the right
-        // extension that cannot actually be loaded. oe_start.c lives in its own
+        // extension that cannot actually be loaded. kn_start.c lives in its own
         // TU precisely so a build target can drop it.
-        if !target.is_executable() && s.file_name().and_then(|f| f.to_str()) == Some("oe_start.c") {
+        if !target.is_executable() && s.file_name().and_then(|f| f.to_str()) == Some("kn_start.c") {
             continue;
         }
         let is_cxx = matches!(
@@ -1248,12 +1262,12 @@ fn clang_link(
     match libload::pkg_config_flags(&cfg.pkg_config, "--libs") {
         Ok(flags) => libs.extend(flags),
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             return Err(1);
         }
     }
     libs.push("-lm".into()); // libm for the floating-point commands
-    // libdl for the foreign-function loader (runtime/oe_dll.c's dlopen/dlsym).
+    // libdl for the foreign-function loader (runtime/kn_dll.c's dlopen/dlsym).
     // Only on Linux, and only for a native build: glibc >= 2.34 folds these
     // into libc so the flag is a harmless no-op there, but an older host still
     // needs it — and macOS has no `libdl` to name (the calls live in libSystem)
@@ -1297,7 +1311,7 @@ fn clang_link(
                     Ok(o.status.success())
                 }
                 Err(e) => {
-                    eprintln!("openepl: {}", crate::libload::spawn_error(driver, &e));
+                    eprintln!("kiln: {}", crate::libload::spawn_error(driver, &e));
                     Err(1)
                 }
             }
@@ -1310,12 +1324,12 @@ fn clang_link(
                         return Err(report_discarded_debug_info());
                     }
                     if !o.status.success() {
-                        eprintln!("openepl: clang failed with status {}", o.status);
+                        eprintln!("kiln: clang failed with status {}", o.status);
                     }
                     Ok(o.status.success())
                 }
                 Err(e) => {
-                    eprintln!("openepl: {}", crate::libload::spawn_error(driver, &e));
+                    eprintln!("kiln: {}", crate::libload::spawn_error(driver, &e));
                     Err(1)
                 }
             }
@@ -1338,11 +1352,11 @@ fn clang_link(
     /// says so and asks to be told.
     fn report_discarded_debug_info() -> i32 {
         eprintln!(
-            "openepl: the debug information this build emitted was rejected by LLVM \
+            "kiln: the debug information this build emitted was rejected by LLVM \
              and thrown away, so the binary could not be stepped through."
         );
         eprintln!(
-            "openepl: this is a bug in the compiler, not in your program. Please \
+            "kiln: this is a bug in the compiler, not in your program. Please \
              report it, and pass `--emit-ir` to keep the .ll named above for \
              the report. `--release` builds emit none and are unaffected."
         );
@@ -1365,7 +1379,7 @@ fn clang_link(
             return Ok(());
         }
         eprintln!(
-            "openepl: this program links a library that is not position-independent; \
+            "kiln: this program links a library that is not position-independent; \
              building the release without PIE"
         );
         let common: Vec<String> = common.iter().filter(|f| *f != "-fPIE").cloned().collect();
@@ -1431,7 +1445,7 @@ fn mingw_link(
     match libload::pkg_config_flags_cross(&cfg.pkg_config, "--cflags") {
         Ok(flags) => common.extend(flags),
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             return Err(1);
         }
     }
@@ -1462,7 +1476,7 @@ fn mingw_link(
     let mut cxx_inputs: Vec<(PathBuf, Option<&'static str>)> = Vec::new();
     for s in &plan.impl_sources {
         // As on the host: the entry object belongs to a program only.
-        if !target.is_executable() && s.file_name().and_then(|f| f.to_str()) == Some("oe_start.c") {
+        if !target.is_executable() && s.file_name().and_then(|f| f.to_str()) == Some("kn_start.c") {
             continue;
         }
         let is_cxx = matches!(
@@ -1483,7 +1497,7 @@ fn mingw_link(
             // library target has asked for it — a library cannot declare a
             // form, and `use ui` without one is a program's mistake to make.
             eprintln!(
-                "openepl: a static library for windows cannot carry C++ sources (this \
+                "kiln: a static library for windows cannot carry C++ sources (this \
                  program uses a library that needs them)"
             );
             return Err(1);
@@ -1491,11 +1505,11 @@ fn mingw_link(
         return build_archive(driver, &driver_args, MINGW_AR, &clang_common, &c_inputs, out_bin);
     }
 
-    let dir = std::env::temp_dir().join(format!("openepl_mingw_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("kiln_mingw_{}", std::process::id()));
     let c_dir = dir.join("c");
     let cxx_dir = dir.join("cxx");
     if let Err(e) = std::fs::create_dir_all(&c_dir).and_then(|_| std::fs::create_dir_all(&cxx_dir)) {
-        eprintln!("openepl: cannot create {}: {e}", dir.display());
+        eprintln!("kiln: cannot create {}: {e}", dir.display());
         return Err(1);
     }
     let mut objects = match compile_objects(driver, &driver_args, &clang_common, &c_inputs, &c_dir) {
@@ -1524,14 +1538,14 @@ fn mingw_link(
         // `-mwindows` is a fact about the TARGET, said below for a form and
         // not for a console program that merely uses the library; and
         // `SDL2main` is the entry SDL offers a program without one, which a
-        // program with `main` in runtime/oe_start.c does not want.
+        // program with `main` in runtime/kn_start.c does not want.
         Ok(flags) => cmd.args(
             flags
                 .iter()
                 .filter(|f| !matches!(f.as_str(), "-mwindows" | "-lmingw32" | "-lSDL2main")),
         ),
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             let _ = std::fs::remove_dir_all(&dir);
             return Err(1);
         }
@@ -1571,11 +1585,11 @@ fn mingw_link(
     match status {
         Ok(s) if s.success() => {}
         Ok(s) => {
-            eprintln!("openepl: {linker} failed with status {s}");
+            eprintln!("kiln: {linker} failed with status {s}");
             return Err(1);
         }
         Err(e) => {
-            eprintln!("openepl: {}", crate::libload::spawn_error(linker, &e));
+            eprintln!("kiln: {}", crate::libload::spawn_error(linker, &e));
             return Err(1);
         }
     }
@@ -1588,11 +1602,11 @@ fn mingw_link(
         match copy_windows_dlls(out_bin, &cfg.extra_dlls) {
             Ok(dlls) if dlls.is_empty() => {}
             Ok(dlls) => eprintln!(
-                "openepl: copied beside it, because the program imports them: {}",
+                "kiln: copied beside it, because the program imports them: {}",
                 dlls.join(" ")
             ),
             Err(e) => {
-                eprintln!("openepl: {e}");
+                eprintln!("kiln: {e}");
                 return Err(1);
             }
         }
@@ -1755,7 +1769,7 @@ fn mingw_release_ldflags(driver_args: &[String], cflags: &[String]) -> Vec<Strin
         .map(|s| s.success())
         .unwrap_or(false);
     if !compiled {
-        eprintln!("openepl: cannot compile a probe program — linking the release unhardened");
+        eprintln!("kiln: cannot compile a probe program — linking the release unhardened");
         let _ = std::fs::remove_dir_all(&dir);
         return Vec::new();
     }
@@ -1779,7 +1793,7 @@ fn mingw_release_ldflags(driver_args: &[String], cflags: &[String]) -> Vec<Strin
 }
 
 fn mingw_probe_dir() -> PathBuf {
-    std::env::temp_dir().join(format!("openepl_probe_win_{}", std::process::id()))
+    std::env::temp_dir().join(format!("kiln_probe_win_{}", std::process::id()))
 }
 
 /// The probe source, or nothing — with the same words the host probe uses —
@@ -1789,7 +1803,7 @@ fn mingw_probe_src(dir: &Path) -> Option<PathBuf> {
     if std::fs::create_dir_all(dir).is_err()
         || std::fs::write(&src, "int main(void){return 0;}\n").is_err()
     {
-        eprintln!("openepl: cannot write a probe program — building the release unhardened");
+        eprintln!("kiln: cannot write a probe program — building the release unhardened");
         return None;
     }
     Some(src)
@@ -1853,7 +1867,7 @@ fn release_ldflags(driver: &str, cflags: &[String], executable: bool) -> Vec<Str
 /// regardless would be worse than leaving it out: the build still succeeds and
 /// the binary is not hardened, which is the failure nobody notices.
 fn probe(driver: &str, base: &[String], want: &[Requirement], extra: &[String]) -> Vec<String> {
-    let dir = std::env::temp_dir().join(format!("openepl_probe_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("kiln_probe_{}", std::process::id()));
     // The extension picks the language: clang++ handed a .c file treats it as
     // C++ and says so as a deprecation warning, which -Werror turns into a
     // rejection of every flag we ask about.
@@ -1865,7 +1879,7 @@ fn probe(driver: &str, base: &[String], want: &[Requirement], extra: &[String]) 
     if std::fs::create_dir_all(&dir).is_err()
         || std::fs::write(&src, "int main(void){return 0;}\n").is_err()
     {
-        eprintln!("openepl: cannot write a probe program — building the release unhardened");
+        eprintln!("kiln: cannot write a probe program — building the release unhardened");
         return Vec::new();
     }
     let out = dir.join("probe");
@@ -1905,7 +1919,7 @@ fn probe_each(
         match accepted {
             Some(alt) => taken.extend(alt.iter().cloned()),
             None => eprintln!(
-                "openepl: {driver} does not accept {} — building the release without it",
+                "kiln: {driver} does not accept {} — building the release without it",
                 alternatives[0].join(" ")
             ),
         }
@@ -1936,11 +1950,11 @@ fn compile_objects(
         match cmd.status() {
             Ok(s) if s.success() => objects.push(obj),
             Ok(s) => {
-                eprintln!("openepl: clang failed with status {s} on {}", path.display());
+                eprintln!("kiln: clang failed with status {s} on {}", path.display());
                 return Err(1);
             }
             Err(e) => {
-                eprintln!("openepl: {}", crate::libload::spawn_error(driver, &e));
+                eprintln!("kiln: {}", crate::libload::spawn_error(driver, &e));
                 return Err(1);
             }
         }
@@ -1960,9 +1974,9 @@ fn build_archive(
     inputs: &[(PathBuf, Option<&'static str>)],
     out_lib: &Path,
 ) -> Result<(), i32> {
-    let dir = std::env::temp_dir().join(format!("openepl_ar_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("kiln_ar_{}", std::process::id()));
     if let Err(e) = std::fs::create_dir_all(&dir) {
-        eprintln!("openepl: cannot create {}: {e}", dir.display());
+        eprintln!("kiln: cannot create {}: {e}", dir.display());
         return Err(1);
     }
 
@@ -1984,22 +1998,22 @@ fn build_archive(
     match status {
         Ok(s) if s.success() => Ok(()),
         Ok(s) => {
-            eprintln!("openepl: ar failed with status {s}");
+            eprintln!("kiln: ar failed with status {s}");
             Err(1)
         }
         Err(e) => {
-            eprintln!("openepl: could not invoke {ar_tool}: {e}");
+            eprintln!("kiln: could not invoke {ar_tool}: {e}");
             Err(1)
         }
     }
 }
 
-/// Find the runtime directory: `$OPENEPL_RUNTIME_DIR`, else walk up from cwd
-/// looking for `runtime/openepl_core.h`.
+/// Find the runtime directory: `$KILN_RUNTIME_DIR`, else walk up from cwd
+/// looking for `runtime/kiln_core.h`.
 fn find_runtime_dir() -> Option<PathBuf> {
-    if let Ok(d) = std::env::var("OPENEPL_RUNTIME_DIR") {
+    if let Ok(d) = std::env::var("KILN_RUNTIME_DIR") {
         let p = PathBuf::from(d);
-        if p.join("openepl_core.h").is_file() {
+        if p.join("kiln_core.h").is_file() {
             return Some(p);
         }
     }
@@ -2007,7 +2021,7 @@ fn find_runtime_dir() -> Option<PathBuf> {
     if let Some(found) = std::env::current_dir().ok().and_then(walk_up_for_runtime) {
         return Some(found);
     }
-    // …and walking up from the executable covers everything else: `openepl new`
+    // …and walking up from the executable covers everything else: `kiln new`
     // is run from wherever the user's project will live, and the templates and
     // runtime are next to the binary, not next to them.
     std::env::current_exe()
@@ -2020,7 +2034,7 @@ fn walk_up_for_runtime(start: PathBuf) -> Option<PathBuf> {
     let mut dir = start;
     loop {
         let cand = dir.join("runtime");
-        if cand.join("openepl_core.h").is_file() {
+        if cand.join("kiln_core.h").is_file() {
             return Some(cand);
         }
         if !dir.pop() {

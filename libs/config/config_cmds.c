@@ -23,7 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "openepl_abi.h"
+#include "kiln_abi.h"
 
 /* --- the document ----------------------------------------------------- */
 
@@ -44,7 +44,7 @@ typedef struct Config {
 } Config;
 
 /* Internal state is plain malloc: it is owned by the handle and freed by the
- * close function. oe_malloc is for values handed BACK to the program, which the
+ * close function. kn_malloc is for values handed BACK to the program, which the
  * runtime owns and frees at exit. */
 static char *config_dup(const char *s) {
     if (!s) s = "";
@@ -252,7 +252,7 @@ static long config_insert_point(Config *c, const char *section, int *exists) {
 /* The "" text sentinel is a real runtime-owned string, so a program can hold a
  * failed result exactly like a successful one. */
 static char *config_empty(void) {
-    char *s = (char *)oe_malloc(1);
+    char *s = (char *)kn_malloc(1);
     if (s) s[0] = '\0';
     return s;
 }
@@ -260,16 +260,16 @@ static char *config_empty(void) {
 static char *config_text(const char *s) {
     if (!s) s = "";
     size_t n = strlen(s) + 1;
-    char *o = (char *)oe_malloc((long)n);
+    char *o = (char *)kn_malloc((long)n);
     if (o) memcpy(o, s, n);
     return o;
 }
 
-static void config_oom(void) { oe_error_set_errno(ENOMEM, "allocate"); }
+static void config_oom(void) { kn_error_set_errno(ENOMEM, "allocate"); }
 
 /* Resolve a handle. On failure the handle table has already written the slot. */
 static Config *config_of(int32_t h) {
-    return (Config *)oe_handle_resolve(h, OE_HK_CONFIG);
+    return (Config *)kn_handle_resolve(h, KN_HK_CONFIG);
 }
 
 static const char *config_nz(const char *s) { return s ? s : ""; }
@@ -278,23 +278,23 @@ static const char *config_nz(const char *s) { return s ? s : ""; }
 
 /* config_open(text path) -> int : a handle, or 0 on failure.
  * A missing FILE is a failure, unlike a missing key. */
-void config_open(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_open(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = config_nz(oe_arg_text(argv, 0));
+    const char *path = config_nz(kn_arg_text(argv, 0));
     if (path[0] == '\0') {
-        oe_error_set(OE_ERR_INVALID_ARG, "config_open: the path is empty");
-        oe_ret_int(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "config_open: the path is empty");
+        kn_ret_int(ret, 0);
         return;
     }
     FILE *f = fopen(path, "rb");
     int e = errno;
-    if (!f) { oe_error_set_errno(e, "open"); oe_ret_int(ret, 0); return; }
+    if (!f) { kn_error_set_errno(e, "open"); kn_ret_int(ret, 0); return; }
 
     /* Read the whole file: settings files are small, and a single buffer is
      * what lets the parser see CRLF and a missing final newline uniformly. */
     size_t cap = 4096, len = 0;
     char *buf = (char *)malloc(cap);
-    if (!buf) { fclose(f); config_oom(); oe_ret_int(ret, 0); return; }
+    if (!buf) { fclose(f); config_oom(); kn_ret_int(ret, 0); return; }
     int read_errno = 0, bad = 0;
     for (;;) {
         size_t got = fread(buf + len, 1, cap - len, f);
@@ -305,79 +305,79 @@ void config_open(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
             break;
         }
         char *nb = (char *)realloc(buf, cap * 2);
-        if (!nb) { free(buf); fclose(f); config_oom(); oe_ret_int(ret, 0); return; }
+        if (!nb) { free(buf); fclose(f); config_oom(); kn_ret_int(ret, 0); return; }
         buf = nb;
         cap *= 2;
     }
     fclose(f);
-    if (bad) { free(buf); oe_error_set_errno(read_errno, "read"); oe_ret_int(ret, 0); return; }
+    if (bad) { free(buf); kn_error_set_errno(read_errno, "read"); kn_ret_int(ret, 0); return; }
 
     Config *c = (Config *)calloc(1, sizeof *c);
-    if (!c) { free(buf); config_oom(); oe_ret_int(ret, 0); return; }
+    if (!c) { free(buf); config_oom(); kn_ret_int(ret, 0); return; }
     c->path = config_dup(path);
     if (!c->path || !config_parse(c, buf, len)) {
-        free(buf); config_free(c); config_oom(); oe_ret_int(ret, 0); return;
+        free(buf); config_free(c); config_oom(); kn_ret_int(ret, 0); return;
     }
     free(buf);
 
-    int32_t h = oe_handle_new(OE_HK_CONFIG, c, config_free);
-    if (h == 0) { config_free(c); oe_ret_int(ret, 0); return; }  /* slot set */
-    oe_error_clear();
-    oe_ret_int(ret, h);
+    int32_t h = kn_handle_new(KN_HK_CONFIG, c, config_free);
+    if (h == 0) { config_free(c); kn_ret_int(ret, 0); return; }  /* slot set */
+    kn_error_clear();
+    kn_ret_int(ret, h);
 }
 
 /* config_create(text path) -> int : an empty document remembering `path`.
  * Nothing touches the disk until config_save. */
-void config_create(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_create(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *path = config_nz(oe_arg_text(argv, 0));
+    const char *path = config_nz(kn_arg_text(argv, 0));
     if (path[0] == '\0') {
-        oe_error_set(OE_ERR_INVALID_ARG, "config_create: the path is empty");
-        oe_ret_int(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "config_create: the path is empty");
+        kn_ret_int(ret, 0);
         return;
     }
     Config *c = (Config *)calloc(1, sizeof *c);
-    if (!c) { config_oom(); oe_ret_int(ret, 0); return; }
+    if (!c) { config_oom(); kn_ret_int(ret, 0); return; }
     c->path = config_dup(path);
-    if (!c->path) { config_free(c); config_oom(); oe_ret_int(ret, 0); return; }
+    if (!c->path) { config_free(c); config_oom(); kn_ret_int(ret, 0); return; }
 
-    int32_t h = oe_handle_new(OE_HK_CONFIG, c, config_free);
-    if (h == 0) { config_free(c); oe_ret_int(ret, 0); return; }
-    oe_error_clear();
-    oe_ret_int(ret, h);
+    int32_t h = kn_handle_new(KN_HK_CONFIG, c, config_free);
+    if (h == 0) { config_free(c); kn_ret_int(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_int(ret, h);
 }
 
 /* config_close(int h) -> bool. */
-void config_close(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_close(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    int32_t ok = oe_handle_close(oe_arg_int(argv, 0), OE_HK_CONFIG);
-    oe_ret_bool(ret, ok);           /* the table wrote the slot either way */
+    int32_t ok = kn_handle_close(kn_arg_int(argv, 0), KN_HK_CONFIG);
+    kn_ret_bool(ret, ok);           /* the table wrote the slot either way */
 }
 
 /* config_close_all() -> int : how many were closed. */
-void config_close_all(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_close_all(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
-    oe_ret_int(ret, oe_handle_close_kind(OE_HK_CONFIG));
+    kn_ret_int(ret, kn_handle_close_kind(KN_HK_CONFIG));
 }
 
 /* config_path(int h) -> text : the file this document reads and writes. */
-void config_path(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_path(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_text(ret, config_empty()); return; }
-    oe_error_clear();
-    oe_ret_text(ret, config_text(c->path));
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_text(ret, config_empty()); return; }
+    kn_error_clear();
+    kn_ret_text(ret, config_text(c->path));
 }
 
 /* config_save(int h) -> bool : write the document back, comments and all. */
-void config_save(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_save(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_bool(ret, 0); return; }
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_bool(ret, 0); return; }
 
     FILE *f = fopen(c->path, "wb");
     int e = errno;
-    if (!f) { oe_error_set_errno(e, "open for writing"); oe_ret_bool(ret, 0); return; }
+    if (!f) { kn_error_set_errno(e, "open for writing"); kn_ret_bool(ret, 0); return; }
     int bad = 0, we = 0;
     for (long i = 0; i < c->n; i++) {
         ConfigLine *l = &c->lines[i];
@@ -388,9 +388,9 @@ void config_save(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         if (r < 0 && !bad) { we = errno; bad = 1; }   /* errno on the next line */
     }
     if (fclose(f) != 0 && !bad) { we = errno; bad = 1; }
-    if (bad) { oe_error_set_errno(we, "write"); oe_ret_bool(ret, 0); return; }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    if (bad) { kn_error_set_errno(we, "write"); kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* --- reading ---------------------------------------------------------- */
@@ -398,13 +398,13 @@ void config_save(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
 /* config_get(int h, text section, text key) -> text : "" when there is no such
  * key. A missing key is NOT a failure — config_has is the predicate — so the
  * slot is cleared and only a bad handle sets it. */
-void config_get(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_get(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_text(ret, config_empty()); return; }
-    long i = config_find_pair(c, config_nz(oe_arg_text(argv, 1)), config_nz(oe_arg_text(argv, 2)));
-    oe_error_clear();
-    oe_ret_text(ret, i < 0 ? config_empty() : config_text(c->lines[i].value));
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_text(ret, config_empty()); return; }
+    long i = config_find_pair(c, config_nz(kn_arg_text(argv, 1)), config_nz(kn_arg_text(argv, 2)));
+    kn_error_clear();
+    kn_ret_text(ret, i < 0 ? config_empty() : config_text(c->lines[i].value));
 }
 
 /* The typed readers take the value to use when the key is absent or does not
@@ -413,74 +413,74 @@ void config_get(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
  * predicate can separate the middle case from the last. */
 
 /* config_get_int(int h, text section, text key, int fallback) -> int */
-void config_get_int(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_get_int(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    int32_t fallback = oe_arg_int(argv, 3);
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_int(ret, fallback); return; }
-    long i = config_find_pair(c, config_nz(oe_arg_text(argv, 1)), config_nz(oe_arg_text(argv, 2)));
-    oe_error_clear();
-    if (i < 0) { oe_ret_int(ret, fallback); return; }
+    int32_t fallback = kn_arg_int(argv, 3);
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_int(ret, fallback); return; }
+    long i = config_find_pair(c, config_nz(kn_arg_text(argv, 1)), config_nz(kn_arg_text(argv, 2)));
+    kn_error_clear();
+    if (i < 0) { kn_ret_int(ret, fallback); return; }
     const char *v = config_nz(c->lines[i].value);
     char *end = NULL;
     errno = 0;
     long n = strtol(v, &end, 10);
-    if (end == v || *end != '\0' || errno == ERANGE) { oe_ret_int(ret, fallback); return; }
-    oe_ret_int(ret, (int32_t)n);
+    if (end == v || *end != '\0' || errno == ERANGE) { kn_ret_int(ret, fallback); return; }
+    kn_ret_int(ret, (int32_t)n);
 }
 
 /* config_get_double(int h, text section, text key, double fallback) -> double */
-void config_get_double(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_get_double(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    double fallback = oe_arg_double(argv, 3);
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_double(ret, fallback); return; }
-    long i = config_find_pair(c, config_nz(oe_arg_text(argv, 1)), config_nz(oe_arg_text(argv, 2)));
-    oe_error_clear();
-    if (i < 0) { oe_ret_double(ret, fallback); return; }
+    double fallback = kn_arg_double(argv, 3);
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_double(ret, fallback); return; }
+    long i = config_find_pair(c, config_nz(kn_arg_text(argv, 1)), config_nz(kn_arg_text(argv, 2)));
+    kn_error_clear();
+    if (i < 0) { kn_ret_double(ret, fallback); return; }
     const char *v = config_nz(c->lines[i].value);
     char *end = NULL;
     double d = strtod(v, &end);
-    if (end == v || *end != '\0') { oe_ret_double(ret, fallback); return; }
-    oe_ret_double(ret, d);
+    if (end == v || *end != '\0') { kn_ret_double(ret, fallback); return; }
+    kn_ret_double(ret, d);
 }
 
 /* config_get_bool(int h, text section, text key, bool fallback) -> bool.
  * Accepts what people actually type: true/false, yes/no, on/off, 1/0. */
-void config_get_bool(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_get_bool(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    int32_t fallback = oe_arg_bool(argv, 3);
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_bool(ret, fallback); return; }
-    long i = config_find_pair(c, config_nz(oe_arg_text(argv, 1)), config_nz(oe_arg_text(argv, 2)));
-    oe_error_clear();
-    if (i < 0) { oe_ret_bool(ret, fallback); return; }
+    int32_t fallback = kn_arg_bool(argv, 3);
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_bool(ret, fallback); return; }
+    long i = config_find_pair(c, config_nz(kn_arg_text(argv, 1)), config_nz(kn_arg_text(argv, 2)));
+    kn_error_clear();
+    if (i < 0) { kn_ret_bool(ret, fallback); return; }
     const char *v = config_nz(c->lines[i].value);
     if (config_ieq(v, "true") || config_ieq(v, "yes") || config_ieq(v, "on")  || config_ieq(v, "1"))
-        { oe_ret_bool(ret, 1); return; }
+        { kn_ret_bool(ret, 1); return; }
     if (config_ieq(v, "false") || config_ieq(v, "no") || config_ieq(v, "off") || config_ieq(v, "0"))
-        { oe_ret_bool(ret, 0); return; }
-    oe_ret_bool(ret, fallback);
+        { kn_ret_bool(ret, 0); return; }
+    kn_ret_bool(ret, fallback);
 }
 
 /* config_has(int h, text section, text key) -> bool. */
-void config_has(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_has(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_bool(ret, 0); return; }
-    long i = config_find_pair(c, config_nz(oe_arg_text(argv, 1)), config_nz(oe_arg_text(argv, 2)));
-    oe_error_clear();
-    oe_ret_bool(ret, i >= 0);
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_bool(ret, 0); return; }
+    long i = config_find_pair(c, config_nz(kn_arg_text(argv, 1)), config_nz(kn_arg_text(argv, 2)));
+    kn_error_clear();
+    kn_ret_bool(ret, i >= 0);
 }
 
 /* config_has_section(int h, text section) -> bool. */
-void config_has_section(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_has_section(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_bool(ret, 0); return; }
-    int yes = config_section_exists(c, config_nz(oe_arg_text(argv, 1)));
-    oe_error_clear();
-    oe_ret_bool(ret, yes);
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_bool(ret, 0); return; }
+    int yes = config_section_exists(c, config_nz(kn_arg_text(argv, 1)));
+    kn_error_clear();
+    kn_ret_bool(ret, yes);
 }
 
 /* --- writing ---------------------------------------------------------- */
@@ -489,7 +489,7 @@ void config_has_section(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
  * Returns 1 on success, 0 on allocation failure (slot already set). */
 static int config_put(Config *c, const char *section, const char *key, const char *value) {
     if (key[0] == '\0') {
-        oe_error_set(OE_ERR_INVALID_ARG, "config_set: the key is empty");
+        kn_error_set(KN_ERR_INVALID_ARG, "config_set: the key is empty");
         return 0;
     }
     long i = config_find_pair(c, section, key);
@@ -522,77 +522,77 @@ static int config_put(Config *c, const char *section, const char *key, const cha
     return 1;
 }
 
-static void config_set_common(OpenEPL_Slot *ret, OpenEPL_Slot *argv, const char *value) {
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_bool(ret, 0); return; }
-    if (!config_put(c, config_nz(oe_arg_text(argv, 1)), config_nz(oe_arg_text(argv, 2)), value)) {
-        oe_ret_bool(ret, 0);
+static void config_set_common(Kiln_Slot *ret, Kiln_Slot *argv, const char *value) {
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_bool(ret, 0); return; }
+    if (!config_put(c, config_nz(kn_arg_text(argv, 1)), config_nz(kn_arg_text(argv, 2)), value)) {
+        kn_ret_bool(ret, 0);
         return;
     }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* config_set(int h, text section, text key, text value) -> bool */
-void config_set(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_set(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    config_set_common(ret, argv, config_nz(oe_arg_text(argv, 3)));
+    config_set_common(ret, argv, config_nz(kn_arg_text(argv, 3)));
 }
 
 /* config_set_int(int h, text section, text key, int value) -> bool */
-void config_set_int(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_set_int(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     char buf[32];
-    snprintf(buf, sizeof buf, "%d", oe_arg_int(argv, 3));
+    snprintf(buf, sizeof buf, "%d", kn_arg_int(argv, 3));
     config_set_common(ret, argv, buf);
 }
 
 /* config_set_double(int h, text section, text key, double value) -> bool */
-void config_set_double(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_set_double(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     char buf[64];
     /* %.17g round-trips a double exactly, so a value written here reads back as
      * the same number rather than one that has quietly lost its tail. */
-    snprintf(buf, sizeof buf, "%.17g", oe_arg_double(argv, 3));
+    snprintf(buf, sizeof buf, "%.17g", kn_arg_double(argv, 3));
     config_set_common(ret, argv, buf);
 }
 
 /* config_set_bool(int h, text section, text key, bool value) -> bool */
-void config_set_bool(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_set_bool(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    config_set_common(ret, argv, oe_arg_bool(argv, 3) ? "true" : "false");
+    config_set_common(ret, argv, kn_arg_bool(argv, 3) ? "true" : "false");
 }
 
 /* config_remove(int h, text section, text key) -> bool : true if it was there.
  * A key that was already absent is a genuine "no", not a failure — false with
  * error code 0. */
-void config_remove(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_remove(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_bool(ret, 0); return; }
-    long i = config_find_pair(c, config_nz(oe_arg_text(argv, 1)), config_nz(oe_arg_text(argv, 2)));
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_bool(ret, 0); return; }
+    long i = config_find_pair(c, config_nz(kn_arg_text(argv, 1)), config_nz(kn_arg_text(argv, 2)));
     if (i >= 0) config_line_remove(c, i);
-    oe_error_clear();
-    oe_ret_bool(ret, i >= 0);
+    kn_error_clear();
+    kn_ret_bool(ret, i >= 0);
 }
 
 /* config_remove_section(int h, text section) -> bool.
  * Removes the header and the section's keys, plus any comment lines BETWEEN
  * them — a note inside a section goes with it — while comments trailing after
  * the last key stay, because they usually introduce whatever comes next. */
-void config_remove_section(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_remove_section(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_bool(ret, 0); return; }
-    const char *section = config_nz(oe_arg_text(argv, 1));
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_bool(ret, 0); return; }
+    const char *section = config_nz(kn_arg_text(argv, 1));
     int removed = 0;
 
     if (section[0] == '\0') {
         for (long i = c->n - 1; i >= 0; i--)
             if (c->lines[i].kind == CFG_PAIR && c->lines[i].section &&
                 c->lines[i].section[0] == '\0') { config_line_remove(c, i); removed = 1; }
-        oe_error_clear();
-        oe_ret_bool(ret, removed);
+        kn_error_clear();
+        kn_ret_bool(ret, removed);
         return;
     }
 
@@ -610,71 +610,71 @@ void config_remove_section(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) 
         for (long i = last; i >= header; i--) config_line_remove(c, i);
         removed = 1;
     }
-    oe_error_clear();
-    oe_ret_bool(ret, removed);
+    kn_error_clear();
+    kn_ret_bool(ret, removed);
 }
 
 /* --- collections: count + indexed accessor ---------------------------- */
 
 /* config_section_count(int h) -> int : -1 on failure. The unnamed section —
  * keys written above any header — counts as "" when it has any keys. */
-void config_section_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_section_count(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_int(ret, -1); return; }
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_int(ret, -1); return; }
     int32_t n = 0;
     for (long i = 0; i < c->n; i++) if (config_declares(c, i)) n++;
-    oe_error_clear();
-    oe_ret_int(ret, n);
+    kn_error_clear();
+    kn_ret_int(ret, n);
 }
 
 /* config_section_at(int h, int index) -> text : "" when out of range. */
-void config_section_at(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_section_at(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_text(ret, config_empty()); return; }
-    int32_t want = oe_arg_int(argv, 1), seen = 1;
-    oe_error_clear();
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_text(ret, config_empty()); return; }
+    int32_t want = kn_arg_int(argv, 1), seen = 1;
+    kn_error_clear();
     if (want >= 1) {
         for (long i = 0; i < c->n; i++) {
             const char *name = config_declares(c, i);
             if (!name) continue;
-            if (seen == want) { oe_ret_text(ret, config_text(name)); return; }
+            if (seen == want) { kn_ret_text(ret, config_text(name)); return; }
             seen++;
         }
     }
-    oe_ret_text(ret, config_empty());
+    kn_ret_text(ret, config_empty());
 }
 
 /* config_key_count(int h, text section) -> int : -1 on failure, 0 for a
  * section that is not there — asking about an absent section is a fair
  * question with the answer "no keys". */
-void config_key_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_key_count(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_int(ret, -1); return; }
-    const char *section = config_nz(oe_arg_text(argv, 1));
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_int(ret, -1); return; }
+    const char *section = config_nz(kn_arg_text(argv, 1));
     int32_t n = 0;
     for (long i = 0; i < c->n; i++)
         if (c->lines[i].kind == CFG_PAIR && config_ieq(c->lines[i].section, section)) n++;
-    oe_error_clear();
-    oe_ret_int(ret, n);
+    kn_error_clear();
+    kn_ret_int(ret, n);
 }
 
 /* config_key_at(int h, text section, int index) -> text : "" out of range. */
-void config_key_at(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void config_key_at(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Config *c = config_of(oe_arg_int(argv, 0));
-    if (!c) { oe_ret_text(ret, config_empty()); return; }
-    const char *section = config_nz(oe_arg_text(argv, 1));
-    int32_t want = oe_arg_int(argv, 2), seen = 1;
-    oe_error_clear();
+    Config *c = config_of(kn_arg_int(argv, 0));
+    if (!c) { kn_ret_text(ret, config_empty()); return; }
+    const char *section = config_nz(kn_arg_text(argv, 1));
+    int32_t want = kn_arg_int(argv, 2), seen = 1;
+    kn_error_clear();
     if (want >= 1) {
         for (long i = 0; i < c->n; i++) {
             if (c->lines[i].kind != CFG_PAIR || !config_ieq(c->lines[i].section, section)) continue;
-            if (seen == want) { oe_ret_text(ret, config_text(c->lines[i].key)); return; }
+            if (seen == want) { kn_ret_text(ret, config_text(c->lines[i].key)); return; }
             seen++;
         }
     }
-    oe_ret_text(ret, config_empty());
+    kn_ret_text(ret, config_empty());
 }

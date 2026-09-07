@@ -1,6 +1,6 @@
 # Third-party notices
 
-OpenEPL bundles and statically links the components below. Their licence texts
+Kiln bundles and statically links the components below. Their licence texts
 ship in `licenses/` inside the release bundle, and this file must stay accurate
 — these notices are a condition of redistribution, not a courtesy.
 
@@ -8,7 +8,7 @@ Only permissive licences are accepted (MIT / BSD / Apache-2.0 / Zlib / ISC);
 GPL and LGPL without a static-linking exception, non-OSI grants and proprietary
 code are rejected.
 
-## Statically linked into `openepl-studio` and into GUI programs it builds
+## Statically linked into `kiln-studio` and into GUI programs it builds
 
 | Component | Licence | Used for |
 | --- | --- | --- |
@@ -18,7 +18,7 @@ code are rejected.
 RmlUi in turn uses:
 
 * **FreeType** — dynamically linked, [FTL or GPLv2](https://freetype.org/license.html);
-  OpenEPL relies on the FreeType Licence (BSD-style with a credit clause).
+  Kiln relies on the FreeType Licence (BSD-style with a credit clause).
 
 ## Dynamically linked (not redistributed)
 
@@ -35,7 +35,7 @@ GUI programs:
 
 ## Build-time tools (not redistributed)
 
-`clang` and `ar` are invoked by `openepl build`; they are ordinary external
+`clang` and `ar` are invoked by `kiln build`; they are ordinary external
 tools and are not part of the bundle.
 
 ## Not vendored, deliberately

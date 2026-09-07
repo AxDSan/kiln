@@ -53,7 +53,7 @@ typedef pid_t process_pid_t;
 #define PROCESS_NO_PID ((pid_t)-1)
 #endif
 
-#include "openepl_abi.h"
+#include "kiln_abi.h"
 
 /* A spawn failure carries a platform code: an errno value on POSIX and a Win32
  * status on Windows, which is not an errno value and must not be run through
@@ -62,9 +62,9 @@ static void process_fail(int code, const char *what) {
 #ifdef _WIN32
     char msg[128];
     snprintf(msg, sizeof msg, "%s: Windows error %d", what, code);
-    oe_error_set((int32_t)code, msg);
+    kn_error_set((int32_t)code, msg);
 #else
-    oe_error_set_errno(code, what);
+    kn_error_set_errno(code, what);
 #endif
 }
 
@@ -75,13 +75,13 @@ static const char *process_nz(const char *s) { return s ? s : ""; }
 /* Text results are runtime-owned like every other text result, so even the ""
  * failure sentinel is a fresh runtime allocation. */
 static char *process_empty_text(void) {
-    char *s = (char *)oe_malloc(1);
+    char *s = (char *)kn_malloc(1);
     if (s) s[0] = '\0';
     return s;
 }
 
 static char *process_dup_text(const char *s, long n) {
-    char *o = (char *)oe_malloc(n + 1);
+    char *o = (char *)kn_malloc(n + 1);
     if (!o) return process_empty_text();
     memcpy(o, s, (size_t)n);
     o[n] = '\0';
@@ -158,7 +158,7 @@ typedef struct {
     int   at_end;    /* stdout reached end of input                      */
 } Proc;
 
-/* Plain malloc, not oe_malloc: this is library bookkeeping, not program data,
+/* Plain malloc, not kn_malloc: this is library bookkeeping, not program data,
  * and it must stay valid while the handle table's close functions run at exit,
  * after program data has been freed. */
 
@@ -379,7 +379,7 @@ static int process_terminate(process_pid_t pid) {
 static void process_release(process_pid_t pid) { (void)pid; }
 #endif
 
-/* The close function handed to oe_handle_new: it runs on process_close AND on
+/* The close function handed to kn_handle_new: it runs on process_close AND on
  * exit cleanup, which is what keeps a forgetful program from accumulating
  * zombies.  Closing the child's stdin first gives a well-behaved child its
  * cue to finish; only then do we insist. */
@@ -420,7 +420,7 @@ static void process_close_fn(void *payload) {
 
 /* Resolve a handle; the handle table sets the error slot on every failure. */
 static Proc *process_get(int32_t h) {
-    return (Proc *)oe_handle_resolve(h, OE_HK_PROC);
+    return (Proc *)kn_handle_resolve(h, KN_HK_PROC);
 }
 
 /* --- run to completion ------------------------------------------------- */
@@ -434,40 +434,40 @@ static Proc *process_get(int32_t h) {
  * the program being started, so a *missing* program inside the command is the
  * shell's honest exit 127 — the same answer a terminal gives — while -1 with
  * the error slot set means the spawn itself failed and nothing ran at all. */
-void process_run(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void process_run(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *cmd = process_nz(oe_arg_text(argv, 0));
+    const char *cmd = process_nz(kn_arg_text(argv, 0));
     int err = 0;
     process_pid_t pid = process_spawn(cmd, NULL, NULL, &err);
     if (pid == PROCESS_NO_PID) {
         process_fail(err, "run");
-        oe_ret_int(ret, -1);
+        kn_ret_int(ret, -1);
         return;
     }
     int32_t st = -1;
     if (!process_reap(pid, &st)) {
         int e = errno;
         process_release(pid);
-        oe_error_set_errno(e, "wait");
-        oe_ret_int(ret, -1);
+        kn_error_set_errno(e, "wait");
+        kn_ret_int(ret, -1);
         return;
     }
     process_release(pid);
-    oe_error_clear();
-    oe_ret_int(ret, st);
+    kn_error_clear();
+    kn_ret_int(ret, st);
 }
 
 /* process_run_capture(text command) -> text
  * Everything the command wrote to stdout, "" if it could not be started.  An
  * empty result with error code 0 means it ran and said nothing. */
-void process_run_capture(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void process_run_capture(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *cmd = process_nz(oe_arg_text(argv, 0));
+    const char *cmd = process_nz(kn_arg_text(argv, 0));
     int err = 0, out_fd = -1;
     process_pid_t pid = process_spawn(cmd, NULL, &out_fd, &err);
     if (pid == PROCESS_NO_PID) {
         process_fail(err, "run");
-        oe_ret_text(ret, process_empty_text());
+        kn_ret_text(ret, process_empty_text());
         return;
     }
 
@@ -500,27 +500,27 @@ void process_run_capture(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
 
     if (read_err) {
         free(buf);
-        oe_error_set_errno(read_err, "read");
-        oe_ret_text(ret, process_empty_text());
+        kn_error_set_errno(read_err, "read");
+        kn_ret_text(ret, process_empty_text());
         return;
     }
     char *out = process_dup_text(buf ? buf : "", (long)len);
     free(buf);
-    oe_error_clear();                    /* a non-zero exit is not a failure */
-    oe_ret_text(ret, out);
+    kn_error_clear();                    /* a non-zero exit is not a failure */
+    kn_ret_text(ret, out);
 }
 
 /* --- a child kept alive behind a handle -------------------------------- */
 
 /* process_start(text command) -> int handle, 0 if it could not be started. */
-void process_start(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void process_start(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *cmd = process_nz(oe_arg_text(argv, 0));
+    const char *cmd = process_nz(kn_arg_text(argv, 0));
     int err = 0, in_fd = -1, out_fd = -1;
     process_pid_t pid = process_spawn(cmd, &in_fd, &out_fd, &err);
     if (pid == PROCESS_NO_PID) {
         process_fail(err, "start");
-        oe_ret_int(ret, 0);
+        kn_ret_int(ret, 0);
         return;
     }
     FILE *out = fdopen(out_fd, "r");
@@ -530,8 +530,8 @@ void process_start(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         process_terminate(pid);
         { int32_t st; process_reap(pid, &st); }
         process_release(pid);
-        oe_error_set_errno(e, "start");
-        oe_ret_int(ret, 0);
+        kn_error_set_errno(e, "start");
+        kn_ret_int(ret, 0);
         return;
     }
     Proc *p = (Proc *)malloc(sizeof *p);
@@ -540,34 +540,34 @@ void process_start(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         process_terminate(pid);
         { int32_t st; process_reap(pid, &st); }
         process_release(pid);
-        oe_error_set(OE_ERR_TABLE_FULL, "out of memory");
-        oe_ret_int(ret, 0);
+        kn_error_set(KN_ERR_TABLE_FULL, "out of memory");
+        kn_ret_int(ret, 0);
         return;
     }
     p->pid = pid; p->in_fd = in_fd; p->out = out;
     p->reaped = 0; p->status = -1; p->at_end = 0;
 
-    int32_t h = oe_handle_new(OE_HK_PROC, p, process_close_fn);
+    int32_t h = kn_handle_new(KN_HK_PROC, p, process_close_fn);
     if (h == 0) {                        /* the table set the slot itself */
         process_close_fn(p);
-        oe_ret_int(ret, 0);
+        kn_ret_int(ret, 0);
         return;
     }
-    oe_error_clear();
-    oe_ret_int(ret, h);
+    kn_error_clear();
+    kn_ret_int(ret, h);
 }
 
 /* process_read_line(int h) -> text
  * One line of the child's output, without its newline.  "" at end of input —
  * which is why process_at_end sits beside it: a blank line the child printed
  * and no line at all are otherwise the same text. */
-void process_read_line(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void process_read_line(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Proc *p = process_get(oe_arg_int(argv, 0));
-    if (!p) { oe_ret_text(ret, process_empty_text()); return; }
+    Proc *p = process_get(kn_arg_int(argv, 0));
+    if (!p) { kn_ret_text(ret, process_empty_text()); return; }
     if (!p->out) {
-        oe_error_set(OE_ERR_INVALID_ARG, "output is closed");
-        oe_ret_text(ret, process_empty_text());
+        kn_error_set(KN_ERR_INVALID_ARG, "output is closed");
+        kn_ret_text(ret, process_empty_text());
         return;
     }
 
@@ -579,51 +579,51 @@ void process_read_line(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     if (n < 0) {
         free(line);
         if (ferror(p->out)) {
-            oe_error_set_errno(e ? e : EIO, "read");
-            oe_ret_text(ret, process_empty_text());
+            kn_error_set_errno(e ? e : EIO, "read");
+            kn_ret_text(ret, process_empty_text());
             return;
         }
         p->at_end = 1;
-        oe_error_clear();                /* end of input is not a failure */
-        oe_ret_text(ret, process_empty_text());
+        kn_error_clear();                /* end of input is not a failure */
+        kn_ret_text(ret, process_empty_text());
         return;
     }
     if (n > 0 && line[n - 1] == '\n') n--;
     if (n > 0 && line[n - 1] == '\r') n--;
     char *out = process_dup_text(line, (long)n);
     free(line);
-    oe_error_clear();
-    oe_ret_text(ret, out);
+    kn_error_clear();
+    kn_ret_text(ret, out);
 }
 
 /* process_at_end(int h) -> bool : the child's output has ended. */
-void process_at_end(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void process_at_end(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Proc *p = process_get(oe_arg_int(argv, 0));
-    if (!p) { oe_ret_bool(ret, 0); return; }
-    oe_error_clear();
-    oe_ret_bool(ret, p->at_end || !p->out);
+    Proc *p = process_get(kn_arg_int(argv, 0));
+    if (!p) { kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_bool(ret, p->at_end || !p->out);
 }
 
 /* process_write_line(int h, text line) -> bool
  * Sends the line and a newline to the child's input.  false with a non-zero
  * error code is a failure; the child having closed its input is EPIPE. */
-void process_write_line(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void process_write_line(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Proc *p = process_get(oe_arg_int(argv, 0));
-    if (!p) { oe_ret_bool(ret, 0); return; }
+    Proc *p = process_get(kn_arg_int(argv, 0));
+    if (!p) { kn_ret_bool(ret, 0); return; }
     if (p->in_fd < 0) {
-        oe_error_set(OE_ERR_INVALID_ARG, "input is closed");
-        oe_ret_bool(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "input is closed");
+        kn_ret_bool(ret, 0);
         return;
     }
-    const char *s = process_nz(oe_arg_text(argv, 1));
+    const char *s = process_nz(kn_arg_text(argv, 1));
     size_t len = strlen(s);
 
     /* One buffer so the line and its newline cannot be split by a short
      * write, which a line-oriented child would read as two lines. */
     char *buf = (char *)malloc(len + 1);
-    if (!buf) { oe_error_set(OE_ERR_TABLE_FULL, "out of memory"); oe_ret_bool(ret, 0); return; }
+    if (!buf) { kn_error_set(KN_ERR_TABLE_FULL, "out of memory"); kn_ret_bool(ret, 0); return; }
     memcpy(buf, s, len);
     buf[len] = '\n';
 
@@ -634,96 +634,96 @@ void process_write_line(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         if (w < 0) {
             if (e == EINTR) continue;
             free(buf);
-            oe_error_set_errno(e, "write");
-            oe_ret_bool(ret, 0);
+            kn_error_set_errno(e, "write");
+            kn_ret_bool(ret, 0);
             return;
         }
         off += (size_t)w;
     }
     free(buf);
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* process_is_running(int h) -> bool
  * Checking also reaps a child that has finished, so polling this in a loop
  * never leaves a zombie behind. */
-void process_is_running(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void process_is_running(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Proc *p = process_get(oe_arg_int(argv, 0));
-    if (!p) { oe_ret_bool(ret, 0); return; }
-    if (p->reaped) { oe_error_clear(); oe_ret_bool(ret, 0); return; }
+    Proc *p = process_get(kn_arg_int(argv, 0));
+    if (!p) { kn_ret_bool(ret, 0); return; }
+    if (p->reaped) { kn_error_clear(); kn_ret_bool(ret, 0); return; }
 
     int32_t st = -1;
     int r = process_poll(p->pid, &st);
     int e = errno;
-    if (r == 0) { oe_error_clear(); oe_ret_bool(ret, 1); return; }
-    if (r < 0) { oe_error_set_errno(e, "wait"); oe_ret_bool(ret, 0); return; }
+    if (r == 0) { kn_error_clear(); kn_ret_bool(ret, 1); return; }
+    if (r < 0) { kn_error_set_errno(e, "wait"); kn_ret_bool(ret, 0); return; }
     p->reaped = 1;
     p->status = st;
-    oe_error_clear();
-    oe_ret_bool(ret, 0);
+    kn_error_clear();
+    kn_ret_bool(ret, 0);
 }
 
 /* process_wait(int h) -> int
  * The child's exit status, -1 if it could not be waited for.  The child's
  * input is closed first: a child still reading from us would otherwise never
  * finish, and the program would hang in a command that promises to return. */
-void process_wait(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void process_wait(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Proc *p = process_get(oe_arg_int(argv, 0));
-    if (!p) { oe_ret_int(ret, -1); return; }
-    if (p->reaped) { oe_error_clear(); oe_ret_int(ret, p->status); return; }
+    Proc *p = process_get(kn_arg_int(argv, 0));
+    if (!p) { kn_ret_int(ret, -1); return; }
+    if (p->reaped) { kn_error_clear(); kn_ret_int(ret, p->status); return; }
 
     if (p->in_fd >= 0) { close(p->in_fd); p->in_fd = -1; }
     int32_t st = -1;
     if (!process_reap(p->pid, &st)) {
         int e = errno;
-        oe_error_set_errno(e, "wait");
-        oe_ret_int(ret, -1);
+        kn_error_set_errno(e, "wait");
+        kn_ret_int(ret, -1);
         return;
     }
     p->reaped = 1;
     p->status = st;
-    oe_error_clear();
-    oe_ret_int(ret, p->status);
+    kn_error_clear();
+    kn_ret_int(ret, p->status);
 }
 
 /* process_kill(int h) -> bool : stop the child now (SIGKILL) and reap it.
  * Killing an already-finished child is a success, not a failure — the caller
  * asked for it to be gone, and it is. */
-void process_kill(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void process_kill(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    Proc *p = process_get(oe_arg_int(argv, 0));
-    if (!p) { oe_ret_bool(ret, 0); return; }
-    if (p->reaped) { oe_error_clear(); oe_ret_bool(ret, 1); return; }
+    Proc *p = process_get(kn_arg_int(argv, 0));
+    if (!p) { kn_ret_bool(ret, 0); return; }
+    if (p->reaped) { kn_error_clear(); kn_ret_bool(ret, 1); return; }
 
     if (!process_terminate(p->pid)) {
         int e = errno;
-        oe_error_set_errno(e ? e : EPERM, "kill");
-        oe_ret_bool(ret, 0);
+        kn_error_set_errno(e ? e : EPERM, "kill");
+        kn_ret_bool(ret, 0);
         return;
     }
     int32_t st = -1;
     if (process_reap(p->pid, &st)) p->status = st;
     p->reaped = 1;
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* process_close(int h) -> bool : release the handle, ending the child if it
  * is still running. */
-void process_close(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void process_close(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    int32_t h = oe_arg_int(argv, 0);
-    if (oe_handle_close(h, OE_HK_PROC)) { oe_error_clear(); oe_ret_bool(ret, 1); return; }
-    oe_ret_bool(ret, 0);                 /* the handle table set the slot */
+    int32_t h = kn_arg_int(argv, 0);
+    if (kn_handle_close(h, KN_HK_PROC)) { kn_error_clear(); kn_ret_bool(ret, 1); return; }
+    kn_ret_bool(ret, 0);                 /* the handle table set the slot */
 }
 
 /* process_close_all() -> int : how many children were closed. */
-void process_close_all(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void process_close_all(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
-    int32_t n = oe_handle_close_kind(OE_HK_PROC);
-    oe_error_clear();
-    oe_ret_int(ret, n);
+    int32_t n = kn_handle_close_kind(KN_HK_PROC);
+    kn_error_clear();
+    kn_ret_int(ret, n);
 }

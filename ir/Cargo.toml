@@ -1,9 +1,9 @@
 [package]
-name = "openepl-ir"
+name = "kiln-ir"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "openepl_ir"
+name = "kiln_ir"
 path = "src/lib.rs"

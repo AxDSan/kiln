@@ -1,13 +1,13 @@
 /* Internal shape of the `json` library: the document tree, the parser, and the
  * serializer.  Nothing here crosses the ABI — a program only ever sees a
- * handle, a path string, and one of the five OpenEPL types.
+ * handle, a path string, and one of the five Kiln types.
  *
- * Tree memory is plain malloc/free, not oe_malloc: it is library bookkeeping
+ * Tree memory is plain malloc/free, not kn_malloc: it is library bookkeeping
  * with a lifetime the handle table controls, not program data the runtime frees
- * at exit.  Only text HANDED BACK to a program goes through oe_malloc.
+ * at exit.  Only text HANDED BACK to a program goes through kn_malloc.
  */
-#ifndef OPENEPL_JSON_INTERNAL_H
-#define OPENEPL_JSON_INTERNAL_H
+#ifndef KILN_JSON_INTERNAL_H
+#define KILN_JSON_INTERNAL_H
 
 #include <stddef.h>
 
@@ -49,4 +49,4 @@ JsonNode *json_parse_text(const char *src, char *errbuf, size_t errcap);
 /* Serialize to a plain malloc'd C string (caller frees).  NULL on no memory. */
 char     *json_write(const JsonNode *v, int pretty);
 
-#endif /* OPENEPL_JSON_INTERNAL_H */
+#endif /* KILN_JSON_INTERNAL_H */

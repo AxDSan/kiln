@@ -1,4 +1,4 @@
-//! Tokenizer for the OpenEPL IR text encoding (`.oir`).
+//! Tokenizer for the Kiln IR text encoding (`.kiln`).
 //!
 //! Line structure is significant only in that statements end at a newline; the
 //! lexer emits explicit `Newline` tokens and the parser consumes them.  Blank

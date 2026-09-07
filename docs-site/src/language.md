@@ -1,6 +1,6 @@
 # Language guide
 
-A whole program is one module. Files are UTF-8 and use the extension `.oir`;
+A whole program is one module. Files are UTF-8 and use the extension `.kiln`;
 `#` starts a comment that runs to the end of the line. This page is the
 reference; [A tour of the language](./tour.md) is the same material met in the
 order a newcomer meets it.
@@ -24,7 +24,7 @@ use <library>      # optional, repeatable
 ```
 
 `target` and `use` come first, then the module's contents. Leave `target` out
-and OpenEPL infers it — a module with a form is a windowed program, anything
+and Kiln infers it — a module with a form is a windowed program, anything
 else is a console one. See [Build targets](./build-targets.md).
 
 `use ui` brings in the visual components; without it, `form` and the visual
@@ -52,7 +52,7 @@ value](./sugar.md#a-binding-can-take-its-type-from-its-value):
 ```
 let count: int = 3
 let ratio: double = 1.5
-let name: text = "OpenEPL"
+let name: text = "Kiln"
 let ready: bool = true
 ```
 
@@ -365,7 +365,7 @@ See [Commands](./reference-commands.md) for the full list.
 ## Bitwise operators and hex literals
 
 A flag word, a mask, a packed pair of 16-bit halves — these are values whose
-*bits* matter rather than their size. OpenEPL writes them the way their
+*bits* matter rather than their size. Kiln writes them the way their
 documentation does, and operates on them with words.
 
 ### Writing a bit pattern

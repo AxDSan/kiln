@@ -1,7 +1,7 @@
-//! The first hour: `openepl templates`, `openepl new`, and whether what comes
+//! The first hour: `kiln templates`, `kiln new`, and whether what comes
 //! out of them actually builds.
 //!
-//! A template is the first OpenEPL code anyone reads, and a broken one is not
+//! A template is the first Kiln code anyone reads, and a broken one is not
 //! a broken example — it is the language failing on the first thing the user
 //! tried. So every template is instantiated and built here through the real
 //! binary, not inspected as text: a template that parses and does not link is
@@ -27,33 +27,33 @@ fn repo() -> PathBuf {
 /// A scratch directory unique to `tag`. Tests run in parallel and two of them
 /// sharing a path race.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_dx_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_dx_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch");
     dir
 }
 
-fn openepl(cwd: &Path, home: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_openepl"))
+fn kiln(cwd: &Path, home: &Path, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(args)
         .current_dir(cwd)
         .env("HOME", home)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl")
+        .expect("run kiln")
 }
 
 fn ok(cwd: &Path, home: &Path, args: &[&str]) -> String {
-    let out = openepl(cwd, home, args);
+    let out = kiln(cwd, home, args);
     assert!(
         out.status.success(),
-        "openepl {args:?} failed:\n{}",
+        "kiln {args:?} failed:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-/// `id -> target`, from the `template:` lines of `openepl templates`.
+/// `id -> target`, from the `template:` lines of `kiln templates`.
 ///
 /// Read from the same directory the projects are created in: a kit in a
 /// `kits/` directory above the caller contributes templates, so a listing
@@ -77,7 +77,7 @@ fn ui_vendored() -> bool {
 }
 
 /// Every bundled template must build. This is the whole reason the file
-/// exists: a template is the one piece of OpenEPL code a new user did not
+/// exists: a template is the one piece of Kiln code a new user did not
 /// write and cannot debug.
 #[test]
 fn every_bundled_template_creates_and_builds() {
@@ -109,7 +109,7 @@ fn every_bundled_template_creates_and_builds() {
             "`{id}` points at {entry}, which was not written"
         );
 
-        let out = openepl(
+        let out = kiln(
             &root,
             &home,
             &["build", entry, "-o", dest.join("built").to_str().unwrap()],
@@ -153,13 +153,13 @@ fn a_new_project_carries_no_placeholders() {
 fn a_timer_program_outlives_main_and_quits_itself() {
     let home = scratch("timer_home");
     let root = scratch("timer_root");
-    let example = repo().join("examples/loopdemo.oir");
+    let example = repo().join("examples/loopdemo.kiln");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["run", example.to_str().unwrap()])
         .current_dir(&root)
         .env("HOME", &home)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -194,13 +194,13 @@ fn a_timer_program_outlives_main_and_quits_itself() {
     assert!(text.contains("tick 3"), "the tick handler never ran to the end: {text}");
 }
 
-/// `openepl new` on a name that does not exist must say what does. A bare
+/// `kiln new` on a name that does not exist must say what does. A bare
 /// "no such template" leaves the user with nothing to type next.
 #[test]
 fn an_unknown_template_names_the_ones_that_exist() {
     let home = scratch("unknown_home");
     let root = scratch("unknown_root");
-    let out = openepl(
+    let out = kiln(
         &root,
         &home,
         &["new", "consoleapp", root.join("x").to_str().unwrap()],
@@ -216,9 +216,9 @@ fn an_unknown_template_names_the_ones_that_exist() {
 fn a_typo_in_a_command_names_the_nearest_one() {
     let home = scratch("typo_home");
     let root = scratch("typo_root");
-    let src = root.join("main.oir");
+    let src = root.join("main.kiln");
     std::fs::write(&src, "module m\nsub main\n  call prnt_text(\"hi\")\nend\n").unwrap();
-    let out = openepl(&root, &home, &["emit", src.to_str().unwrap()]);
+    let out = kiln(&root, &home, &["emit", src.to_str().unwrap()]);
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -235,14 +235,14 @@ fn a_typo_in_a_command_names_the_nearest_one() {
 fn a_windowed_program_is_refused_sleep_and_pointed_at_timer() {
     let home = scratch("sleep_home");
     let root = scratch("sleep_root");
-    let src = root.join("main.oir");
+    let src = root.join("main.kiln");
     std::fs::write(
         &src,
         //  1         2       3           4         5      6         7                        8
         "module m\nuse ui\nuse system\nform win\nend\nsub main\n  call sys_sleep_ms(500)\nend\n",
     )
     .unwrap();
-    let out = openepl(&root, &home, &["emit", src.to_str().unwrap()]);
+    let out = kiln(&root, &home, &["emit", src.to_str().unwrap()]);
     assert!(!out.status.success(), "a sleep in a windowed program must not build");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -259,6 +259,6 @@ fn a_windowed_program_is_refused_sleep_and_pointed_at_timer() {
         "module m\nuse system\nsub main\n  call sys_sleep_ms(1)\nend\n",
     )
     .unwrap();
-    let out = openepl(&root, &home, &["emit", src.to_str().unwrap()]);
+    let out = kiln(&root, &home, &["emit", src.to_str().unwrap()]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 }

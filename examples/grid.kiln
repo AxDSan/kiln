@@ -1,0 +1,112 @@
+# Rows in a grid, and a datasource that feeds it.
+#
+#   kiln run examples/grid.kiln
+#
+# The grid never holds the people itself: it is bound by name to a datasource,
+# and shows whatever that holds. Fill the datasource once — in the form, from
+# `main`, from a handler — and every grid bound to it shows the rows. That is
+# the shape a `database` kit will hand its query results into.
+#
+# Rows are one text with a newline between rows and a tab between cells,
+# because a property value is a literal. The commands are the way around
+# building that text by hand: `datasource_add_row` takes a row, `grid_cell`
+# reads one cell back, and both count from 1 like every position here.
+#
+# `select` and `activate` hand the handler the row. A handler may take it or
+# leave it out.
+module grid
+use ui
+
+datasource people
+  name = "people"
+  columns = "Name\tCity\tAge"
+  rows = "Ada\tLondon\t36\nLinus\tHelsinki\t28\nGrace\tArlington\t45"
+end
+
+form win
+  title = "Grid"
+  width = 520
+  height = 330
+  background_color = "#f6f8fa"
+
+  label heading
+    text = "People"
+    left = 20
+    top = 16
+    width = 200
+    color = "#1f2328"
+  end
+
+  grid table
+    name = "table"
+    bind = "people"
+    selected = 2
+    left = 20
+    top = 44
+    width = 480
+    height = 150
+    on select: on_select
+    on activate: on_activate
+  end
+
+  label status
+    text = "Pick a row."
+    left = 20
+    top = 208
+    width = 480
+    color = "#1f2328"
+  end
+
+  button add
+    text = "Add a row"
+    left = 20
+    top = 240
+    width = 140
+    height = 34
+    color = "#ffffff"
+    border_radius = 6
+    on click: on_add
+  end
+
+  button older
+    text = "Age selected"
+    left = 176
+    top = 240
+    width = 140
+    height = 34
+    background_color = "#6e7781"
+    color = "#ffffff"
+    border_radius = 6
+    on click: on_older
+  end
+end
+
+# Rows added before the window opens are on screen from the first frame.
+sub main
+  call datasource_add_row("people", "Dennis\tNew York\t70")
+  let rows = grid_row_count("table")
+  call print_text("rows: {rows}")
+end
+
+sub on_select(row: int)
+  status.text = "Selected " + grid_cell("table", row, 1)
+  call print_text("select {row}")
+end
+
+sub on_activate(row: int)
+  status.text = "Opened " + grid_cell("table", row, 1)
+  call print_text("activate {row}")
+end
+
+sub on_add
+  var n = people.count + 1
+  call datasource_add_row("people", "Person {n}\tNowhere\t0")
+  table.selected = n
+end
+
+sub on_older
+  if table.selected > 0
+    var age: int = text_to_int(grid_cell("table", table.selected, 3))
+    call grid_set_cell("table", table.selected, 3, int_to_text(age + 1))
+  end
+end

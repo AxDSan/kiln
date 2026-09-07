@@ -3,5 +3,5 @@
   "section": "System",
   "version": "0.1.0",
   "platforms": ["windows"],
-  "comment": "The Win32 API as declarations: user32, gdi32, kernel32 and advapi32 in five .oed files that `use win` merges into one bundle. Windows only — a program that uses it is refused for any other target, by name, at build time."
+  "comment": "The Win32 API as declarations: user32, gdi32, kernel32 and advapi32 in five .kdecl files that `use win` merges into one bundle. Windows only — a program that uses it is refused for any other target, by name, at build time."
 }

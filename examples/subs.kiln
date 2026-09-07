@@ -1,0 +1,69 @@
+# Subroutines that take arguments and give something back.
+#
+#   kiln run examples/subs.kiln
+#
+# A `sub` used to be only an entry point or an event handler: nothing in,
+# nothing out. Now it takes a parameter list in the same `name: type` shape a
+# `let` uses, and an optional return type after a colon — so a subroutine
+# declaration reads like the declarations already in the language.
+#
+# Calling one is calling anything else: `add(2, 3)` in an expression, or
+# `call greet("Ada")` as a statement. Commands and subroutines share one
+# namespace, so a subroutine may not take a library command's name.
+module subs
+
+# Parameters in, a value out.
+sub add(a: int, b: int): int
+  return a + b
+end
+
+# Parameters are immutable, so working state is an ordinary local.
+sub factorial(n: int): int
+  var result: int = 1
+  for i in 2..n
+    result *= i
+  end
+  return result
+end
+
+# Recursion works: a subroutine can call itself, and the compiler needs no
+# forward declaration to let it. A one-line `if` states the base case.
+sub fib(n: int): int
+  return n if n < 2
+  return fib(n - 1) + fib(n - 2)
+end
+
+# A trailing parameter may carry a default, so `shout("ada")` fills in the `!`.
+sub shout(who: text, mark: text = "!"): text
+  return who.uppercase() + mark
+end
+
+sub is_even(n: int): bool
+  return n % 2 = 0
+end
+
+# No return type: a subroutine that does something rather than computes
+# something. A bare `return` leaves it early.
+sub describe(n: int)
+  if n < 0
+    call print_text("negative")
+    return
+  end
+  let kind = if is_even(n) then "even" else "odd"
+  call print_text("{n} is {kind}")
+end
+
+sub main
+  call print_int(add(2, 3))
+  call print_int(add(add(1, 2), 4))
+  call print_int(factorial(6))
+  call print_int(fib(15))
+  call print_text(shout("ada"))
+  call describe(-1)
+  call describe(4)
+  call describe(7)
+
+  # A subroutine call is an expression, so it composes like any other.
+  let total = add(factorial(4), fib(10))
+  call print_int(total)
+end

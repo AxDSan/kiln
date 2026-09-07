@@ -1,6 +1,6 @@
 //! The `tcpserver` and `tcpclient` components, end to end in built binaries.
 //!
-//! Every program here is built through the real `openepl` and spoken to over
+//! Every program here is built through the real `kiln` and spoken to over
 //! a real socket — from Rust, or from the other component in the same
 //! program — because a component whose events fire in a unit test and not in
 //! a binary is the failure the suite exists to catch. The port is always one
@@ -27,17 +27,17 @@ fn repo() -> PathBuf {
 
 /// Build one source file to a binary in a scratch directory unique to `tag`.
 fn build(src_path: &Path, tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_netc_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_netc_{tag}"));
     std::fs::create_dir_all(&dir).expect("scratch dir");
     let bin = dir.join("prog");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src_path.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(
         out.status.success(),
-        "openepl build {tag} failed:\n{}",
+        "kiln build {tag} failed:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
     bin
@@ -45,9 +45,9 @@ fn build(src_path: &Path, tag: &str) -> PathBuf {
 
 /// Build inline source.
 fn build_src(src: &str, tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_netc_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_netc_{tag}"));
     std::fs::create_dir_all(&dir).expect("scratch dir");
-    let path = dir.join("main.oir");
+    let path = dir.join("main.kiln");
     std::fs::write(&path, src).expect("write source");
     build(&path, tag)
 }
@@ -131,7 +131,7 @@ fn port_was_busy(stdout: &str, stderr: &str) -> bool {
 /// program reports the client arriving and leaving by number.
 #[test]
 fn the_echo_example_echoes_lines_and_counts_clients_from_one() {
-    let bin = build(&repo().join("examples/tcpecho.oir"), "echo");
+    let bin = build(&repo().join("examples/tcpecho.kiln"), "echo");
     let port = free_port();
     let child = start(&bin, port);
 
@@ -439,12 +439,12 @@ end
 /// (e) The listing the language server and the docs are generated from.
 #[test]
 fn the_listing_shows_the_components_and_their_commands() {
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["commands", "--use", "net"])
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
     for line in [
@@ -481,5 +481,5 @@ fn the_chat_example_builds() {
         eprintln!("RmlUi not vendored; skipping");
         return;
     }
-    build(&repo().join("examples/tcpchat.oir"), "chat");
+    build(&repo().join("examples/tcpchat.kiln"), "chat");
 }

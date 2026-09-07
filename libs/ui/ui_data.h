@@ -15,8 +15,8 @@
  * nor a newline; there is deliberately no escaping, because an escape the
  * inspector shows and the program has to spell is worse than a stated limit.
  */
-#ifndef OPENEPL_UI_DATA_H
-#define OPENEPL_UI_DATA_H
+#ifndef KILN_UI_DATA_H
+#define KILN_UI_DATA_H
 
 #include <stdint.h>
 
@@ -75,4 +75,4 @@ int32_t     ui_table_set_cell(UiTable *t, int32_t row, int32_t col, const char *
 #ifdef __cplusplus
 }
 #endif
-#endif /* OPENEPL_UI_DATA_H */
+#endif /* KILN_UI_DATA_H */

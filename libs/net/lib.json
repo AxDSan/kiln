@@ -7,7 +7,7 @@
     "vendor/mbedtls/build/library/libmbedx509.a",
     "vendor/mbedtls/build/library/libmbedcrypto.a"
   ],
-  "optional_feature": "OPENEPL_NET_TLS",
+  "optional_feature": "KILN_NET_TLS",
   "optional_include_dirs": [
     "vendor/mbedtls/include"
   ],

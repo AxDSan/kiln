@@ -2,9 +2,9 @@
 //! anchors that follow a resize, colours refused before the substrate sees
 //! them, and where a form's window opens.
 //!
-//! Everything runs headless through the UI test hooks (abi/openepl_ui.h):
-//! `OPENEPL_UI_SIZE` stands in for a window manager's resize, and
-//! `OPENEPL_UI_DEBUG` prints the rectangle each anchored control was moved
+//! Everything runs headless through the UI test hooks (abi/kiln_ui.h):
+//! `KILN_UI_SIZE` stands in for a window manager's resize, and
+//! `KILN_UI_DEBUG` prints the rectangle each anchored control was moved
 //! to — by widget handle, because component identifiers never reach the
 //! binary (G8). The form is handle 1 and its children follow in declaration
 //! order.
@@ -27,29 +27,29 @@ fn ui_available() -> bool {
     false
 }
 
-/// Build `<repo>/examples/<name>.oir`. `tag` must be unique per test: tests
+/// Build `<repo>/examples/<name>.kiln`. `tag` must be unique per test: tests
 /// run in parallel, and two writing one output path race each other.
 fn build_as(name: &str, tag: &str) -> PathBuf {
-    let example = repo().join("examples").join(format!("{name}.oir"));
-    build_file(&example, &std::env::temp_dir().join(format!("openepl_{name}_{tag}_layout")))
+    let example = repo().join("examples").join(format!("{name}.kiln"));
+    build_file(&example, &std::env::temp_dir().join(format!("kiln_{name}_{tag}_layout")))
 }
 
 /// Build inline source, for the cases small enough not to deserve an example.
 fn build_src(src: &str, tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_layout_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_layout_{tag}"));
     std::fs::create_dir_all(&dir).expect("temp dir");
-    let path = dir.join("main.oir");
+    let path = dir.join("main.kiln");
     std::fs::write(&path, src).expect("write source");
     build_file(&path, &dir.join("prog"))
 }
 
 fn build_file(source: &Path, out_bin: &Path) -> PathBuf {
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", source.to_str().unwrap(), "-o", out_bin.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl");
-    assert!(status.success(), "openepl build {} failed", source.display());
+        .expect("run kiln");
+    assert!(status.success(), "kiln build {} failed", source.display());
     out_bin.to_path_buf()
 }
 
@@ -57,10 +57,10 @@ fn build_file(source: &Path, out_bin: &Path) -> PathBuf {
 /// is given, with the anchor debug lines on.
 fn run_headless(bin: &Path, frames: &str, size: Option<&str>) -> Output {
     let mut c = Command::new(bin);
-    c.env("OPENEPL_UI_EXIT_AFTER_FRAMES", frames)
-        .env("OPENEPL_UI_DEBUG", "1");
+    c.env("KILN_UI_EXIT_AFTER_FRAMES", frames)
+        .env("KILN_UI_DEBUG", "1");
     if let Some(s) = size {
-        c.env("OPENEPL_UI_SIZE", s);
+        c.env("KILN_UI_SIZE", s);
     }
     let out = c.output().expect("run built binary");
     assert!(
@@ -193,11 +193,11 @@ fn a_form_declares_where_its_window_opens() {
     if !ui_available() {
         return;
     }
-    let listing = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let listing = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["commands", "--use", "ui"])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl commands");
+        .expect("run kiln commands");
     let listing = String::from_utf8_lossy(&listing.stdout);
     for line in [
         "property: form position text",
@@ -233,7 +233,7 @@ end
 /// The form's `load` runs once, before the first frame is drawn — so a handler
 /// that fills in a caption is never seen half-done — and after the window
 /// exists, so one that reads the form's size gets the real one. RmlUi raises no
-/// such event; the library holds the handler and calls it from `oe_ui_run`.
+/// such event; the library holds the handler and calls it from `kn_ui_run`.
 #[test]
 fn a_form_load_handler_runs_before_the_first_frame() {
     if !ui_available() {

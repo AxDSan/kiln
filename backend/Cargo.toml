@@ -1,12 +1,12 @@
 [package]
-name = "openepl-backend"
+name = "kiln-backend"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "openepl_backend"
+name = "kiln_backend"
 path = "src/lib.rs"
 
 [dependencies]
-openepl-ir = { path = "../ir" }
+kiln-ir = { path = "../ir" }

@@ -34,13 +34,13 @@ Three places, and the first match of a name wins:
 | | Where | For |
 | --- | --- | --- |
 | 1 | `kits/` beside your project | a kit that belongs to this program |
-| 2 | `~/.openepl/kits/` | a kit you installed |
+| 2 | `~/.kiln/kits/` | a kit you installed |
 | 3 | the bundled `libs/` | what ships with the toolchain |
 
 So a project can pin its own copy of a kit without installing anything, and an
 installed kit can stand in for a bundled library while you work on it.
 
-`openepl kits` prints what resolution decided:
+`kiln kits` prints what resolution decided:
 
 ```text
 kit: units 1.0.0 project
@@ -57,18 +57,18 @@ something was loaded, and it should be answerable without guessing.
 ## Installing
 
 ```sh
-openepl kit add ./mykit          # a directory
-openepl kit add mykit.tar.gz     # or a tarball
+kiln kit add ./mykit          # a directory
+kiln kit add mykit.tar.gz     # or a tarball
 ```
 
-Both unpack into `~/.openepl/kits/`. The kit is the directory holding the
+Both unpack into `~/.kiln/kits/`. The kit is the directory holding the
 `*_libinfo.c` — at the top of the archive or one level down, either works —
 and installing over an existing one replaces it and says so.
 
 ## Writing one
 
 A kit is a library directory, so start from
-[Writing a support library](https://github.com/AxDSan/openepl/blob/main/libs/README.md)
+[Writing a support library](https://github.com/AxDSan/kiln/blob/main/libs/README.md)
 and add a `lib.json` with the design-time keys:
 
 ```json
@@ -86,7 +86,7 @@ and add a `lib.json` with the design-time keys:
 | --- | --- |
 | `display` | the name a person reads; defaults to the directory name |
 | `section` | the toolbox heading to file the kit under |
-| `version` | reported by `openepl kits`; defaults to `0.0.0` |
+| `version` | reported by `kiln kits`; defaults to `0.0.0` |
 | `order` | where it sorts in a toolbox; equal values sort by name |
 | `icons` | `Component=path` pairs, the path relative to the kit |
 | `templates` | subdirectories holding a `template.meta` |
@@ -96,20 +96,20 @@ existed — none of which have any of them — are listed and used unchanged. Th
 same file also carries the build flags a library needs, so a kit that wants
 C++, `pkg-config` or a vendored dependency configures both in one place.
 
-A template named here appears in `openepl templates` and can be created with
-`openepl new`, exactly like a built-in one:
+A template named here appears in `kiln templates` and can be created with
+`kiln new`, exactly like a built-in one:
 
 ```sh
-openepl templates
-openepl new units-starter converter
+kiln templates
+kiln new units-starter converter
 ```
 
 ## Shipping declarations
 
 A kit can also carry a bundle of foreign *declarations* — `dll` calls, `is c`
-records and `const` values — in one or more `.oed` files beside `lib.json`. A
-small kit keeps them in `<name>.oed`; a large one splits them by the library
-they wrap (`user32.oed`, `kernel32.oed`, `gdi32.oed`), and every `.oed` in the
+records and `const` values — in one or more `.kdecl` files beside `lib.json`. A
+small kit keeps them in `<name>.kdecl`; a large one splits them by the library
+they wrap (`user32.kdecl`, `kernel32.kdecl`, `gdi32.kdecl`), and every `.kdecl` in the
 directory is merged into one bundle. `use <name>` merges them into a program as
 if it had typed them, so
 a kit like `win` can supply `MessageBoxA`, `RECT` and `MB_OK` with no

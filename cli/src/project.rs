@@ -1,29 +1,29 @@
-//! The project file — `project.oeproj` — and `openepl project`.
+//! The project file — `project.kproj` — and `kiln project`.
 //!
-//! A project is a directory with a `project.oeproj` in it, and the file is the
+//! A project is a directory with a `project.kproj` in it, and the file is the
 //! same `key: value` lines as `template.meta`: the CLI is the only reader of a
-//! project file, so Studio learns a project's shape through `openepl project`
+//! project file, so Studio learns a project's shape through `kiln project`
 //! rather than by parsing this itself, exactly as it learns a form's shape
-//! through `openepl inspect`. A second parser in C++ would drift from this one
+//! through `kiln inspect`. A second parser in C++ would drift from this one
 //! the first time a field was added.
 //!
 //! Fields:
 //!
 //!   name:    what the project is called; also the default output name
-//!   main:    the entry `.oir`, relative to the project file
+//!   main:    the entry `.kiln`, relative to the project file
 //!   target:  console | gui | sharedlib | staticlib
 //!   kits:    the `use` set, so a fresh checkout knows what to `kit add`
 //!   version: the PROJECT's version — not the toolchain's, which is what
-//!            `openepl version` reports. `new` writes `0.1.0`.
+//!            `kiln version` reports. `new` writes `0.1.0`.
 //!
 //! `build`, `run`, `emit` and `inspect` accept the file or its directory in
-//! place of an `.oir`, and resolve `main` from it.
+//! place of an `.kiln`, and resolve `main` from it.
 
 use std::path::{Path, PathBuf};
 
-use openepl_ir::Target;
+use kiln_ir::Target;
 
-pub const FILE_NAME: &str = "project.oeproj";
+pub const FILE_NAME: &str = "project.kproj";
 
 #[derive(Debug)]
 pub struct Project {
@@ -41,11 +41,11 @@ pub struct Project {
 
 /// Is this argument a project rather than a source file?
 ///
-/// A directory always is: there is nothing else `openepl build <dir>` could
+/// A directory always is: there is nothing else `kiln build <dir>` could
 /// mean. A file is one by extension only, so a source file named oddly is
 /// still handed to the parser.
 pub fn is_project_path(p: &Path) -> bool {
-    p.is_dir() || p.extension().and_then(|e| e.to_str()) == Some("oeproj")
+    p.is_dir() || p.extension().and_then(|e| e.to_str()) == Some("kproj")
 }
 
 /// The project file for a path that names a project or its directory.
@@ -56,7 +56,7 @@ pub fn locate(p: &Path) -> Result<PathBuf, String> {
             Ok(file)
         } else {
             Err(format!(
-                "{} has no {FILE_NAME} — run `openepl new` to create a project, or name the .oir directly",
+                "{} has no {FILE_NAME} — run `kiln new` to create a project, or name the .kiln directly",
                 p.display()
             ))
         }
@@ -141,7 +141,7 @@ pub fn render(name: &str, main: &str, target: Target, kits: &[String], version: 
     )
 }
 
-/// The keys `openepl project ... set` accepts, in the order `render` writes
+/// The keys `kiln project ... set` accepts, in the order `render` writes
 /// them. A key not on this list is rejected rather than written: a project
 /// file may carry a hand-added line the toolchain does not know, and silently
 /// accepting `targt: gui` would look like it worked.
@@ -188,35 +188,35 @@ pub fn apply_edits(text: &str, edits: &[(String, String)]) -> String {
     joined
 }
 
-/// `openepl project <file-or-dir> set <key>=<value>...`
+/// `kiln project <file-or-dir> set <key>=<value>...`
 ///
 /// Studio's only way to change a project file: by the house rule the CLI is
-/// the single reader — and writer — of `.oeproj`, so a second parser in C++
+/// the single reader — and writer — of `.kproj`, so a second parser in C++
 /// cannot drift from this one.
 fn cmd_project_set(path: &str, args: &[String]) -> i32 {
     let file = match locate(Path::new(path)) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             return 1;
         }
     };
     if args.is_empty() {
-        eprintln!("openepl: usage: openepl project <project.oeproj | directory> set <key>=<value>...");
-        eprintln!("openepl: keys: {}", SETTABLE.join(", "));
+        eprintln!("kiln: usage: kiln project <project.kproj | directory> set <key>=<value>...");
+        eprintln!("kiln: keys: {}", SETTABLE.join(", "));
         return 2;
     }
 
     let mut edits: Vec<(String, String)> = Vec::new();
     for a in args {
         let Some((key, value)) = a.split_once('=') else {
-            eprintln!("openepl: `{a}` is not <key>=<value>");
+            eprintln!("kiln: `{a}` is not <key>=<value>");
             return 2;
         };
         let key = key.trim();
         let value = value.trim();
         if !SETTABLE.contains(&key) {
-            eprintln!("openepl: cannot set `{key}` — keys: {}", SETTABLE.join(", "));
+            eprintln!("kiln: cannot set `{key}` — keys: {}", SETTABLE.join(", "));
             return 2;
         }
         // Validated here rather than at the next build: a project file that
@@ -224,18 +224,18 @@ fn cmd_project_set(path: &str, args: &[String]) -> i32 {
         // open again.
         if key == "target" && Target::parse(value).is_none() {
             eprintln!(
-                "openepl: unknown target `{value}` — expected console, gui, sharedlib or staticlib"
+                "kiln: unknown target `{value}` — expected console, gui, sharedlib or staticlib"
             );
             return 2;
         }
         if key == "main" && value.is_empty() {
-            eprintln!("openepl: `main` is the entry file — it cannot be empty");
+            eprintln!("kiln: `main` is the entry file — it cannot be empty");
             return 2;
         }
         // A value carrying a newline would split into a second line and read
         // back as a different key entirely.
         if value.contains('\n') || value.contains('\r') {
-            eprintln!("openepl: a value cannot contain a newline");
+            eprintln!("kiln: a value cannot contain a newline");
             return 2;
         }
         edits.retain(|(k, _)| k != key);
@@ -245,13 +245,13 @@ fn cmd_project_set(path: &str, args: &[String]) -> i32 {
     let text = match std::fs::read_to_string(&file) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("openepl: cannot read {}: {e}", file.display());
+            eprintln!("kiln: cannot read {}: {e}", file.display());
             return 1;
         }
     };
     let updated = apply_edits(&text, &edits);
     if let Err(e) = std::fs::write(&file, &updated) {
-        eprintln!("openepl: cannot write {}: {e}", file.display());
+        eprintln!("kiln: cannot write {}: {e}", file.display());
         return 1;
     }
     // Read it back through the same loader the build uses, so `set` reports
@@ -264,13 +264,13 @@ fn cmd_project_set(path: &str, args: &[String]) -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("openepl: wrote {} but it no longer loads: {e}", file.display());
+            eprintln!("kiln: wrote {} but it no longer loads: {e}", file.display());
             1
         }
     }
 }
 
-/// `openepl project <file-or-dir>` — the resolved fields, one per line.
+/// `kiln project <file-or-dir>` — the resolved fields, one per line.
 ///
 /// `main:` is printed resolved rather than as written, because the reader is
 /// Studio deciding what to open, and Studio is not standing in the project's
@@ -278,14 +278,14 @@ fn cmd_project_set(path: &str, args: &[String]) -> i32 {
 /// reader never splits a value.
 pub fn cmd_project(args: &[String]) -> i32 {
     let Some(path) = args.first() else {
-        eprintln!("openepl: usage: openepl project <project.oeproj | directory> [set <key>=<value>...]");
+        eprintln!("kiln: usage: kiln project <project.kproj | directory> [set <key>=<value>...]");
         return 2;
     };
     if args.get(1).map(String::as_str) == Some("set") {
         return cmd_project_set(path, &args[2..]);
     }
     if args.len() > 1 {
-        eprintln!("openepl: unexpected argument `{}`", args[1]);
+        eprintln!("kiln: unexpected argument `{}`", args[1]);
         return 2;
     }
     match load(Path::new(path)) {
@@ -305,7 +305,7 @@ pub fn cmd_project(args: &[String]) -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             1
         }
     }
@@ -317,15 +317,15 @@ mod tests {
 
     #[test]
     fn render_and_load_agree() {
-        let dir = std::env::temp_dir().join("openepl_project_unit");
+        let dir = std::env::temp_dir().join("kiln_project_unit");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let text = render("demo", "src/main.oir", Target::Gui, &["ui".into(), "file".into()], "0.1.0");
+        let text = render("demo", "src/main.kiln", Target::Gui, &["ui".into(), "file".into()], "0.1.0");
         std::fs::write(dir.join(FILE_NAME), text).unwrap();
 
         let p = load(&dir).unwrap();
         assert_eq!(p.name, "demo");
-        assert_eq!(p.main, dir.join("src/main.oir"));
+        assert_eq!(p.main, dir.join("src/main.kiln"));
         assert_eq!(p.target, Some(Target::Gui));
         assert_eq!(p.kits, vec!["ui", "file"]);
         assert_eq!(p.version, "0.1.0");
@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn set_rewrites_a_field_and_keeps_the_rest() {
-        let text = "# my project\nname: demo\nmain: src/main.oir\ntarget: console\nkits: ui\nversion: 0.1.0\nauthor: someone\n";
+        let text = "# my project\nname: demo\nmain: src/main.kiln\ntarget: console\nkits: ui\nversion: 0.1.0\nauthor: someone\n";
         let out = apply_edits(
             text,
             &[("target".into(), "gui".into()), ("version".into(), "0.2.0".into())],
@@ -360,13 +360,13 @@ mod tests {
 
     #[test]
     fn set_appends_a_field_the_file_lacks() {
-        let out = apply_edits("main: a.oir\n", &[("version".into(), "1.0.0".into())]);
-        assert_eq!(out, "main: a.oir\nversion: 1.0.0\n");
+        let out = apply_edits("main: a.kiln\n", &[("version".into(), "1.0.0".into())]);
+        assert_eq!(out, "main: a.kiln\nversion: 1.0.0\n");
     }
 
     #[test]
     fn a_directory_without_a_project_says_so() {
-        let dir = std::env::temp_dir().join("openepl_project_unit_empty");
+        let dir = std::env::temp_dir().join("kiln_project_unit_empty");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let err = load(&dir).unwrap_err();

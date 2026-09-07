@@ -1,0 +1,122 @@
+# Reading a process's memory through the Win32 process API — a console program
+# written with nothing but `use win`.
+#
+#   kiln build examples/win/meminfo.kiln --os windows -o meminfo.exe
+#
+# This is the proof that the process half and the memory half of the kit are
+# bound to the real thing rather than merely parsed. A wrong struct offset, a
+# DWORD declared as an int64, a symbol spelled the way MSDN prints it rather
+# than the way kernel32 exports it: none of those show up in a build, and all
+# of them show up the moment Windows fills a struct.
+#
+# The process it opens is itself. That is deliberate: reading another process
+# needs a second process to exist and a privilege to be held, and neither
+# belongs in an example. The binding being proved is the same one either way —
+# OpenProcess hands back a handle, ReadProcessMemory reads through it, and the
+# bytes that come back are the bytes that were written.
+#
+# Every line prints `<label> ok` or `<label> FAILED`, so a regression names
+# itself instead of leaving a number to be squinted at.
+module meminfo
+use win
+
+# A recognisable pattern to write into the page and read back out again.
+const SENTINEL = 0x1234_5678
+# The second one, so a write that lands can be told from a read that happened
+# to see the first.
+const SECOND = 0x0BAD_F00D
+
+sub say(label: text, ok: bool)
+  if ok
+    call print_text(label + " ok")
+  else
+    call print_text(label + " FAILED")
+  end
+end
+
+sub main
+  # --- the process ------------------------------------------------------
+  # GetCurrentProcessId answers a DWORD; OpenProcess turns it into a handle
+  # with the rights asked for. PROCESS_VM_READ, PROCESS_VM_WRITE and
+  # PROCESS_QUERY_INFORMATION are single bits of an access mask, so `bor`
+  # combines them — the same `|` the C headers write.
+  let pid: int = GetCurrentProcessId()
+  call say("pid", pid > 0)
+
+  let access: int = PROCESS_VM_READ bor PROCESS_VM_WRITE bor PROCESS_QUERY_INFORMATION
+  let process: ptr = OpenProcess(access, false, pid)
+  if ptr_is_null(process)
+    call print_text("open FAILED {GetLastError()}")
+    return
+  end
+  call say("open", true)
+
+  # --- a page of our own memory, with a known value in it ---------------
+  # VirtualAlloc rather than mem_alloc, so the region VirtualQuery reports on
+  # below is one page with a protection this program chose.
+  let page: ptr = VirtualAlloc(ptr_null(), 4096, MEM_COMMIT_RESERVE, PAGE_READWRITE)
+  if ptr_is_null(page)
+    call print_text("alloc FAILED {GetLastError()}")
+    return
+  end
+  call say("alloc", true)
+  call ptr_write_int(page, 0, SENTINEL)
+
+  # --- read it back through the process handle --------------------------
+  # This is the whole point: the value does not come back off the pointer, it
+  # comes back through kernel32, out of the process named by `process`.
+  # `lpNumberOfBytesRead` is a SIZE_T*, so the cell is eight bytes wide and is
+  # read with ptr_read_int64 — four would be a heap overwrite.
+  let into: ptr = mem_alloc(8)
+  let moved: ptr = mem_alloc(8)
+  call mem_zero(into, 8)
+  call mem_zero(moved, 8)
+
+  let read_ok: bool = ReadProcessMemory(process, page, into, 4, moved)
+  call say("read", read_ok)
+  call say("read count", ptr_read_int64(moved, 0) = int_to_int64(4))
+  let got: int = ptr_read_int(into, 0)
+  call say("read value", got = SENTINEL)
+  call print_text("value {got}")
+
+  # --- and write through it, the other direction ------------------------
+  call ptr_write_int(into, 0, SECOND)
+  call mem_zero(moved, 8)
+  let write_ok: bool = WriteProcessMemory(process, page, into, 4, moved)
+  call say("write", write_ok)
+  call say("write count", ptr_read_int64(moved, 0) = int_to_int64(4))
+  call say("write landed", ptr_read_int(page, 0) = SECOND)
+
+  # --- what Windows says about that page --------------------------------
+  # VirtualQuery fills a MEMORY_BASIC_INFORMATION. Its answer is the return
+  # value's worth of bytes written, which is the struct's own size when the
+  # call succeeds — the first thing a wrong layout gets wrong.
+  var region: MEMORY_BASIC_INFORMATION
+  let written: int64 = VirtualQuery(page, region, size of MEMORY_BASIC_INFORMATION)
+  call say("query", written = size of MEMORY_BASIC_INFORMATION)
+  call say("query state", region.State = MEM_COMMIT)
+  call say("query protect", region.Protect = PAGE_READWRITE)
+  call say("query base", ptr_to_int(region.BaseAddress) = ptr_to_int(page))
+  call print_text("region {region.RegionSize}")
+
+  # --- the machine ------------------------------------------------------
+  # One more struct the callee fills, and the number every allocation above
+  # was rounded to.
+  var info: SYSTEM_INFO
+  call GetSystemInfo(info)
+  call say("page size", info.dwPageSize = 4096)
+  call say("cpus", info.dwNumberOfProcessors > 0)
+
+  # --- a module and a symbol in it --------------------------------------
+  # LoadLibraryA + GetProcAddress: the pair every plugin loader is built on.
+  let user32: ptr = LoadLibraryA("user32.dll")
+  call say("load", not ptr_is_null(user32))
+  call say("symbol", not ptr_is_null(GetProcAddress(user32, "MessageBoxA")))
+  call say("missing symbol", ptr_is_null(GetProcAddress(user32, "NoSuchExport")))
+
+  call VirtualFree(page, 0, MEM_RELEASE)
+  call mem_free(into)
+  call mem_free(moved)
+  call CloseHandle(process)
+  call print_text("done")
+end

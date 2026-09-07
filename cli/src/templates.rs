@@ -1,4 +1,4 @@
-//! Project templates — `openepl templates` and `openepl new`.
+//! Project templates — `kiln templates` and `kiln new`.
 //!
 //! Templates live in `templates/<id>/`, each with a `template.meta` describing
 //! it and one or more source files. `__MODULE__` in any file is replaced with
@@ -8,14 +8,14 @@
 //! the new project's module name.
 //!
 //! They are exposed through the CLI rather than read directly by the designer,
-//! for the same reason the designer never parses `.oir` itself: one
+//! for the same reason the designer never parses `.kiln` itself: one
 //! reader, one format, no drift. Studio builds its New Project tiles from
-//! `openepl templates` output, so adding a template adds a tile with no IDE
+//! `kiln templates` output, so adding a template adds a tile with no IDE
 //! change.
 
 use std::path::{Path, PathBuf};
 
-use openepl_ir::Target;
+use kiln_ir::Target;
 
 /// One template, as described by its `template.meta`.
 pub struct Template {
@@ -91,7 +91,7 @@ fn parse_meta(id: &str, dir: &Path, meta: &Path) -> Result<Template, String> {
     let mut name = String::new();
     let mut desc = String::new();
     let mut target = None;
-    let mut entry = String::from("main.oir");
+    let mut entry = String::from("main.kiln");
 
     for line in text.lines() {
         let Some((key, value)) = line.split_once(':') else {
@@ -123,7 +123,7 @@ fn parse_meta(id: &str, dir: &Path, meta: &Path) -> Result<Template, String> {
     })
 }
 
-/// `openepl templates` — list what can be created.
+/// `kiln templates` — list what can be created.
 ///
 /// Line-based, like `inspect`, so a consumer needs no JSON parser. Each line
 /// repeats the id so the fields can be read in any order.
@@ -131,7 +131,7 @@ pub fn cmd_list(repo_root: &Path) -> i32 {
     let templates = match load_all(repo_root) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             return 1;
         }
     };
@@ -144,7 +144,7 @@ pub fn cmd_list(repo_root: &Path) -> i32 {
     0
 }
 
-/// `openepl new <template> <dir> [--name <module>] [--title <text>]`.
+/// `kiln new <template> <dir> [--name <module>] [--title <text>]`.
 pub fn cmd_new(repo_root: &Path, args: &[String]) -> i32 {
     let mut template_id: Option<String> = None;
     let mut dest: Option<PathBuf> = None;
@@ -158,7 +158,7 @@ pub fn cmd_new(repo_root: &Path, args: &[String]) -> i32 {
                 match args.get(i) {
                     Some(v) => module = Some(v.clone()),
                     None => {
-                        eprintln!("openepl: `--name` needs a module name");
+                        eprintln!("kiln: `--name` needs a module name");
                         return 2;
                     }
                 }
@@ -168,19 +168,19 @@ pub fn cmd_new(repo_root: &Path, args: &[String]) -> i32 {
                 match args.get(i) {
                     Some(v) if !v.trim().is_empty() => title = Some(v.trim().to_string()),
                     _ => {
-                        eprintln!("openepl: `--title` needs a title");
+                        eprintln!("kiln: `--title` needs a title");
                         return 2;
                     }
                 }
             }
             s if s.starts_with('-') => {
-                eprintln!("openepl: unknown flag `{s}`");
+                eprintln!("kiln: unknown flag `{s}`");
                 return 2;
             }
             s if template_id.is_none() => template_id = Some(s.to_string()),
             s if dest.is_none() => dest = Some(PathBuf::from(s)),
             s => {
-                eprintln!("openepl: unexpected argument `{s}`");
+                eprintln!("kiln: unexpected argument `{s}`");
                 return 2;
             }
         }
@@ -188,22 +188,22 @@ pub fn cmd_new(repo_root: &Path, args: &[String]) -> i32 {
     }
 
     let (Some(template_id), Some(dest)) = (template_id, dest) else {
-        eprintln!("openepl: usage: openepl new <template> <dir> [--name <module>] [--title <text>]");
-        eprintln!("openepl: run `openepl templates` to see what is available");
+        eprintln!("kiln: usage: kiln new <template> <dir> [--name <module>] [--title <text>]");
+        eprintln!("kiln: run `kiln templates` to see what is available");
         return 2;
     };
 
     let templates = match load_all(repo_root) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("openepl: {e}");
+            eprintln!("kiln: {e}");
             return 1;
         }
     };
     let Some(t) = templates.iter().find(|t| t.id == template_id) else {
-        eprintln!("openepl: no template `{template_id}`");
+        eprintln!("kiln: no template `{template_id}`");
         eprintln!(
-            "openepl: available: {}",
+            "kiln: available: {}",
             templates
                 .iter()
                 .map(|t| t.id.as_str())
@@ -234,18 +234,18 @@ pub fn cmd_new(repo_root: &Path, args: &[String]) -> i32 {
     // Never write over someone's work: an existing non-empty directory is an
     // error, not something to merge into.
     if dest.exists() && std::fs::read_dir(&dest).map(|d| d.count()).unwrap_or(0) > 0 {
-        eprintln!("openepl: {} already exists and is not empty", dest.display());
+        eprintln!("kiln: {} already exists and is not empty", dest.display());
         return 1;
     }
     if let Err(e) = std::fs::create_dir_all(&dest) {
-        eprintln!("openepl: cannot create {}: {e}", dest.display());
+        eprintln!("kiln: cannot create {}: {e}", dest.display());
         return 1;
     }
 
     let files = match std::fs::read_dir(&t.dir) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("openepl: cannot read {}: {e}", t.dir.display());
+            eprintln!("kiln: cannot read {}: {e}", t.dir.display());
             return 1;
         }
     };
@@ -260,7 +260,7 @@ pub fn cmd_new(repo_root: &Path, args: &[String]) -> i32 {
         let bytes = match std::fs::read(&from) {
             Ok(b) => b,
             Err(e) => {
-                eprintln!("openepl: cannot read {}: {e}", from.display());
+                eprintln!("kiln: cannot read {}: {e}", from.display());
                 return 1;
             }
         };
@@ -276,7 +276,7 @@ pub fn cmd_new(repo_root: &Path, args: &[String]) -> i32 {
         };
         let to = dest.join(name);
         if let Err(e) = std::fs::write(&to, out) {
-            eprintln!("openepl: cannot write {}: {e}", to.display());
+            eprintln!("kiln: cannot write {}: {e}", to.display());
             return 1;
         }
     }
@@ -287,13 +287,13 @@ pub fn cmd_new(repo_root: &Path, args: &[String]) -> i32 {
     let entry_path = dest.join(&t.entry);
     let kits = std::fs::read_to_string(&entry_path)
         .ok()
-        .and_then(|src| openepl_ir::parse(&src).ok())
+        .and_then(|src| kiln_ir::parse(&src).ok())
         .map(|m| m.uses.clone())
         .unwrap_or_default();
     let proj = dest.join(crate::project::FILE_NAME);
     let text = crate::project::render(&module, &t.entry, t.target, &kits, "0.1.0");
     if let Err(e) = std::fs::write(&proj, text) {
-        eprintln!("openepl: cannot write {}: {e}", proj.display());
+        eprintln!("kiln: cannot write {}: {e}", proj.display());
         return 1;
     }
 
@@ -304,9 +304,9 @@ pub fn cmd_new(repo_root: &Path, args: &[String]) -> i32 {
     // that ships its own is left alone.
     let ignore = dest.join(".gitignore");
     if !ignore.exists() {
-        let text = "# Studio's throwaway build, made by Run\n.openepl/\n\n# Where Build puts your program\nbuild/\n";
+        let text = "# Studio's throwaway build, made by Run\n.kiln/\n\n# Where Build puts your program\nbuild/\n";
         if let Err(e) = std::fs::write(&ignore, text) {
-            eprintln!("openepl: cannot write {}: {e}", ignore.display());
+            eprintln!("kiln: cannot write {}: {e}", ignore.display());
             return 1;
         }
     }

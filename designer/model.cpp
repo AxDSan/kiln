@@ -7,7 +7,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace openepl::designer {
+namespace kiln::designer {
 namespace {
 
 std::vector<std::string> split_words(const std::string& line, int max_parts) {
@@ -69,22 +69,22 @@ std::string render_value(const std::string& type_name, const std::string& proper
 
 } // namespace
 
-/// Is `path` a project rather than a source file — a directory, or `.oeproj`?
+/// Is `path` a project rather than a source file — a directory, or `.kproj`?
 static bool is_project(const std::string& path) {
     struct stat st;
     if (::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) return true;
-    const std::string ext = ".oeproj";
+    const std::string ext = ".kproj";
     return path.size() > ext.size() && path.compare(path.size() - ext.size(), ext.size(), ext) == 0;
 }
 
-bool load_model(const std::string& openepl_bin, const std::string& given, Model& out,
+bool load_model(const std::string& kiln_bin, const std::string& given, Model& out,
                 std::string& error) {
     std::string path = given;
     std::string project;
     if (is_project(given)) {
-        const std::string cmd = openepl_bin + " project " + given + " 2>&1";
+        const std::string cmd = kiln_bin + " project " + given + " 2>&1";
         FILE* pipe = popen(cmd.c_str(), "r");
-        if (!pipe) { error = "could not run openepl project"; return false; }
+        if (!pipe) { error = "could not run kiln project"; return false; }
         std::string text, line;
         char buf[4096];
         while (fgets(buf, sizeof buf, pipe)) text += buf;
@@ -96,14 +96,14 @@ bool load_model(const std::string& openepl_bin, const std::string& given, Model&
             else if (line.rfind("project: ", 0) == 0) project = line.substr(9);
         }
         if (rc != 0 || path.empty()) {
-            error = text.empty() ? "openepl project failed" : text;
+            error = text.empty() ? "kiln project failed" : text;
             return false;
         }
     }
 
-    const std::string cmd = openepl_bin + " inspect " + path + " 2>&1";
+    const std::string cmd = kiln_bin + " inspect " + path + " 2>&1";
     FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) { error = "could not run openepl inspect"; return false; }
+    if (!pipe) { error = "could not run kiln inspect"; return false; }
 
     out = Model{};
     out.path = path;
@@ -172,7 +172,7 @@ bool load_model(const std::string& openepl_bin, const std::string& given, Model&
     }
 
     if (rc != 0) {
-        error = text.empty() ? "openepl inspect failed" : text;
+        error = text.empty() ? "kiln inspect failed" : text;
         return false;
     }
     // A module with no form is still a project: a console program or a library
@@ -504,4 +504,4 @@ bool save_model(Model& m, const std::vector<std::string>& new_subs,
     return true;
 }
 
-} // namespace openepl::designer
+} // namespace kiln::designer

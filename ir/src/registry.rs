@@ -2,7 +2,7 @@
 //!
 //! Maps a surface command name to its `Signature` and the runtime symbol the
 //! backend emits a call to.  In Phase 2 this table is replaced by signatures
-//! loaded from `openepl_get_lib_info`; keeping it in one place now
+//! loaded from `kiln_get_lib_info`; keeping it in one place now
 //! means the validator and the backend agree on exactly one source of truth.
 
 use std::collections::HashMap;
@@ -51,7 +51,7 @@ pub enum ComponentKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComponentDesc {
     pub name: String,
-    /// Accessibility role (`OE_ROLE_*`) — carried from the descriptor so a11y
+    /// Accessibility role (`KN_ROLE_*`) — carried from the descriptor so a11y
     /// data exists from the start.
     pub a11y_role: i32,
     pub kind: ComponentKind,
@@ -72,6 +72,21 @@ impl ComponentDesc {
     }
 }
 
+/// What a command's documentation says, when it has any.
+///
+/// Kept beside the registry rather than inside `Command` on purpose: a command
+/// with no documentation is not a different kind of command, and every one of
+/// the places that builds a `Command` — the hard-coded core set most of all —
+/// would otherwise have to name two more fields it has nothing to put in.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CommandDoc {
+    /// One sentence: what it does, and what it returns when it fails.
+    pub summary: String,
+    /// One to three lines of Kiln calling it, with no surrounding
+    /// `module`/`sub` — the documentation generator supplies those.
+    pub example: String,
+}
+
 /// One registered command.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Command {
@@ -86,6 +101,8 @@ pub struct Command {
 #[derive(Debug, Clone, Default)]
 pub struct Registry {
     map: HashMap<String, Command>,
+    /// Documentation, for the commands that have it. Sparse by design.
+    docs: HashMap<String, CommandDoc>,
     components: HashMap<String, ComponentDesc>,
     /// Subroutines defined in the module being compiled, by name.
     ///
@@ -135,6 +152,7 @@ impl Registry {
     pub fn new() -> Registry {
         Registry {
             map: HashMap::new(),
+            docs: HashMap::new(),
             components: HashMap::new(),
             subs: HashMap::new(),
             dlls: HashMap::new(),
@@ -376,6 +394,21 @@ impl Registry {
         self.components.keys().map(|s| s.as_str())
     }
 
+    /// Record what a command's documentation says. Both halves may be empty,
+    /// in which case nothing is stored — an undocumented command is absent
+    /// from this map rather than present with nothing in it.
+    pub fn set_doc(&mut self, name: impl Into<String>, doc: CommandDoc) {
+        if doc.summary.is_empty() && doc.example.is_empty() {
+            return;
+        }
+        self.docs.insert(name.into(), doc);
+    }
+
+    /// What a command's documentation says, or `None` when it has none.
+    pub fn doc(&self, name: &str) -> Option<&CommandDoc> {
+        self.docs.get(name)
+    }
+
     pub fn get(&self, name: &str) -> Option<&Command> {
         self.map.get(name)
     }
@@ -435,96 +468,96 @@ impl Registry {
                 };
 
             // --- I/O (void) --------------------------------------------------
-            cmd("print_int", "oe_print_int", &[Int], None);
-            cmd("print_int64", "oe_print_int64", &[Int64], None);
-            cmd("print_double", "oe_print_double", &[Double], None);
-            cmd("print_text", "oe_print_text", &[Text], None);
-            cmd("read_line", "oe_read_line", &[], Some(Text));
-            cmd("input_ended", "oe_input_ended", &[], Some(Bool));
-            cmd("ask", "oe_ask", &[Text], Some(Text));
+            cmd("print_int", "kn_print_int", &[Int], None);
+            cmd("print_int64", "kn_print_int64", &[Int64], None);
+            cmd("print_double", "kn_print_double", &[Double], None);
+            cmd("print_text", "kn_print_text", &[Text], None);
+            cmd("read_line", "kn_read_line", &[], Some(Text));
+            cmd("input_ended", "kn_input_ended", &[], Some(Bool));
+            cmd("ask", "kn_ask", &[Text], Some(Text));
             // What a failed `assert` runs: print the message and stop, failing.
-            cmd("assert_failed", "oe_assert_failed", &[Text], None);
+            cmd("assert_failed", "kn_assert_failed", &[Text], None);
 
             // --- Errors ------------------------------------------------------
-            cmd("last_error_code", "oe_last_error_code", &[], Some(Int));
-            cmd("last_error_text", "oe_last_error_text", &[], Some(Text));
+            cmd("last_error_code", "kn_last_error_code", &[], Some(Int));
+            cmd("last_error_text", "kn_last_error_text", &[], Some(Text));
 
             // --- Integer math ------------------------------------------------
-            cmd("abs_int", "oe_abs_int", &[Int], Some(Int));
-            cmd("min_int", "oe_min_int", &[Int, Int], Some(Int));
-            cmd("max_int", "oe_max_int", &[Int, Int], Some(Int));
-            cmd("mod_int", "oe_mod_int", &[Int, Int], Some(Int));
-            cmd("pow_int", "oe_pow_int", &[Int, Int], Some(Int));
+            cmd("abs_int", "kn_abs_int", &[Int], Some(Int));
+            cmd("min_int", "kn_min_int", &[Int, Int], Some(Int));
+            cmd("max_int", "kn_max_int", &[Int, Int], Some(Int));
+            cmd("mod_int", "kn_mod_int", &[Int, Int], Some(Int));
+            cmd("pow_int", "kn_pow_int", &[Int, Int], Some(Int));
 
             // --- Floating-point math ----------------------------------------
-            cmd("sqrt", "oe_sqrt", &[Double], Some(Double));
-            cmd("sin", "oe_sin", &[Double], Some(Double));
-            cmd("cos", "oe_cos", &[Double], Some(Double));
-            cmd("tan", "oe_tan", &[Double], Some(Double));
-            cmd("pow", "oe_pow", &[Double, Double], Some(Double));
-            cmd("exp", "oe_exp", &[Double], Some(Double));
-            cmd("ln", "oe_ln", &[Double], Some(Double));
-            cmd("log10", "oe_log10", &[Double], Some(Double));
-            cmd("floor", "oe_floor", &[Double], Some(Double));
-            cmd("ceil", "oe_ceil", &[Double], Some(Double));
-            cmd("round", "oe_round", &[Double], Some(Double));
-            cmd("abs_double", "oe_abs_double", &[Double], Some(Double));
+            cmd("sqrt", "kn_sqrt", &[Double], Some(Double));
+            cmd("sin", "kn_sin", &[Double], Some(Double));
+            cmd("cos", "kn_cos", &[Double], Some(Double));
+            cmd("tan", "kn_tan", &[Double], Some(Double));
+            cmd("pow", "kn_pow", &[Double, Double], Some(Double));
+            cmd("exp", "kn_exp", &[Double], Some(Double));
+            cmd("ln", "kn_ln", &[Double], Some(Double));
+            cmd("log10", "kn_log10", &[Double], Some(Double));
+            cmd("floor", "kn_floor", &[Double], Some(Double));
+            cmd("ceil", "kn_ceil", &[Double], Some(Double));
+            cmd("round", "kn_round", &[Double], Some(Double));
+            cmd("abs_double", "kn_abs_double", &[Double], Some(Double));
             cmd(
                 "min_double",
-                "oe_min_double",
+                "kn_min_double",
                 &[Double, Double],
                 Some(Double),
             );
             cmd(
                 "max_double",
-                "oe_max_double",
+                "kn_max_double",
                 &[Double, Double],
                 Some(Double),
             );
 
             // --- Conversions -------------------------------------------------
-            cmd("int_to_double", "oe_int_to_double", &[Int], Some(Double));
-            cmd("double_to_int", "oe_double_to_int", &[Double], Some(Int));
-            cmd("int_to_int64", "oe_int_to_int64", &[Int], Some(Int64));
-            cmd("int64_to_int", "oe_int64_to_int", &[Int64], Some(Int));
-            cmd("int_to_text", "oe_int_to_text", &[Int], Some(Text));
-            cmd("int64_to_text", "oe_int64_to_text", &[Int64], Some(Text));
-            cmd("double_to_text", "oe_double_to_text", &[Double], Some(Text));
-            cmd("text_to_int", "oe_text_to_int", &[Text], Some(Int));
-            cmd("text_to_double", "oe_text_to_double", &[Text], Some(Double));
+            cmd("int_to_double", "kn_int_to_double", &[Int], Some(Double));
+            cmd("double_to_int", "kn_double_to_int", &[Double], Some(Int));
+            cmd("int_to_int64", "kn_int_to_int64", &[Int], Some(Int64));
+            cmd("int64_to_int", "kn_int64_to_int", &[Int64], Some(Int));
+            cmd("int_to_text", "kn_int_to_text", &[Int], Some(Text));
+            cmd("int64_to_text", "kn_int64_to_text", &[Int64], Some(Text));
+            cmd("double_to_text", "kn_double_to_text", &[Double], Some(Text));
+            cmd("text_to_int", "kn_text_to_int", &[Text], Some(Int));
+            cmd("text_to_double", "kn_text_to_double", &[Text], Some(Double));
 
             // --- Text --------------------------------------------------------
-            cmd("text_eq", "oe_text_eq", &[Text, Text], Some(Bool));
-            cmd("length", "oe_length", &[Text], Some(Int));
-            cmd("uppercase", "oe_uppercase", &[Text], Some(Text));
-            cmd("lowercase", "oe_lowercase", &[Text], Some(Text));
-            cmd("trim", "oe_trim", &[Text], Some(Text));
-            cmd("substr", "oe_substr", &[Text, Int, Int], Some(Text));
-            cmd("find", "oe_find", &[Text, Text], Some(Int));
-            cmd("replace", "oe_replace", &[Text, Text, Text], Some(Text));
-            cmd("concat", "oe_concat", &[Text, Text], Some(Text));
-            cmd("repeat", "oe_repeat", &[Text, Int], Some(Text));
-            cmd("reverse", "oe_reverse", &[Text], Some(Text));
+            cmd("text_eq", "kn_text_eq", &[Text, Text], Some(Bool));
+            cmd("length", "kn_length", &[Text], Some(Int));
+            cmd("uppercase", "kn_uppercase", &[Text], Some(Text));
+            cmd("lowercase", "kn_lowercase", &[Text], Some(Text));
+            cmd("trim", "kn_trim", &[Text], Some(Text));
+            cmd("substr", "kn_substr", &[Text, Int, Int], Some(Text));
+            cmd("find", "kn_find", &[Text, Text], Some(Int));
+            cmd("replace", "kn_replace", &[Text, Text, Text], Some(Text));
+            cmd("concat", "kn_concat", &[Text, Text], Some(Text));
+            cmd("repeat", "kn_repeat", &[Text, Int], Some(Text));
+            cmd("reverse", "kn_reverse", &[Text], Some(Text));
 
             // --- Date / time -------------------------------------------------
-            cmd("now", "oe_now", &[], Some(Int64));
-            cmd("year", "oe_year", &[Int64], Some(Int));
-            cmd("format_time", "oe_format_time", &[Int64, Text], Some(Text));
+            cmd("now", "kn_now", &[], Some(Int64));
+            cmd("year", "kn_year", &[Int64], Some(Int));
+            cmd("format_time", "kn_format_time", &[Int64, Text], Some(Text));
 
             // --- Arrays ------------------------------------------------------
             // Declared over `AnyArray`/`AnyElem` rather than once per element
             // type: the array carries its element tag at run time, and the
             // checker pairs the two so `append(ints, "x")` is still an error.
-            cmd("count", "oe_ary_count", &[AnyArray], Some(Int));
-            cmd("append", "oe_ary_append", &[AnyArray, AnyElem], Some(AnyArray));
-            cmd("remove", "oe_ary_remove", &[AnyArray, Int], None);
-            cmd("sort", "oe_ary_sort", &[AnyArray], None);
-            cmd("contains", "oe_ary_contains", &[AnyArray, AnyElem], Some(Bool));
-            cmd("index_of", "oe_ary_index_of", &[AnyArray, AnyElem], Some(Int));
-            cmd("join", "oe_ary_join", &[AnyArray, Text], Some(Text));
+            cmd("count", "kn_ary_count", &[AnyArray], Some(Int));
+            cmd("append", "kn_ary_append", &[AnyArray, AnyElem], Some(AnyArray));
+            cmd("remove", "kn_ary_remove", &[AnyArray, Int], None);
+            cmd("sort", "kn_ary_sort", &[AnyArray], None);
+            cmd("contains", "kn_ary_contains", &[AnyArray, AnyElem], Some(Bool));
+            cmd("index_of", "kn_ary_index_of", &[AnyArray, AnyElem], Some(Int));
+            cmd("join", "kn_ary_join", &[AnyArray, Text], Some(Text));
             cmd(
                 "split",
-                "oe_ary_split",
+                "kn_ary_split",
                 &[Text, Text],
                 Some(Array(crate::Elem::Text)),
             );
@@ -532,16 +565,16 @@ impl Registry {
             // command in its own right so the shorthand adds no semantics the
             // language did not already have, and so a computed run can be taken
             // without one.
-            cmd("slice", "oe_ary_slice", &[AnyArray, Int, Int], Some(AnyArray));
+            cmd("slice", "kn_ary_slice", &[AnyArray, Int, Int], Some(AnyArray));
 
             // --- Byte-sets ---------------------------------------------------
-            cmd("bytes_new", "oe_bin_make", &[Int], Some(Bytes));
-            cmd("bytes_count", "oe_bin_size", &[Bytes], Some(Int));
-            cmd("bytes_at", "oe_bin_byte", &[Bytes, Int], Some(Int));
-            cmd("bytes_set", "oe_bin_put", &[Bytes, Int, Int], None);
-            cmd("bytes_from_text", "oe_bin_from_text", &[Text], Some(Bytes));
-            cmd("text_from_bytes", "oe_bin_to_text", &[Bytes], Some(Text));
-            cmd("bytes_slice", "oe_bin_slice", &[Bytes, Int, Int], Some(Bytes));
+            cmd("bytes_new", "kn_bin_make", &[Int], Some(Bytes));
+            cmd("bytes_count", "kn_bin_size", &[Bytes], Some(Int));
+            cmd("bytes_at", "kn_bin_byte", &[Bytes, Int], Some(Int));
+            cmd("bytes_set", "kn_bin_put", &[Bytes, Int, Int], None);
+            cmd("bytes_from_text", "kn_bin_from_text", &[Text], Some(Bytes));
+            cmd("text_from_bytes", "kn_bin_to_text", &[Bytes], Some(Text));
+            cmd("bytes_slice", "kn_bin_slice", &[Bytes, Int, Int], Some(Bytes));
 
             // --- Dictionaries ------------------------------------------------
             // Declared over `AnyDict`/`AnyElem` for the reason the array
@@ -552,12 +585,12 @@ impl Registry {
             // `dict_get` on a key that is not there answers the sentinel for
             // its value type (0, "", false) and sets the error slot; `dict_has`
             // is the predicate that tells that apart from a stored 0.
-            cmd("dict_count", "oe_dict_count", &[AnyDict], Some(Int));
-            cmd("dict_has", "oe_dict_has", &[AnyDict, Text], Some(Bool));
-            cmd("dict_get", "oe_dict_lookup", &[AnyDict, Text], Some(AnyElem));
-            cmd("dict_set", "oe_dict_store", &[AnyDict, Text, AnyElem], None);
-            cmd("dict_remove", "oe_dict_erase", &[AnyDict, Text], Some(Bool));
-            cmd("dict_keys", "oe_dict_keys", &[AnyDict], Some(Array(crate::Elem::Text)));
+            cmd("dict_count", "kn_dict_count", &[AnyDict], Some(Int));
+            cmd("dict_has", "kn_dict_has", &[AnyDict, Text], Some(Bool));
+            cmd("dict_get", "kn_dict_lookup", &[AnyDict, Text], Some(AnyElem));
+            cmd("dict_set", "kn_dict_store", &[AnyDict, Text, AnyElem], None);
+            cmd("dict_remove", "kn_dict_erase", &[AnyDict, Text], Some(Bool));
+            cmd("dict_keys", "kn_dict_keys", &[AnyDict], Some(Array(crate::Elem::Text)));
 
             // --- Pointers and raw memory -------------------------------------
             // A `ptr` is an opaque 64-bit address; these are the escape hatch to
@@ -567,31 +600,31 @@ impl Registry {
             // check a C programmer would not have. `ptr_read_text` copies, so it
             // is the one that can answer "" for a null pointer instead of
             // faulting; every other read at null is undefined, as in C.
-            cmd("ptr_null", "oe_ptr_null", &[], Some(Ptr));
-            cmd("ptr_is_null", "oe_ptr_is_null", &[Ptr], Some(Bool));
-            cmd("ptr_offset", "oe_ptr_offset", &[Ptr, Int64], Some(Ptr));
-            cmd("ptr_from_int", "oe_ptr_from_int", &[Int64], Some(Ptr));
-            cmd("ptr_to_int", "oe_ptr_to_int", &[Ptr], Some(Int64));
-            cmd("ptr_read_int", "oe_ptr_read_int", &[Ptr, Int64], Some(Int));
-            cmd("ptr_write_int", "oe_ptr_write_int", &[Ptr, Int64, Int], None);
-            cmd("ptr_read_int64", "oe_ptr_read_int64", &[Ptr, Int64], Some(Int64));
-            cmd("ptr_write_int64", "oe_ptr_write_int64", &[Ptr, Int64, Int64], None);
-            cmd("ptr_read_byte", "oe_ptr_read_byte", &[Ptr, Int64], Some(Int));
-            cmd("ptr_write_byte", "oe_ptr_write_byte", &[Ptr, Int64, Int], None);
-            cmd("ptr_read_double", "oe_ptr_read_double", &[Ptr, Int64], Some(Double));
-            cmd("ptr_write_double", "oe_ptr_write_double", &[Ptr, Int64, Double], None);
-            cmd("ptr_read_ptr", "oe_ptr_read_ptr", &[Ptr, Int64], Some(Ptr));
-            cmd("ptr_write_ptr", "oe_ptr_write_ptr", &[Ptr, Int64, Ptr], None);
-            cmd("ptr_read_text", "oe_ptr_read_text", &[Ptr], Some(Text));
-            cmd("ptr_write_text", "oe_ptr_write_text", &[Ptr, Int64, Text], None);
-            cmd("ptr_of_text", "oe_ptr_of_text", &[Text], Some(Ptr));
-            cmd("mem_alloc", "oe_mem_alloc", &[Int64], Some(Ptr));
-            cmd("mem_free", "oe_mem_free", &[Ptr], None);
-            cmd("mem_zero", "oe_mem_zero", &[Ptr, Int64], None);
-            cmd("mem_copy", "oe_mem_copy", &[Ptr, Ptr, Int64], None);
+            cmd("ptr_null", "kn_ptr_null", &[], Some(Ptr));
+            cmd("ptr_is_null", "kn_ptr_is_null", &[Ptr], Some(Bool));
+            cmd("ptr_offset", "kn_ptr_offset", &[Ptr, Int64], Some(Ptr));
+            cmd("ptr_from_int", "kn_ptr_from_int", &[Int64], Some(Ptr));
+            cmd("ptr_to_int", "kn_ptr_to_int", &[Ptr], Some(Int64));
+            cmd("ptr_read_int", "kn_ptr_read_int", &[Ptr, Int64], Some(Int));
+            cmd("ptr_write_int", "kn_ptr_write_int", &[Ptr, Int64, Int], None);
+            cmd("ptr_read_int64", "kn_ptr_read_int64", &[Ptr, Int64], Some(Int64));
+            cmd("ptr_write_int64", "kn_ptr_write_int64", &[Ptr, Int64, Int64], None);
+            cmd("ptr_read_byte", "kn_ptr_read_byte", &[Ptr, Int64], Some(Int));
+            cmd("ptr_write_byte", "kn_ptr_write_byte", &[Ptr, Int64, Int], None);
+            cmd("ptr_read_double", "kn_ptr_read_double", &[Ptr, Int64], Some(Double));
+            cmd("ptr_write_double", "kn_ptr_write_double", &[Ptr, Int64, Double], None);
+            cmd("ptr_read_ptr", "kn_ptr_read_ptr", &[Ptr, Int64], Some(Ptr));
+            cmd("ptr_write_ptr", "kn_ptr_write_ptr", &[Ptr, Int64, Ptr], None);
+            cmd("ptr_read_text", "kn_ptr_read_text", &[Ptr], Some(Text));
+            cmd("ptr_write_text", "kn_ptr_write_text", &[Ptr, Int64, Text], None);
+            cmd("ptr_of_text", "kn_ptr_of_text", &[Text], Some(Ptr));
+            cmd("mem_alloc", "kn_mem_alloc", &[Int64], Some(Ptr));
+            cmd("mem_free", "kn_mem_free", &[Ptr], None);
+            cmd("mem_zero", "kn_mem_zero", &[Ptr, Int64], None);
+            cmd("mem_copy", "kn_mem_copy", &[Ptr, Ptr, Int64], None);
 
             // --- Event loop --------------------------------------------------
-            cmd("quit", "oe_quit", &[], None);
+            cmd("quit", "kn_quit", &[], None);
         }
         r
     }

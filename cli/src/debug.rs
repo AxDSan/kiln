@@ -1,4 +1,4 @@
-//! `openepl debug` — what the debugger knows about a built program.
+//! `kiln debug` — what the debugger knows about a built program.
 //!
 //! At this stage it reads and reports; it does not run anything. That is the
 //! order deliberately: the code that understands debug information is what
@@ -13,12 +13,12 @@ use std::path::Path;
 
 pub fn usage() {
     eprintln!(
-        "openepl debug — read the debug information in a built program\n\n\
+        "kiln debug — read the debug information in a built program\n\n\
          USAGE:\n  \
-         openepl debug --dump-lines <program>       the line table, one row per line\n  \
-         openepl debug --dump-subs <program>        the subroutines and their extents\n  \
-         openepl debug --resolve <program> <line>   where a breakpoint on that line goes\n  \
-         openepl debug --at <program> <address>     which line an address is in\n\n\
+         kiln debug --dump-lines <program>       the line table, one row per line\n  \
+         kiln debug --dump-subs <program>        the subroutines and their extents\n  \
+         kiln debug --resolve <program> <line>   where a breakpoint on that line goes\n  \
+         kiln debug --at <program> <address>     which line an address is in\n\n\
          The program must have been built without `--release`, which strips\n\
          the debug information."
     );
@@ -33,13 +33,13 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     let Some(bin) = rest.first() else {
-        eprintln!("openepl: `{flag}` needs the path of a built program");
+        eprintln!("kiln: `{flag}` needs the path of a built program");
         return 2;
     };
-    let program = match openepl_debug::load(Path::new(bin)) {
+    let program = match kiln_debug::load(Path::new(bin)) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("openepl: {bin}: {e}");
+            eprintln!("kiln: {bin}: {e}");
             return 1;
         }
     };
@@ -74,7 +74,7 @@ pub fn run(args: &[String]) -> i32 {
         }
         "--resolve" => {
             let Some(want) = rest.get(1) else {
-                eprintln!("openepl: `--resolve` needs a line number");
+                eprintln!("kiln: `--resolve` needs a line number");
                 return 2;
             };
             // `file:line` is accepted as well as a bare line, because that is
@@ -88,14 +88,14 @@ pub fn run(args: &[String]) -> i32 {
             if let Some(f) = file {
                 if !program.source.ends_with(f) && !f.ends_with(&program.source) {
                     eprintln!(
-                        "openepl: this program was built from {}, not {f}",
+                        "kiln: this program was built from {}, not {f}",
                         program.source
                     );
                     return 1;
                 }
             }
             let Ok(line) = line.parse::<u32>() else {
-                eprintln!("openepl: `{line}` is not a line number");
+                eprintln!("kiln: `{line}` is not a line number");
                 return 2;
             };
             match program.breakpoint_for(line) {
@@ -112,19 +112,19 @@ pub fn run(args: &[String]) -> i32 {
                     0
                 }
                 None => {
-                    eprintln!("openepl: nothing runs at or after line {line}");
+                    eprintln!("kiln: nothing runs at or after line {line}");
                     1
                 }
             }
         }
         "--at" => {
             let Some(want) = rest.get(1) else {
-                eprintln!("openepl: `--at` needs an address");
+                eprintln!("kiln: `--at` needs an address");
                 return 2;
             };
             let text = want.strip_prefix("0x").unwrap_or(want);
             let Ok(address) = u64::from_str_radix(text, 16) else {
-                eprintln!("openepl: `{want}` is not an address");
+                eprintln!("kiln: `{want}` is not an address");
                 return 2;
             };
             match program.line_for(address) {
@@ -149,7 +149,7 @@ pub fn run(args: &[String]) -> i32 {
             }
         }
         other => {
-            eprintln!("openepl: unknown flag `{other}`");
+            eprintln!("kiln: unknown flag `{other}`");
             usage();
             2
         }

@@ -1,0 +1,64 @@
+# Calling a function whose address is only known at run time.
+#
+# `libplug.so` is not linked against and not declared: the program opens it with
+# `dlopen`, asks `dlsym` for an address by name, and calls what comes back with
+# `call through`. The signature is written at the call site — the `(args)` and
+# the `: type` — because there is no declaration anywhere to carry it.
+module plug
+
+# A table of function pointers, the shape a COM vtable has. An inline `ptr[N]`
+# inside a c-record is the one indexable place a `ptr` can live: Kiln's own
+# lists do not hold `ptr`.
+record Slots is c
+  fn: ptr[4]
+end
+
+# The POSIX loader. `libdl.so.2` is spelled with its extension so it is used
+# exactly as written, rather than decorated into a `libdl.so` that only a
+# development package installs.
+dll dlopen(path: text, mode: int): ptr from "libdl.so.2"
+dll dlsym(handle: ptr, symbol: text): ptr from "libdl.so.2"
+dll dlclose(handle: ptr): int from "libdl.so.2"
+
+const RTLD_NOW = 2
+
+sub main
+  let lib: ptr = dlopen("./libplug.so", RTLD_NOW)
+  if ptr_is_null(lib)
+    call print_text("libplug.so did not load")
+    return
+  end
+
+  # A value in, a value out. `add_fn` is an address; the `(5, 10): int` is the
+  # C prototype, stated here because nothing else states it.
+  let add_fn: ptr = dlsym(lib, "add")
+  call print_int(call through add_fn(5, 10): int)
+
+  # A C string out, copied into a managed text — the same marshalling a `dll`
+  # with a `text` return does.
+  let name_fn: ptr = dlsym(lib, "name")
+  call print_text(call through name_fn(): text)
+
+  # No return type, so it is a statement: the plug-in writes through the cell.
+  let cell: ptr = mem_alloc(4)
+  call ptr_write_int(cell, 0, 41)
+  call through (dlsym(lib, "bump"))(cell)
+  call print_int(ptr_read_int(cell, 0))
+  call mem_free(cell)
+
+  # The shape a COM vtable has: the address is READ out of a table of pointers
+  # rather than held in a variable. A callee that is itself an expression goes
+  # in parentheses, because the parentheses after the callee are the arguments.
+  let table: ptr = mem_alloc(8)
+  call ptr_write_ptr(table, 0, add_fn)
+  call print_int(call through (ptr_read_ptr(table, 0))(20, 22): int)
+  call mem_free(table)
+
+  # A slot of an inline array is a callee with no parentheses needed, because
+  # the `[3]` is part of the name and only the `(20, 22)` is the arguments.
+  var vt: Slots
+  vt.fn[3] = add_fn
+  call print_int(call through vt.fn[3](2, 3): int)
+
+  call print_int(dlclose(lib))
+end

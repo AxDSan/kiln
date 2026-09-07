@@ -1,7 +1,7 @@
-//! End-to-end tests for `address of`: passing an OpenEPL subroutine to C as a
+//! End-to-end tests for `address of`: passing an Kiln subroutine to C as a
 //! function pointer. Build a tiny C library that calls back through a pointer,
-//! build an OpenEPL program that hands it the address of a sub, run the two
-//! together, and prove that C reaches OpenEPL code — for a returned value
+//! build an Kiln program that hands it the address of a sub, run the two
+//! together, and prove that C reaches Kiln code — for a returned value
 //! (`apply` -> `summer`), for a side effect repeated in C's own loop
 //! (`each` -> `announce`), and for a C string handed to a `text` parameter
 //! (`greet` -> `say`). Also prove that a non-C-representable sub is a named
@@ -30,7 +30,7 @@ fn on_path(tool: &str) -> bool {
 /// beside its own executable, so the built `.so` and the built program must
 /// share one directory — and two tests must not share it.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_cb_{tag}_test"));
+    let dir = std::env::temp_dir().join(format!("kiln_cb_{tag}_test"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -48,11 +48,11 @@ fn build_cb_so(dir: &Path) {
     assert!(status.success(), "clang failed to build libcb.so");
 }
 
-/// Build `examples/dll/cb.oir` to `dir/cb`, optionally with `--release`; return
+/// Build `examples/dll/cb.kiln` to `dir/cb`, optionally with `--release`; return
 /// the binary path.
 fn build_cb(dir: &Path, release: bool) -> PathBuf {
     let repo = repo();
-    let src = repo.join("examples/dll/cb.oir");
+    let src = repo.join("examples/dll/cb.kiln");
     let out = dir.join("cb");
     let mut args = vec![
         "build".to_string(),
@@ -63,12 +63,12 @@ fn build_cb(dir: &Path, release: bool) -> PathBuf {
     if release {
         args.push("--release".to_string());
     }
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(&args)
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
-        .expect("run openepl");
-    assert!(status.success(), "openepl build cb failed (release={release})");
+        .expect("run kiln");
+    assert!(status.success(), "kiln build cb failed (release={release})");
     out
 }
 
@@ -92,7 +92,7 @@ fn run_lines(bin: &Path) -> Vec<String> {
 /// a C string it prints (`greet(address of say)` -> "from C"), proving a `text`
 /// parameter arrives intact.
 #[test]
-fn c_calls_back_into_openepl_for_a_value_and_for_effect() {
+fn c_calls_back_into_kiln_for_a_value_and_for_effect() {
     let dir = scratch("run");
     build_cb_so(&dir);
     let bin = build_cb(&dir, false);
@@ -125,7 +125,7 @@ fn a_release_build_keeps_the_address_taken_sub() {
 #[test]
 fn a_non_c_representable_sub_is_a_named_build_error() {
     let dir = scratch("badsig");
-    let src = dir.join("bad.oir");
+    let src = dir.join("bad.kiln");
     std::fs::write(
         &src,
         "module m\n\
@@ -133,12 +133,12 @@ fn a_non_c_representable_sub_is_a_named_build_error() {
          sub bad(xs: int[])\n  call print_int(1)\nend\n\
          sub main\n  call each(address of bad, 1)\nend\n",
     )
-    .expect("write bad.oir");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    .expect("write bad.kiln");
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", dir.join("x").to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(!out.status.success(), "a non-C-representable callback must not build");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -152,18 +152,18 @@ fn a_non_c_representable_sub_is_a_named_build_error() {
 #[test]
 fn address_of_a_non_sub_is_a_named_build_error() {
     let dir = scratch("nonsub");
-    let src = dir.join("bad.oir");
+    let src = dir.join("bad.kiln");
     // `print_int` is a built-in command, not a sub.
     std::fs::write(
         &src,
         "module m\nsub main\n  var p: ptr = address of print_int\n  call print_int(1)\nend\n",
     )
-    .expect("write bad.oir");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    .expect("write bad.kiln");
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", dir.join("x").to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(!out.status.success(), "address of a command must not build");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -185,7 +185,7 @@ fn mingw_present() -> bool {
 /// The same C library and the same program, cross-built for Windows: the `.c`
 /// becomes `cb.dll` through mingw and the program a PE32+ image, and — when wine
 /// is here — the two run together with the identical output. `LoadLibrary` +
-/// `GetProcAddress` reach `cb.dll`, and the function pointer OpenEPL handed it
+/// `GetProcAddress` reach `cb.dll`, and the function pointer Kiln handed it
 /// is one the Windows C ABI calls the same way it does on Linux.
 #[test]
 fn cb_cross_builds_for_windows_and_runs_under_wine() {
@@ -203,13 +203,13 @@ fn cb_cross_builds_for_windows_and_runs_under_wine() {
     assert!(status.success(), "mingw failed to build cb.dll");
 
     let image = dir.join("cb.exe");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
-        .args(["build", repo().join("examples/dll/cb.oir").to_str().unwrap(), "--os", "windows", "-o"])
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["build", repo().join("examples/dll/cb.kiln").to_str().unwrap(), "--os", "windows", "-o"])
         .arg(&image)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl --os windows");
-    assert!(status.success(), "openepl build --os windows failed");
+        .expect("run kiln --os windows");
+    assert!(status.success(), "kiln build --os windows failed");
     assert!(image.exists(), "no Windows image was produced");
 
     if !on_path("wine") {

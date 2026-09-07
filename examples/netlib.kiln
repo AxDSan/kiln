@@ -1,0 +1,78 @@
+# Networking: TCP, HTTP, and what a program sees when a url needs TLS.
+#
+#   kiln run examples/netlib.kiln
+#
+# Only the https line needs the network, and only on a toolchain that vendored
+# mbedTLS; everything else is pure or dials a closed port on purpose, because
+# the failures a program must be able to detect are the point of the file.
+module netlib
+use net
+
+sub main
+  # --- percent-encoding round-trips ---
+  let raw = "name=Ada Lovelace & co/100%"
+  let enc = net_url_encode(raw)
+  call print_text(enc)
+  call print_text(net_url_decode(enc))
+  call print_text("round-trip ok") if net_url_decode(enc) = raw
+
+  # --- https either dials or refuses, and is never downgraded to http ---
+  # Which branch runs is a fact about the build, not about this program: TLS is
+  # an optional dependency, so a toolchain without mbedTLS vendored answers
+  # 10006 here and one with it makes the connection for real.
+  let body = net_http_get("https://example.com/")
+  if last_error_code() = 10006
+    call print_text("https refused: this build has no TLS")
+    call print_text(last_error_text())
+  else
+    call print_text("https dialled over TLS")
+  end
+
+  # --- a scheme that is not http at all ---
+  call print_text(net_http_get("ftp://example.com/x"))
+  call print_int(last_error_code())
+
+  # --- a connection that cannot succeed: nothing listens on this port ---
+  call print_int(net_timeout_get())
+  if net_timeout_set(1500)
+    call print_int(net_timeout_get())
+  end
+  let h = net_tcp_connect("127.0.0.1", 9)
+  if h = 0
+    call print_text("connect failed as expected")
+    call print_text(last_error_text())
+  else
+    call print_text("unexpectedly connected")
+    if net_tcp_close(h)
+      call print_text("closed")
+    end
+  end
+
+  # --- a name that does not resolve ---
+  call print_text(net_host_ip("no-such-host.invalid"))
+  call print_text("resolver failure reported") if last_error_code() <> 0
+
+  # --- localhost always resolves, without touching the network ---
+  call print_text(net_host_ip("127.0.0.1"))
+
+  # --- the serving side, with nothing served ---
+  # net_request() answers only inside an httpserver `request` handler; asking
+  # for one anywhere else is a failure, not an empty answer, because a program
+  # that got 0 back and carried on would be replying into nothing.
+  call print_int(net_request())
+  if last_error_code() = 10005
+    call print_text("no request outside a handler, as expected")
+  end
+  # And a handle that is not a request is refused rather than read.
+  call print_text(net_req_path(0))
+  call print_int(last_error_code())
+
+  # --- a stale handle is detected, not dereferenced ---
+  call print_int(net_tcp_close_all())
+  if net_tcp_close(1)
+    call print_text("BUG: closed a handle that was never open")
+  else
+    call print_text("stale handle refused")
+    call print_int(last_error_code())
+  end
+end

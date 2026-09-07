@@ -1,6 +1,6 @@
 //! End-to-end tests for the optional calling-convention marker on a `dll`
 //! declaration (`... from "user32" system`). The marker is documentation and
-//! forward-compat: every target OpenEPL emits is 64-bit with a single C
+//! forward-compat: every target Kiln emits is 64-bit with a single C
 //! convention, so a `dll` declared WITH `system`/`stdcall`/`cdecl` must build
 //! and run identically to one declared without. These tests prove exactly that
 //! — the parser accepts the marker in its allowed positions and nothing
@@ -28,7 +28,7 @@ fn on_path(tool: &str) -> bool {
 /// beside its own executable, so the built `.so` and the program must share one
 /// directory, and two tests must not.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_cc_{tag}_test"));
+    let dir = std::env::temp_dir().join(format!("kiln_cc_{tag}_test"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -83,7 +83,7 @@ end
 /// The seven lines the unmarked `mathdll` program prints (see `dll.rs`).
 const EXPECTED: &[&str] = &[
     "42",
-    "OpenEPL <-> C",
+    "Kiln <-> C",
     "42",
     "50",
     "9000000001",
@@ -99,14 +99,14 @@ fn a_marked_dll_builds_and_runs_identically() {
     let dir = scratch("linux");
     build_mathdll_so(&dir);
 
-    let src = dir.join("marked.oir");
-    std::fs::write(&src, MARKED).expect("write marked.oir");
+    let src = dir.join("marked.kiln");
+    std::fs::write(&src, MARKED).expect("write marked.kiln");
     let bin = dir.join("marked");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(status.success(), "a marked program must build");
 
     let out = Command::new(&bin).output().expect("run marked program");
@@ -140,13 +140,13 @@ fn an_unknown_convention_is_a_build_error() {
             "fastcall",
         ),
     ] {
-        let path = dir.join(format!("{name}.oir"));
+        let path = dir.join(format!("{name}.kiln"));
         std::fs::write(&path, src).expect("write reject source");
-        let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+        let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
             .args(["build", path.to_str().unwrap(), "-o", dir.join("x").to_str().unwrap()])
-            .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+            .env("KILN_RUNTIME_DIR", repo().join("runtime"))
             .output()
-            .expect("run openepl");
+            .expect("run kiln");
         assert!(!out.status.success(), "`{bad}` must not build");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
@@ -177,16 +177,16 @@ fn a_marked_dll_cross_builds_for_windows_and_runs_under_wine() {
         .expect("run mingw for mathdll.dll");
     assert!(status.success(), "mingw failed to build mathdll.dll");
 
-    let src = dir.join("marked.oir");
-    std::fs::write(&src, MARKED).expect("write marked.oir");
+    let src = dir.join("marked.kiln");
+    std::fs::write(&src, MARKED).expect("write marked.kiln");
     let image = dir.join("marked.exe");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "--os", "windows", "-o"])
         .arg(&image)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl --os windows");
-    assert!(status.success(), "openepl build --os windows failed");
+        .expect("run kiln --os windows");
+    assert!(status.success(), "kiln build --os windows failed");
     assert!(image.exists(), "no Windows image was produced");
 
     if !on_path("wine") {

@@ -1,4 +1,4 @@
-//! End-to-end tests for the Phase 1 toolchain: build `.oir` examples to native
+//! End-to-end tests for the Phase 1 toolchain: build `.kiln` examples to native
 //! binaries, run them, and prove dead-code stripping.
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -10,7 +10,7 @@ fn repo() -> PathBuf {
         .to_path_buf()
 }
 
-/// Build `<repo>/examples/<name>.oir` to a temp binary; return its path.
+/// Build `<repo>/examples/<name>.kiln` to a temp binary; return its path.
 ///
 /// `tag` MUST be unique per test. Tests run in parallel, and two tests writing
 /// the same output path race: one truncates the binary while the other executes
@@ -19,19 +19,19 @@ fn repo() -> PathBuf {
 /// flake twice.
 fn build_as(name: &str, tag: &str) -> PathBuf {
     let repo = repo();
-    let example = repo.join("examples").join(format!("{name}.oir"));
-    let out_bin = std::env::temp_dir().join(format!("openepl_{name}_{tag}_test"));
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let example = repo.join("examples").join(format!("{name}.kiln"));
+    let out_bin = std::env::temp_dir().join(format!("kiln_{name}_{tag}_test"));
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
             example.to_str().unwrap(),
             "-o",
             out_bin.to_str().unwrap(),
         ])
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
-        .expect("run openepl");
-    assert!(status.success(), "openepl build {name} failed");
+        .expect("run kiln");
+    assert!(status.success(), "kiln build {name} failed");
     out_bin
 }
 
@@ -47,7 +47,7 @@ fn hello_builds_and_runs() {
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(
         lines,
-        vec!["OpenEPL — arithmetic demo", "42", "14", "42", "42"]
+        vec!["Kiln — arithmetic demo", "42", "14", "42", "42"]
     );
 }
 
@@ -58,8 +58,8 @@ fn demo_builds_and_runs() {
     assert_eq!(
         lines,
         vec![
-            "HELLO, OPENEPL", // uppercase(concat)
-            "14",             // length("Hello, OpenEPL")
+            "HELLO, KILN", // uppercase(concat)
+            "11",             // length("Hello, Kiln")
             "a/b/c/d",        // replace "-" -> "/"
             "padded",         // trim
             "desserts",       // reverse("stressed")
@@ -93,16 +93,16 @@ fn unused_commands_are_dead_stripped() {
         .collect();
 
     // Referenced commands are present.
-    for want in ["oe_print_int", "oe_print_text"] {
+    for want in ["kn_print_int", "kn_print_text"] {
         assert!(symbols.contains(&want), "expected `{want}` to be linked in");
     }
     // Unreferenced commands are gone.
     for gone in [
-        "oe_sqrt",
-        "oe_replace",
-        "oe_now",
-        "oe_uppercase",
-        "oe_pow_int",
+        "kn_sqrt",
+        "kn_replace",
+        "kn_now",
+        "kn_uppercase",
+        "kn_pow_int",
     ] {
         assert!(
             !symbols.contains(&gone),
@@ -140,13 +140,13 @@ fn hello_library_via_abi() {
     // `use hello` — a third-party support library loaded through the ABI.
     let stdout = run(&build_as("hellolib", "abi"));
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines, vec!["Hello, OpenEPL!", "HELLO, WORLD!"]);
+    assert_eq!(lines, vec!["Hello, Kiln!", "HELLO, WORLD!"]);
 }
 
 ///
 /// a native GUI binary, and a click reaches the handler subroutine.
 ///
-/// Runs headlessly through the UI test hooks (see abi/openepl_ui.h): render a
+/// Runs headlessly through the UI test hooks (see abi/kiln_ui.h): render a
 /// few frames, dispatch a synthetic click at widget handle 3 (the button), exit.
 #[test]
 fn form_builds_and_click_reaches_handler() {
@@ -158,8 +158,8 @@ fn form_builds_and_click_reaches_handler() {
     let bin = build_as("form", "click");
 
     let out = Command::new(&bin)
-        .env("OPENEPL_UI_EXIT_AFTER_FRAMES", "3")
-        .env("OPENEPL_UI_SYNTH_CLICK", "3")
+        .env("KILN_UI_EXIT_AFTER_FRAMES", "3")
+        .env("KILN_UI_SYNTH_CLICK", "3")
         .output()
         .expect("run form binary");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -204,15 +204,15 @@ fn button_hover_changes_pixels() {
     }
     let bin = build_as("form", "hover");
     let dir = std::env::temp_dir();
-    let base = dir.join("openepl_base.ppm");
-    let hover = dir.join("openepl_hover.ppm");
+    let base = dir.join("kiln_base.ppm");
+    let hover = dir.join("kiln_hover.ppm");
 
     let render = |dump: &std::path::Path, mouse: Option<&str>| {
         let mut c = Command::new(&bin);
-        c.env("OPENEPL_UI_EXIT_AFTER_FRAMES", "3")
-            .env("OPENEPL_UI_DUMP", dump);
+        c.env("KILN_UI_EXIT_AFTER_FRAMES", "3")
+            .env("KILN_UI_DUMP", dump);
         if let Some(m) = mouse {
-            c.env("OPENEPL_UI_MOUSE", m);
+            c.env("KILN_UI_MOUSE", m);
         }
         assert!(c.output().expect("render").status.success());
     };
@@ -261,8 +261,8 @@ fn accessibility_tree_is_published() {
     }
     let bin = build_as("form", "a11y");
     let out = Command::new(&bin)
-        .env("OPENEPL_UI_EXIT_AFTER_FRAMES", "3")
-        .env("OPENEPL_UI_DUMP_A11Y", "1")
+        .env("KILN_UI_EXIT_AFTER_FRAMES", "3")
+        .env("KILN_UI_DUMP_A11Y", "1")
         .output()
         .expect("run form");
     let text = String::from_utf8_lossy(&out.stdout);
@@ -272,7 +272,7 @@ fn accessibility_tree_is_published() {
         .collect();
     assert_eq!(rows.len(), 3, "expected window+label+button, got:\n{text}");
 
-    // role 1 = window, 3 = label, 2 = button (abi/openepl_abi.h)
+    // role 1 = window, 3 = label, 2 = button (abi/kiln_abi.h)
     assert!(
         rows[0].contains("role=1") && rows[0].contains("parent=0"),
         "root: {}",
@@ -341,8 +341,8 @@ fn accessibility_adapter_activates_on_a_real_bus() {
 
     let bin = build_as("form", "a11ylive");
     let out = Command::new(&bin)
-        .env("OPENEPL_UI_EXIT_AFTER_FRAMES", "90")
-        .env("OPENEPL_UI_DUMP_A11Y", "1")
+        .env("KILN_UI_EXIT_AFTER_FRAMES", "90")
+        .env("KILN_UI_DUMP_A11Y", "1")
         .output()
         .expect("run form");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -365,9 +365,9 @@ fn app_runs_with_accessibility_disabled() {
     }
     let bin = build_as("form", "noa11y");
     let out = Command::new(&bin)
-        .env("OPENEPL_NO_A11Y", "1")
-        .env("OPENEPL_UI_EXIT_AFTER_FRAMES", "3")
-        .env("OPENEPL_UI_SYNTH_CLICK", "3")
+        .env("KILN_NO_A11Y", "1")
+        .env("KILN_UI_EXIT_AFTER_FRAMES", "3")
+        .env("KILN_UI_SYNTH_CLICK", "3")
         .output()
         .expect("run form");
     assert!(
@@ -392,9 +392,9 @@ fn property_access_updates_a_component() {
     }
     let bin = build_as("counter", "prop");
     let out = Command::new(&bin)
-        .env("OPENEPL_UI_EXIT_AFTER_FRAMES", "6")
-        .env("OPENEPL_UI_SYNTH_CLICK", "3")
-        .env("OPENEPL_UI_DUMP_A11Y", "1")
+        .env("KILN_UI_EXIT_AFTER_FRAMES", "6")
+        .env("KILN_UI_SYNTH_CLICK", "3")
+        .env("KILN_UI_DUMP_A11Y", "1")
         .output()
         .expect("run counter");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -427,7 +427,7 @@ fn main_may_touch_components_before_the_loop_starts() {
     }
     let bin = build_as("mainorder", "order");
     let out = Command::new(&bin)
-        .env("OPENEPL_UI_EXIT_AFTER_FRAMES", "3")
+        .env("KILN_UI_EXIT_AFTER_FRAMES", "3")
         .output()
         .expect("run mainorder");
     assert!(out.status.success(), "main touching a component crashed");
@@ -529,21 +529,21 @@ fn dividing_by_zero_reports_instead_of_crashing() {
             "division overflowed",
         ),
     ] {
-        let dir = std::env::temp_dir().join("openepl_divzero_test");
+        let dir = std::env::temp_dir().join("kiln_divzero_test");
         std::fs::create_dir_all(&dir).unwrap();
-        let src_path = dir.join(format!("dz{}.oir", want.len()));
+        let src_path = dir.join(format!("dz{}.kiln", want.len()));
         std::fs::write(&src_path, src).unwrap();
         let bin = dir.join(format!("dz{}", want.len()));
-        let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+        let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
             .args([
                 "build",
                 src_path.to_str().unwrap(),
                 "-o",
                 bin.to_str().unwrap(),
             ])
-            .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+            .env("KILN_RUNTIME_DIR", repo().join("runtime"))
             .status()
-            .expect("run openepl");
+            .expect("run kiln");
         assert!(status.success(), "build failed for: {want}");
         let out = Command::new(&bin).output().expect("run built binary");
         assert!(!out.status.success(), "{want}: expected a non-zero exit");
@@ -558,15 +558,15 @@ fn dividing_by_zero_reports_instead_of_crashing() {
 /// A build carries a DWARF line table, and a release build does not.
 ///
 /// This is the assertion the whole debugger rests on: an address in the built
-/// program maps back to a line of the `.oir` the user wrote. It is checked
+/// program maps back to a line of the `.kiln` the user wrote. It is checked
 /// through `objdump` rather than by reading the emitted IR, because IR that
 /// looks right and metadata LLVM accepts are different claims — LLVM discards
 /// debug information it dislikes with a warning and exit code 0.
 #[test]
 fn a_build_carries_a_line_table_and_a_release_build_does_not() {
     let repo = repo();
-    let example = repo.join("examples").join("loops.oir");
-    let dir = std::env::temp_dir().join("openepl_linetable_test");
+    let example = repo.join("examples").join("loops.kiln");
+    let dir = std::env::temp_dir().join("kiln_linetable_test");
     std::fs::create_dir_all(&dir).unwrap();
 
     let decoded = |bin: &Path| -> String {
@@ -578,28 +578,28 @@ fn a_build_carries_a_line_table_and_a_release_build_does_not() {
     };
 
     let debug_bin = dir.join("loops");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
             example.to_str().unwrap(),
             "-o",
             debug_bin.to_str().unwrap(),
         ])
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(status.success(), "debug build failed");
 
     let table = decoded(&debug_bin);
     assert!(
-        table.contains("loops.oir"),
+        table.contains("loops.kiln"),
         "no line table for the source: {table}"
     );
     // Every row for our source names a real line, never line 0 — a debugger
     // reads 0 as "no line here" and steps straight past it.
     let rows: Vec<&str> = table
         .lines()
-        .filter(|l| l.trim_start().starts_with("loops.oir "))
+        .filter(|l| l.trim_start().starts_with("loops.kiln "))
         .collect();
     assert!(rows.len() > 5, "too few rows to be a real table: {table}");
     for row in &rows {
@@ -608,7 +608,7 @@ fn a_build_carries_a_line_table_and_a_release_build_does_not() {
     }
 
     let release_bin = dir.join("loops-release");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
             example.to_str().unwrap(),
@@ -616,12 +616,12 @@ fn a_build_carries_a_line_table_and_a_release_build_does_not() {
             "-o",
             release_bin.to_str().unwrap(),
         ])
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(status.success(), "release build failed");
     assert!(
-        !decoded(&release_bin).contains("loops.oir"),
+        !decoded(&release_bin).contains("loops.kiln"),
         "a release build kept its line table"
     );
 }
@@ -637,9 +637,9 @@ fn a_build_carries_a_line_table_and_a_release_build_does_not() {
 /// nothing, so the test measures the stack rather than the pipe.
 #[test]
 fn a_loop_calling_a_command_does_not_grow_the_stack() {
-    let dir = std::env::temp_dir().join("openepl_stackgrow_test");
+    let dir = std::env::temp_dir().join("kiln_stackgrow_test");
     std::fs::create_dir_all(&dir).unwrap();
-    let src_path = dir.join("grow.oir");
+    let src_path = dir.join("grow.kiln");
     std::fs::write(
         &src_path,
         "module grow\n\
@@ -653,16 +653,16 @@ fn a_loop_calling_a_command_does_not_grow_the_stack() {
     )
     .unwrap();
     let bin = dir.join("grow");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
             src_path.to_str().unwrap(),
             "-o",
             bin.to_str().unwrap(),
         ])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(status.success(), "build failed");
     let out = Command::new(&bin).output().expect("run built binary");
     assert!(
@@ -675,13 +675,13 @@ fn a_loop_calling_a_command_does_not_grow_the_stack() {
 
 /// **M0, the RAD metric.** A scripted designer session adds a button,
 /// sets its properties, wires a click handler, and saves — and the resulting
-/// `.oir` compiles to a native binary whose button actually works.
+/// `.kiln` compiles to a native binary whose button actually works.
 ///
 /// This is the whole product thesis in one test: draw it, wire it, ship it.
 #[test]
 fn designer_produces_a_working_app() {
     let repo = repo();
-    let designer = repo.join("designer/openepl-designer");
+    let designer = repo.join("designer/kiln-designer");
     if !designer.exists() {
         eprintln!("designer not built (run designer/build.sh); skipping");
         return;
@@ -693,7 +693,7 @@ fn designer_produces_a_working_app() {
         eprintln!("RmlUi not vendored; skipping");
         return;
     }
-    let project = std::env::temp_dir().join("openepl_designed.oir");
+    let project = std::env::temp_dir().join("kiln_designed.kiln");
     std::fs::write(
         &project,
         r#"module designed
@@ -710,9 +710,9 @@ end
 
     let out = Command::new(&designer)
         .arg(&project)
-        .arg(repo.join("target/debug/openepl"))
+        .arg(repo.join("target/debug/kiln"))
         .env(
-            "OPENEPL_DESIGNER_SCRIPT",
+            "KILN_DESIGNER_SCRIPT",
             "add:button;set:text=Press me;set:left=40;set:top=80;wire:click=on_press;save",
         )
         .output()
@@ -739,22 +739,22 @@ end
         "handler stub not generated:\n{src}"
     );
 
-    let bin = std::env::temp_dir().join("openepl_designed_app");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let bin = std::env::temp_dir().join("kiln_designed_app");
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
             project.to_str().unwrap(),
             "-o",
             bin.to_str().unwrap(),
         ])
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
         .expect("compile designed app");
     assert!(status.success(), "the designed app did not compile");
 
     let run = Command::new(&bin)
-        .env("OPENEPL_UI_EXIT_AFTER_FRAMES", "4")
-        .env("OPENEPL_UI_SYNTH_CLICK", "2")
+        .env("KILN_UI_EXIT_AFTER_FRAMES", "4")
+        .env("KILN_UI_SYNTH_CLICK", "2")
         .output()
         .expect("run designed app");
     assert!(
@@ -770,12 +770,12 @@ end
 #[test]
 fn designer_toolbox_lists_components() {
     let repo = repo();
-    let designer = repo.join("designer/openepl-designer");
+    let designer = repo.join("designer/kiln-designer");
     if !designer.exists() {
         eprintln!("designer not built; skipping");
         return;
     }
-    let project = std::env::temp_dir().join("openepl_toolbox_probe.oir");
+    let project = std::env::temp_dir().join("kiln_toolbox_probe.kiln");
     std::fs::write(
         &project,
         "module probe\nuse ui\n\nform win\n  title = \"Probe\"\nend\n",
@@ -784,9 +784,9 @@ fn designer_toolbox_lists_components() {
 
     let out = Command::new(&designer)
         .arg(&project)
-        .arg(repo.join("target/debug/openepl"))
-        .env("OPENEPL_DESIGNER_DEBUG", "1")
-        .env("OPENEPL_DESIGNER_SCRIPT", "")
+        .arg(repo.join("target/debug/kiln"))
+        .env("KILN_DESIGNER_DEBUG", "1")
+        .env("KILN_DESIGNER_SCRIPT", "")
         .output()
         .expect("run designer");
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -809,11 +809,11 @@ fn all_components_are_real_controls() {
     }
     let bin = build_as("controls", "real");
     let out = Command::new(&bin)
-        .env("OPENEPL_UI_EXIT_AFTER_FRAMES", "4")
+        .env("KILN_UI_EXIT_AFTER_FRAMES", "4")
         // Handle 7 is the button: the form root is 1 and children follow in
         // declaration order.
-        .env("OPENEPL_UI_SYNTH_CLICK", "7")
-        .env("OPENEPL_UI_DUMP_A11Y", "1")
+        .env("KILN_UI_SYNTH_CLICK", "7")
+        .env("KILN_UI_DUMP_A11Y", "1")
         .output()
         .expect("run controls");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -842,7 +842,7 @@ fn all_components_are_real_controls() {
 #[test]
 fn designer_output_always_compiles() {
     let repo = repo();
-    let designer = repo.join("designer/openepl-designer");
+    let designer = repo.join("designer/kiln-designer");
     if !designer.exists() {
         eprintln!("designer not built; skipping");
         return;
@@ -853,14 +853,14 @@ fn designer_output_always_compiles() {
         eprintln!("RmlUi not vendored; skipping");
         return;
     }
-    let project = std::env::temp_dir().join("openepl_roundtrip.oir");
-    std::fs::copy(repo.join("examples/controls.oir"), &project).expect("seed project");
+    let project = std::env::temp_dir().join("kiln_roundtrip.kiln");
+    std::fs::copy(repo.join("examples/controls.kiln"), &project).expect("seed project");
 
     let out = Command::new(&designer)
         .arg(&project)
-        .arg(repo.join("target/debug/openepl"))
+        .arg(repo.join("target/debug/kiln"))
         .env(
-            "OPENEPL_DESIGNER_SCRIPT",
+            "KILN_DESIGNER_SCRIPT",
             "add:checkbox;add:progressbar;add:image;add:groupbox;add:editbox;save",
         )
         .output()
@@ -873,15 +873,15 @@ fn designer_output_always_compiles() {
         "bool was quoted as text:\n{src}"
     );
 
-    let bin = std::env::temp_dir().join("openepl_roundtrip_app");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let bin = std::env::temp_dir().join("kiln_roundtrip_app");
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
             project.to_str().unwrap(),
             "-o",
             bin.to_str().unwrap(),
         ])
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
         .expect("compile");
     assert!(
@@ -901,13 +901,13 @@ fn designer_output_always_compiles() {
 #[test]
 fn dragging_moves_components_precisely() {
     let repo = repo();
-    let designer = repo.join("designer/openepl-designer");
+    let designer = repo.join("designer/kiln-designer");
     if !designer.exists() {
         eprintln!("designer not built; skipping");
         return;
     }
-    let project = std::env::temp_dir().join("openepl_drag.oir");
-    std::fs::copy(repo.join("examples/controls.oir"), &project).expect("seed");
+    let project = std::env::temp_dir().join("kiln_drag.kiln");
+    std::fs::copy(repo.join("examples/controls.kiln"), &project).expect("seed");
 
     // grp starts at (20,120). Grab 10px inside it and drop at (150,120), so it
     // must land at (140,110) — cursor position minus the grab offset.
@@ -917,8 +917,8 @@ fn dragging_moves_components_precisely() {
     // participate in a measurement of the grab offset.
     let out = Command::new(&designer)
         .arg(&project)
-        .arg(repo.join("target/debug/openepl"))
-        .env("OPENEPL_DESIGNER_SCRIPT", "drag:grp@30,130->150,120;save")
+        .arg(repo.join("target/debug/kiln"))
+        .env("KILN_DESIGNER_SCRIPT", "drag:grp@30,130->150,120;save")
         .output()
         .expect("run designer");
     assert!(out.status.success());
@@ -943,8 +943,8 @@ fn dragging_moves_components_precisely() {
     // and dropping at (100,200) gives (95,195), which snaps to the 10px grid.
     let out = Command::new(&designer)
         .arg(&project)
-        .arg(repo.join("target/debug/openepl"))
-        .env("OPENEPL_DESIGNER_SCRIPT", "drag:agree@25,89->100,200;save")
+        .arg(repo.join("target/debug/kiln"))
+        .env("KILN_DESIGNER_SCRIPT", "drag:agree@25,89->100,200;save")
         .output()
         .expect("run designer");
     assert!(out.status.success());
@@ -973,19 +973,19 @@ fn dragging_moves_components_precisely() {
 #[test]
 fn selection_outline_traces_the_rendered_frame() {
     let repo = repo();
-    let designer = repo.join("designer/openepl-designer");
+    let designer = repo.join("designer/kiln-designer");
     if !designer.exists() {
         eprintln!("designer not built; skipping");
         return;
     }
-    let project = std::env::temp_dir().join("openepl_sel.oir");
-    std::fs::copy(repo.join("examples/controls.oir"), &project).expect("seed");
+    let project = std::env::temp_dir().join("kiln_sel.kiln");
+    std::fs::copy(repo.join("examples/controls.kiln"), &project).expect("seed");
 
     let out = Command::new(&designer)
         .arg(&project)
-        .arg(repo.join("target/debug/openepl"))
-        .env("OPENEPL_DESIGNER_DEBUG", "1")
-        .env("OPENEPL_DESIGNER_SCRIPT", "select:grp")
+        .arg(repo.join("target/debug/kiln"))
+        .env("KILN_DESIGNER_DEBUG", "1")
+        .env("KILN_DESIGNER_SCRIPT", "select:grp")
         .output()
         .expect("run designer");
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -1008,20 +1008,20 @@ fn selection_outline_traces_the_rendered_frame() {
 #[test]
 fn dragging_snaps_to_alignment_guides() {
     let repo = repo();
-    let designer = repo.join("designer/openepl-designer");
+    let designer = repo.join("designer/kiln-designer");
     if !designer.exists() {
         eprintln!("designer not built; skipping");
         return;
     }
-    let project = std::env::temp_dir().join("openepl_align.oir");
-    std::fs::copy(repo.join("examples/controls.oir"), &project).expect("seed");
+    let project = std::env::temp_dir().join("kiln_align.kiln");
+    std::fs::copy(repo.join("examples/controls.kiln"), &project).expect("seed");
 
     // Most components sit at left = 20. Drop grp at left = 23, close enough
     // that it must snap flush to 20 rather than to the 10px grid.
     let out = Command::new(&designer)
         .arg(&project)
-        .arg(repo.join("target/debug/openepl"))
-        .env("OPENEPL_DESIGNER_SCRIPT", "drag:grp@20,120->23,200;save")
+        .arg(repo.join("target/debug/kiln"))
+        .env("KILN_DESIGNER_SCRIPT", "drag:grp@20,120->23,200;save")
         .output()
         .expect("run designer");
     assert!(out.status.success());
@@ -1044,23 +1044,23 @@ fn dragging_snaps_to_alignment_guides() {
 #[test]
 fn layout_follows_the_window_size() {
     let repo = repo();
-    let designer = repo.join("designer/openepl-designer");
+    let designer = repo.join("designer/kiln-designer");
     if !designer.exists() {
         eprintln!("designer not built; skipping");
         return;
     }
-    let project = std::env::temp_dir().join("openepl_resize.oir");
-    std::fs::copy(repo.join("examples/controls.oir"), &project).expect("seed");
-    let dump = std::env::temp_dir().join("openepl_resize.ppm");
+    let project = std::env::temp_dir().join("kiln_resize.kiln");
+    std::fs::copy(repo.join("examples/controls.kiln"), &project).expect("seed");
+    let dump = std::env::temp_dir().join("kiln_resize.ppm");
 
     let out = Command::new(&designer)
         .arg(&project)
-        .arg(repo.join("target/debug/openepl"))
+        .arg(repo.join("target/debug/kiln"))
         // A real window: the offscreen surface a headless run defaults to
         // cannot grow, and growing is the whole test.
-        .env("OPENEPL_UI_WINDOW", "1")
-        .env("OPENEPL_DESIGNER_SCRIPT", "winsize:1700x1000")
-        .env("OPENEPL_DESIGNER_DUMP", &dump)
+        .env("KILN_UI_WINDOW", "1")
+        .env("KILN_DESIGNER_SCRIPT", "winsize:1700x1000")
+        .env("KILN_DESIGNER_DUMP", &dump)
         .output()
         .expect("run designer");
     assert!(out.status.success());
@@ -1121,13 +1121,13 @@ const LIB_SRC: &str = "module greetlib\n\
 /// unique per test — see `build_as`.
 fn build_lib(target: &str, tag: &str, ext: &str) -> PathBuf {
     let repo = repo();
-    let dir = std::env::temp_dir().join(format!("openepl_lib_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_lib_{tag}"));
     std::fs::create_dir_all(&dir).expect("temp dir");
-    let src = dir.join("greetlib.oir");
+    let src = dir.join("greetlib.kiln");
     std::fs::write(&src, LIB_SRC).expect("write source");
     let out = dir.join(format!("libgreet.{ext}"));
 
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
             src.to_str().unwrap(),
@@ -1136,10 +1136,10 @@ fn build_lib(target: &str, tag: &str, ext: &str) -> PathBuf {
             "-o",
             out.to_str().unwrap(),
         ])
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
-        .expect("run openepl");
-    assert!(status.success(), "openepl build --target {target} failed");
+        .expect("run kiln");
+    assert!(status.success(), "kiln build --target {target} failed");
     out
 }
 
@@ -1263,15 +1263,15 @@ fn one_source_builds_as_both_library_kinds() {
 /// program — both are caught before the toolchain is invoked.
 #[test]
 fn library_targets_reject_nonsense() {
-    let dir = std::env::temp_dir().join("openepl_lib_reject");
+    let dir = std::env::temp_dir().join("kiln_lib_reject");
     std::fs::create_dir_all(&dir).expect("temp dir");
-    let src = dir.join("empty.oir");
+    let src = dir.join("empty.kiln");
     std::fs::write(&src, "module empty\ntarget sharedlib\n").expect("write");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl");
+        .expect("run kiln");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "an empty library should not build");
     assert!(
@@ -1284,20 +1284,20 @@ fn library_targets_reject_nonsense() {
 // Project templates
 // ---------------------------------------------------------------------------
 
-fn openepl(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_openepl"))
+fn kiln(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(args)
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl")
+        .expect("run kiln")
 }
 
 /// A template that does not compile is worse than no template: it hands a
 /// newcomer a broken project as their first experience. Every one is built.
 #[test]
 fn every_template_creates_a_project_that_builds() {
-    let listing = openepl(&["templates"]);
+    let listing = kiln(&["templates"]);
     let text = String::from_utf8_lossy(&listing.stdout);
     // `template: <id> <target>`. A `gui` template links the vendored UI stack,
     // which a fresh checkout does not have; skipping it is honest, and failing
@@ -1313,12 +1313,12 @@ fn every_template_creates_a_project_that_builds() {
     assert!(!ids.is_empty(), "no templates listed:\n{text}");
 
     for id in ids {
-        let dir = std::env::temp_dir().join(format!("openepl_tmpl_{id}"));
+        let dir = std::env::temp_dir().join(format!("kiln_tmpl_{id}"));
         let _ = std::fs::remove_dir_all(&dir);
-        let out = openepl(&["new", id, dir.to_str().unwrap()]);
+        let out = kiln(&["new", id, dir.to_str().unwrap()]);
         assert!(
             out.status.success(),
-            "`openepl new {id}` failed: {}",
+            "`kiln new {id}` failed: {}",
             String::from_utf8_lossy(&out.stderr)
         );
 
@@ -1331,7 +1331,7 @@ fn every_template_creates_a_project_that_builds() {
         assert!(Path::new(open).is_file(), "{open} was not created");
 
         let bin = dir.join("out");
-        let built = openepl(&["build", open, "-o", bin.to_str().unwrap()]);
+        let built = kiln(&["build", open, "-o", bin.to_str().unwrap()]);
         assert!(
             built.status.success(),
             "template `{id}` does not build:\n{}",
@@ -1345,20 +1345,20 @@ fn every_template_creates_a_project_that_builds() {
 /// and print, not merely compile.
 #[test]
 fn the_console_template_runs() {
-    let dir = std::env::temp_dir().join("openepl_tmpl_run");
+    let dir = std::env::temp_dir().join("kiln_tmpl_run");
     let _ = std::fs::remove_dir_all(&dir);
-    assert!(openepl(&["new", "console-app", dir.to_str().unwrap()])
+    assert!(kiln(&["new", "console-app", dir.to_str().unwrap()])
         .status
         .success());
 
     let bin = dir.join("app");
-    let src = dir.join("main.oir");
-    assert!(openepl(&["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+    let src = dir.join("main.kiln");
+    assert!(kiln(&["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()])
         .status
         .success());
     let out = Command::new(&bin).output().expect("run template app");
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("Hello from OpenEPL"), "got: {text}");
+    assert!(text.contains("Hello from Kiln"), "got: {text}");
     assert!(text.contains("six times seven is 42"), "arithmetic line missing: {text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1366,16 +1366,16 @@ fn the_console_template_runs() {
 /// The module name comes from the directory, sanitised into an identifier.
 #[test]
 fn the_module_name_follows_the_directory() {
-    let dir = std::env::temp_dir().join("openepl-my-app");
+    let dir = std::env::temp_dir().join("kiln-my-app");
     let _ = std::fs::remove_dir_all(&dir);
-    let out = openepl(&["new", "console-app", dir.to_str().unwrap()]);
+    let out = kiln(&["new", "console-app", dir.to_str().unwrap()]);
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        text.contains("module: openepl_my_app"),
+        text.contains("module: kiln_my_app"),
         "dashes are not legal in an identifier: {text}"
     );
-    let src = std::fs::read_to_string(dir.join("main.oir")).expect("read");
-    assert!(src.contains("module openepl_my_app"));
+    let src = std::fs::read_to_string(dir.join("main.kiln")).expect("read");
+    assert!(src.contains("module kiln_my_app"));
     assert!(!src.contains("__MODULE__"), "placeholder left behind");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1383,10 +1383,10 @@ fn the_module_name_follows_the_directory() {
 /// Creating into someone's existing work would destroy it.
 #[test]
 fn new_refuses_a_non_empty_directory() {
-    let dir = std::env::temp_dir().join("openepl_tmpl_occupied");
+    let dir = std::env::temp_dir().join("kiln_tmpl_occupied");
     std::fs::create_dir_all(&dir).expect("mkdir");
     std::fs::write(dir.join("keepme.txt"), "important").expect("write");
-    let out = openepl(&["new", "console-app", dir.to_str().unwrap()]);
+    let out = kiln(&["new", "console-app", dir.to_str().unwrap()]);
     assert!(!out.status.success(), "should refuse a non-empty directory");
     assert!(
         dir.join("keepme.txt").is_file(),
@@ -1401,9 +1401,9 @@ fn new_refuses_a_non_empty_directory() {
 /// a character and yields text that is no longer valid UTF-8.
 #[test]
 fn text_commands_are_utf8_correct() {
-    let dir = std::env::temp_dir().join("openepl_utf8");
+    let dir = std::env::temp_dir().join("kiln_utf8");
     std::fs::create_dir_all(&dir).expect("mkdir");
-    let src = dir.join("utf8.oir");
+    let src = dir.join("utf8.kiln");
     std::fs::write(
         &src,
         "module utf8check\ntarget console\n\nsub main\n  \
@@ -1416,11 +1416,11 @@ fn text_commands_are_utf8_correct() {
     .expect("write");
 
     let bin = dir.join("utf8");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(out.status.success(), "build failed: {}", String::from_utf8_lossy(&out.stderr));
 
     let text = run(&bin);
@@ -1470,7 +1470,7 @@ fn support_library_examples_pass_their_own_checks() {
 
 /// Arrays and byte-sets, end to end.
 ///
-/// `examples/arrays.oir` is a self-checking transcript: every line prints `ok`
+/// `examples/arrays.kiln` is a self-checking transcript: every line prints `ok`
 /// or `FAIL`, so the assertion is that nothing failed and that the file ran at
 /// all. It covers what unit tests cannot — that an out-of-range index really
 /// does report through the error slot in a built binary rather than reading
@@ -1491,9 +1491,9 @@ fn arrays_example_passes_its_own_checks() {
 /// the bytes that happen to sit after the array.
 #[test]
 fn an_out_of_range_index_reports_instead_of_reading_past_the_end() {
-    let dir = std::env::temp_dir().join("openepl_bounds_test");
+    let dir = std::env::temp_dir().join("kiln_bounds_test");
     let _ = std::fs::create_dir_all(&dir);
-    let src = dir.join("bounds.oir");
+    let src = dir.join("bounds.kiln");
     std::fs::write(
         &src,
         "module bounds\nsub main\n  \
@@ -1508,11 +1508,11 @@ fn an_out_of_range_index_reports_instead_of_reading_past_the_end() {
     .expect("write");
 
     let bin = dir.join("bounds");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(
         out.status.success(),
         "build failed: {}",
@@ -1522,7 +1522,7 @@ fn an_out_of_range_index_reports_instead_of_reading_past_the_end() {
     let text = run(&bin);
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines[0], "0", "a failed read yields the sentinel: {text}");
-    assert_eq!(lines[1], "10007", "OE_ERR_OUT_OF_RANGE: {text}");
+    assert_eq!(lines[1], "10007", "KN_ERR_OUT_OF_RANGE: {text}");
     assert_eq!(lines[2], "10007", "a failed write reports too: {text}");
     assert_eq!(lines[3], "22", "a good read still works: {text}");
     assert_eq!(lines[4], "0", "success clears the error slot: {text}");
@@ -1539,9 +1539,9 @@ fn an_out_of_range_index_reports_instead_of_reading_past_the_end() {
 /// nothing occupies 0 any more.
 #[test]
 fn positions_count_from_one() {
-    let dir = std::env::temp_dir().join("openepl_onebased");
+    let dir = std::env::temp_dir().join("kiln_onebased");
     let _ = std::fs::create_dir_all(&dir);
-    let src = dir.join("one.oir");
+    let src = dir.join("one.kiln");
     std::fs::write(
         &src,
         "module one\nsub main\n  \
@@ -1559,11 +1559,11 @@ fn positions_count_from_one() {
     .expect("write");
 
     let bin = dir.join("one");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(
         out.status.success(),
         "build failed: {}",
@@ -1590,19 +1590,19 @@ fn positions_count_from_one() {
 /// language they guessed wrong about.
 #[test]
 fn a_zero_index_is_a_compile_error() {
-    let dir = std::env::temp_dir().join("openepl_zeroidx");
+    let dir = std::env::temp_dir().join("kiln_zeroidx");
     let _ = std::fs::create_dir_all(&dir);
-    let src = dir.join("zero.oir");
+    let src = dir.join("zero.kiln");
     std::fs::write(
         &src,
         "module zero\nsub main\n  var xs: int[] = [1]\n  call print_int(xs[0])\nend\n",
     )
     .expect("write");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", dir.join("z").to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(!out.status.success(), "xs[0] must not compile");
     let msg = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -1628,7 +1628,7 @@ fn a_malformed_colour_literal_is_a_compile_error() {
         eprintln!("RmlUi not vendored; skipping");
         return;
     }
-    let dir = std::env::temp_dir().join("openepl_colour");
+    let dir = std::env::temp_dir().join("kiln_colour");
     let _ = std::fs::create_dir_all(&dir);
     let program = |declared: &str, assigned: &str| {
         format!(
@@ -1640,14 +1640,14 @@ fn a_malformed_colour_literal_is_a_compile_error() {
     let build = |file: &str, src: &str| {
         let path = dir.join(file);
         std::fs::write(&path, src).expect("write");
-        Command::new(env!("CARGO_BIN_EXE_openepl"))
+        Command::new(env!("CARGO_BIN_EXE_kiln"))
             .args(["build", path.to_str().unwrap(), "-o", dir.join(file).with_extension("").to_str().unwrap()])
-            .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+            .env("KILN_RUNTIME_DIR", repo.join("runtime"))
             .output()
-            .expect("run openepl")
+            .expect("run kiln")
     };
 
-    let bad = build("bad.oir", &program("#44444", "#12345"));
+    let bad = build("bad.kiln", &program("#44444", "#12345"));
     assert!(!bad.status.success(), "a five-digit colour must not compile");
     let msg = String::from_utf8_lossy(&bad.stderr);
     for want in [
@@ -1657,7 +1657,7 @@ fn a_malformed_colour_literal_is_a_compile_error() {
         assert!(msg.contains(want), "expected {want:?} in: {msg}");
     }
 
-    let good = build("good.oir", &program("#444444", "#123456"));
+    let good = build("good.kiln", &program("#444444", "#123456"));
     assert!(
         good.status.success(),
         "a six-digit colour must build: {}",
@@ -1729,17 +1729,17 @@ fn a_component_must_be_declared_where_its_kind_belongs() {
         eprintln!("RmlUi not vendored; skipping");
         return;
     }
-    let dir = std::env::temp_dir().join("openepl_kind");
+    let dir = std::env::temp_dir().join("kiln_kind");
     let _ = std::fs::create_dir_all(&dir);
     let cases = [
         (
-            "visual.oir",
+            "visual.kiln",
             "module visual\nuse ui\n\nbutton stray\n  text = \"no form\"\nend\n\nsub main\n  \
              call print_int(1)\nend\n",
             "has to live inside a form",
         ),
         (
-            "nonvisual.oir",
+            "nonvisual.kiln",
             "module nonvisual\nuse ui\n\nform win\n  title = \"t\"\n  timer inner\n    \
              interval = 10\n  end\nend\n",
             "declare it at module level",
@@ -1748,16 +1748,16 @@ fn a_component_must_be_declared_where_its_kind_belongs() {
     for (file, src, want) in cases {
         let path = dir.join(file);
         std::fs::write(&path, src).expect("write");
-        let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+        let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
             .args([
                 "build",
                 path.to_str().unwrap(),
                 "-o",
                 dir.join("k").to_str().unwrap(),
             ])
-            .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+            .env("KILN_RUNTIME_DIR", repo.join("runtime"))
             .output()
-            .expect("run openepl");
+            .expect("run kiln");
         assert!(!out.status.success(), "{file} must not compile");
         let msg = String::from_utf8_lossy(&out.stderr);
         assert!(
@@ -1774,17 +1774,17 @@ fn a_component_must_be_declared_where_its_kind_belongs() {
 /// program that never ends, and a test that waits forever tells CI nothing.
 fn run_module_within(name: &str, src: &str, envs: &[(&str, &str)], secs: u64) -> String {
     let repo = repo();
-    let dir = std::env::temp_dir().join(format!("openepl_mod_{name}"));
+    let dir = std::env::temp_dir().join(format!("kiln_mod_{name}"));
     let _ = std::fs::create_dir_all(&dir);
-    let path = dir.join(format!("{name}.oir"));
+    let path = dir.join(format!("{name}.kiln"));
     std::fs::write(&path, src).expect("write module");
     let bin = dir.join(name);
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", path.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
-        .expect("run openepl");
-    assert!(status.success(), "openepl build {name} failed");
+        .expect("run kiln");
+    assert!(status.success(), "kiln build {name} failed");
 
     let mut cmd = Command::new(&bin);
     cmd.stdout(std::process::Stdio::piped());
@@ -1868,7 +1868,7 @@ fn a_window_and_a_timer_run_in_the_same_program() {
          form win\n  title = \"both\"\n  width = 240\n  height = 160\nend\n\n\
          sub main\n  call print_text(\"main returned\")\nend\n\n\
          sub on_tick\n  call print_text(\"tick\")\nend\n",
-        &[("OPENEPL_UI_EXIT_AFTER_FRAMES", "60")],
+        &[("KILN_UI_EXIT_AFTER_FRAMES", "60")],
         30,
     );
     assert!(
@@ -1967,7 +1967,7 @@ fn a_program_that_uses_neither_links_neither() {
         .output()
         .expect("run nm");
     let text = String::from_utf8_lossy(&syms.stdout);
-    for sym in ["oe_dict_at", "oe_dict_put", "oe_rec_new", "oe_rec_get"] {
+    for sym in ["kn_dict_at", "kn_dict_put", "kn_rec_new", "kn_rec_get"] {
         assert!(
             !text.contains(sym),
             "`{sym}` survived into a program that never mentions one:\n{text}"
@@ -2011,15 +2011,15 @@ fn records_and_dictionaries_compose() {
 /// parameter — the composition the server example cannot assert, because
 /// nothing in the test suite had ever spoken HTTP to a built program.
 ///
-/// The client is Rust rather than OpenEPL on purpose: a program that requested
+/// The client is Rust rather than Kiln on purpose: a program that requested
 /// its own port would block its only thread inside `net_tcp_receive_line`
 /// waiting for a reply that only the same thread's pump can produce.
 #[test]
 fn an_http_handler_reaches_records_and_a_dictionary() {
     use std::io::{Read, Write};
-    let dir = std::env::temp_dir().join("openepl_httpd_compose");
+    let dir = std::env::temp_dir().join("kiln_httpd_compose");
     std::fs::create_dir_all(&dir).expect("scratch dir");
-    let src = dir.join("main.oir");
+    let src = dir.join("main.kiln");
     std::fs::write(
         &src,
         r#"module httpcompose
@@ -2068,11 +2068,11 @@ end
     .expect("write source");
 
     let bin = dir.join("httpcompose");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(status.success(), "building the http composition failed");
 
     // A port in use is somebody else's machine, not a product failure: the
@@ -2136,9 +2136,9 @@ fn a_window_and_a_server_share_one_loop() {
         eprintln!("RmlUi not vendored; skipping");
         return;
     }
-    let dir = std::env::temp_dir().join("openepl_uinet_compose");
+    let dir = std::env::temp_dir().join("kiln_uinet_compose");
     std::fs::create_dir_all(&dir).expect("scratch dir");
-    let src = dir.join("main.oir");
+    let src = dir.join("main.kiln");
     std::fs::write(
         &src,
         r#"module uinet
@@ -2179,11 +2179,11 @@ end
     .expect("write source");
 
     let bin = dir.join("uinet");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(status.success(), "building the ui+net composition failed");
 
     if std::net::TcpListener::bind("127.0.0.1:8138").is_err() {
@@ -2194,9 +2194,9 @@ end
     // Frames are uncapped, so the count is a lifetime, not a duration: enough
     // turns of the loop that a request has somewhere to arrive.
     let child = Command::new(&bin)
-        .env("OPENEPL_UI_EXIT_AFTER_FRAMES", "30000")
-        .env("OPENEPL_UI_FRAME_MS", "0")
-        .env("OPENEPL_UI_DUMP_A11Y", "1")
+        .env("KILN_UI_EXIT_AFTER_FRAMES", "30000")
+        .env("KILN_UI_FRAME_MS", "0")
+        .env("KILN_UI_DUMP_A11Y", "1")
         .stdout(std::process::Stdio::piped())
         .spawn()
         .expect("start ui+net program");
@@ -2240,9 +2240,9 @@ end
 /// which is the one thing a script cannot recover from.
 #[test]
 fn a_failed_start_exits_non_zero() {
-    let dir = std::env::temp_dir().join("openepl_exitcode");
+    let dir = std::env::temp_dir().join("kiln_exitcode");
     std::fs::create_dir_all(&dir).expect("scratch dir");
-    let src = dir.join("main.oir");
+    let src = dir.join("main.kiln");
     std::fs::write(
         &src,
         r#"module bindfail
@@ -2265,11 +2265,11 @@ end
     .expect("write source");
 
     let bin = dir.join("bindfail");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(status.success(), "building the bind-failure program failed");
 
     // Hold the port from the test process, so the program cannot have it.
@@ -2296,27 +2296,27 @@ end
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Build inline `.oir` source to a temp binary. `tag` must be unique per test —
+/// Build inline `.kiln` source to a temp binary. `tag` must be unique per test —
 /// see `build_as`, which this is the anonymous-source twin of.
 fn build_src(src: &str, tag: &str) -> PathBuf {
     let repo = repo();
-    let dir = std::env::temp_dir().join(format!("openepl_src_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_src_{tag}"));
     std::fs::create_dir_all(&dir).expect("temp dir");
-    let path = dir.join("main.oir");
+    let path = dir.join("main.kiln");
     std::fs::write(&path, src).expect("write source");
     let bin = dir.join("prog");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", path.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
-        .expect("run openepl");
-    assert!(status.success(), "openepl build {tag} failed");
+        .expect("run kiln");
+    assert!(status.success(), "kiln build {tag} failed");
     bin
 }
 
 /// What an event hands its handler, end to end in a built binary.
 ///
-/// `examples/eventparams.oir` wires two timers to the same `tick`: one handler
+/// `examples/eventparams.kiln` wires two timers to the same `tick`: one handler
 /// takes the count and one ignores it. Both must be ordinary subroutines, so
 /// the assertion is the whole transcript in order — the counted handler seeing
 /// 1, 2, 3 is the entire point, and a thunk that dropped the argument or handed
@@ -2387,8 +2387,8 @@ end
 ";
     let bin = build_src(SRC, "boolprop");
     let out = Command::new(&bin)
-        .env("OPENEPL_UI_EXIT_AFTER_FRAMES", "4")
-        .env("OPENEPL_UI_SYNTH_CLICK", "2.1")
+        .env("KILN_UI_EXIT_AFTER_FRAMES", "4")
+        .env("KILN_UI_SYNTH_CLICK", "2.1")
         .output()
         .expect("run boolprop");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -2467,8 +2467,8 @@ end
 ";
     let bin = build_src(SRC, "composed");
     let out = Command::new(&bin)
-        .env("OPENEPL_UI_EXIT_AFTER_FRAMES", "8")
-        .env("OPENEPL_UI_SYNTH_CLICK", "4")
+        .env("KILN_UI_EXIT_AFTER_FRAMES", "8")
+        .env("KILN_UI_SYNTH_CLICK", "4")
         .output()
         .expect("run composed");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -2503,22 +2503,22 @@ end
 #[test]
 fn the_inspector_edits_a_colour_on_a_real_component() {
     let repo = repo();
-    let designer = repo.join("designer/openepl-designer");
+    let designer = repo.join("designer/kiln-designer");
     if !designer.exists() {
         eprintln!("designer not built; skipping");
         return;
     }
-    let original = repo.join("examples/controls.oir");
-    // Never the tracked file: Studio saves on exit, and examples/form.oir has
+    let original = repo.join("examples/controls.kiln");
+    // Never the tracked file: Studio saves on exit, and examples/form.kiln has
     // been committed with a stray designer edit twice.
-    let project = std::env::temp_dir().join("openepl_swatch.oir");
+    let project = std::env::temp_dir().join("kiln_swatch.kiln");
     std::fs::copy(&original, &project).expect("seed project");
 
     let out = Command::new(&designer)
         .arg(&project)
-        .arg(repo.join("target/debug/openepl"))
+        .arg(repo.join("target/debug/kiln"))
         .env(
-            "OPENEPL_DESIGNER_SCRIPT",
+            "KILN_DESIGNER_SCRIPT",
             "select:go;swatch:background_color;pick:#1a7f37;save",
         )
         .output()
@@ -2552,7 +2552,7 @@ fn the_inspector_edits_a_colour_on_a_real_component() {
     let _ = std::fs::remove_file(&project);
 }
 
-/// A grid bound to a datasource, end to end: `examples/grid.oir` adds a row
+/// A grid bound to a datasource, end to end: `examples/grid.kiln` adds a row
 /// from `main` and prints the count, so `rows: 4` proves the datasource, the
 /// binding and the count command all reached a built program. It is a GUI
 /// example, so it runs only where the UI stack is vendored and is told to
@@ -2566,7 +2566,7 @@ fn grid_example_counts_its_rows() {
     }
     let bin = build_as("grid", "rows");
     let out = Command::new(&bin)
-        .env("OPENEPL_UI_EXIT_AFTER_FRAMES", "3")
+        .env("KILN_UI_EXIT_AFTER_FRAMES", "3")
         .output()
         .expect("run grid");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -2578,5 +2578,52 @@ fn grid_example_counts_its_rows() {
     assert!(
         !stdout.lines().any(|l| l.contains("FAIL")),
         "grid reported failures:\n{stdout}"
+    );
+}
+
+/// Documentation travels with a command, through the C table and the ABI and
+/// out of `kiln commands` — the path every reader of it depends on.
+///
+/// Also: a command that carries no documentation must print no `doc:` line at
+/// all. The whole enrichment is incremental, and it only stays safe as long as
+/// an undocumented command is absent from that output rather than present with
+/// nothing in it.
+#[test]
+fn a_documented_command_carries_its_doc_and_example() {
+    let repo = repo();
+    let bin = repo.join("target").join(if cfg!(debug_assertions) { "debug" } else { "release" })
+        .join("kiln");
+    let out = Command::new(&bin)
+        .arg("commands")
+        .arg("--use")
+        .arg("file")
+        .current_dir(&repo)
+        .output()
+        .expect("run kiln commands");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    assert!(
+        stdout.contains("doc: file_read_text Read a whole text file"),
+        "the sentence did not survive the ABI:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("example: file_read_text let notes: text = file_read_text(\"notes.txt\")"),
+        "the example did not survive the ABI:\n{stdout}"
+    );
+    // Multi-line examples arrive as several lines, in order.
+    let lines: Vec<&str> = stdout
+        .lines()
+        .filter(|l| l.starts_with("example: file_read_text "))
+        .collect();
+    assert_eq!(lines.len(), 2, "expected both example lines:\n{stdout}");
+
+    // An undocumented command prints its signature and nothing else.
+    assert!(
+        stdout.contains("command: print_text(text)"),
+        "core is missing from the listing:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("doc: print_text "),
+        "an undocumented command must print no doc line:\n{stdout}"
     );
 }

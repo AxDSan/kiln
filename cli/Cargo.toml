@@ -1,17 +1,17 @@
 [package]
-name = "openepl-cli"
+name = "kiln-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "openepl"
+name = "kiln"
 path = "src/main.rs"
 
 [dependencies]
-openepl-ir = { path = "../ir" }
-openepl-backend = { path = "../backend" }
-openepl-debug = { path = "../debug" }
+kiln-ir = { path = "../ir" }
+kiln-backend = { path = "../backend" }
+kiln-debug = { path = "../debug" }
 lsp-server = "0.10"
 lsp-types = "0.97"
 serde = { version = "1", features = ["derive"] }

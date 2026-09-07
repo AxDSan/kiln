@@ -1,16 +1,16 @@
 /* Tables, the components that own them, and the commands that fill them.
  *
- * Bookkeeping here is malloc'd rather than oe_malloc'd: a table is rewritten
+ * Bookkeeping here is malloc'd rather than kn_malloc'd: a table is rewritten
  * many times over a program's life and the runtime's allocator is a bump
  * allocator freed at exit, so every `grid_set_cell` would leak its previous
  * value until the window closed.  What crosses into the program — a cell read
- * back, the rows as one text — is copied through oe_malloc like every other
+ * back, the rows as one text — is copied through kn_malloc like every other
  * text result, so the program may hold it.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "openepl_abi.h"
+#include "kiln_abi.h"
 #include "ui_data.h"
 
 typedef struct {
@@ -47,8 +47,8 @@ static char *dup_text(const char *s) {
     return out;
 }
 
-static char *oe_dup(const char *s, size_t n) {
-    char *out = (char *)oe_malloc((long)n + 1);
+static char *kn_dup(const char *s, size_t n) {
+    char *out = (char *)kn_malloc((long)n + 1);
     if (out) { memcpy(out, s, n); out[n] = 0; }
     return out;
 }
@@ -154,7 +154,7 @@ static char **split(const char *text, char sep, int32_t *count) {
 static char *join(char **parts, int32_t count, char sep) {
     size_t total = 0;
     for (int32_t i = 0; i < count; i++) total += strlen(parts[i]) + 1;
-    char *out = (char *)oe_malloc((long)total + 1);
+    char *out = (char *)kn_malloc((long)total + 1);
     if (!out) return NULL;
     char *p = out;
     for (int32_t i = 0; i < count; i++) {
@@ -175,7 +175,7 @@ void ui_table_set_columns(UiTable *t, const char *tabbed) {
 }
 
 char *ui_table_columns(const UiTable *t) {
-    if (!t) return oe_dup("", 0);
+    if (!t) return kn_dup("", 0);
     return join(t->header, t->header_count, '\t');
 }
 
@@ -217,7 +217,7 @@ void ui_table_set_rows(UiTable *t, const char *text) {
 }
 
 char *ui_table_rows(const UiTable *t) {
-    if (!t || t->row_count == 0) return oe_dup("", 0);
+    if (!t || t->row_count == 0) return kn_dup("", 0);
     /* Two passes so the text is built once at its final size rather than
      * grown a row at a time through the bump allocator. */
     size_t total = 0;
@@ -226,7 +226,7 @@ char *ui_table_rows(const UiTable *t) {
         for (int32_t c = 0; c < r->count; c++) total += strlen(r->cells[c]) + 1;
         total += 1;
     }
-    char *out = (char *)oe_malloc((long)total + 1);
+    char *out = (char *)kn_malloc((long)total + 1);
     if (!out) return NULL;
     char *p = out;
     for (int32_t i = 0; i < t->row_count; i++) {
@@ -283,66 +283,66 @@ static UiTable *table_named(int32_t kind, const char *name) {
     char msg[128];
     snprintf(msg, sizeof msg, "no %s named \"%s\"",
              kind == UI_ENTRY_GRID ? "grid" : "datasource", name ? name : "");
-    oe_error_set(OE_ERR_INVALID_ARG, msg);
+    kn_error_set(KN_ERR_INVALID_ARG, msg);
     return NULL;
 }
 
-static void cmd_clear(int32_t kind, OpenEPL_Slot *ret, OpenEPL_Slot *argv) {
-    UiTable *t = table_named(kind, oe_arg_text(argv, 0));
-    if (!t) { oe_ret_bool(ret, 0); return; }
+static void cmd_clear(int32_t kind, Kiln_Slot *ret, Kiln_Slot *argv) {
+    UiTable *t = table_named(kind, kn_arg_text(argv, 0));
+    if (!t) { kn_ret_bool(ret, 0); return; }
     ui_table_clear(t);
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
-static void cmd_add_row(int32_t kind, OpenEPL_Slot *ret, OpenEPL_Slot *argv) {
-    UiTable *t = table_named(kind, oe_arg_text(argv, 0));
-    if (!t) { oe_ret_int(ret, 0); return; }
-    oe_error_clear();
-    oe_ret_int(ret, ui_table_add_row(t, oe_arg_text(argv, 1)));
+static void cmd_add_row(int32_t kind, Kiln_Slot *ret, Kiln_Slot *argv) {
+    UiTable *t = table_named(kind, kn_arg_text(argv, 0));
+    if (!t) { kn_ret_int(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_int(ret, ui_table_add_row(t, kn_arg_text(argv, 1)));
 }
 
-static void cmd_cell(int32_t kind, OpenEPL_Slot *ret, OpenEPL_Slot *argv) {
-    UiTable *t = table_named(kind, oe_arg_text(argv, 0));
-    const char *cell = t ? ui_table_cell(t, oe_arg_int(argv, 1), oe_arg_int(argv, 2)) : NULL;
+static void cmd_cell(int32_t kind, Kiln_Slot *ret, Kiln_Slot *argv) {
+    UiTable *t = table_named(kind, kn_arg_text(argv, 0));
+    const char *cell = t ? ui_table_cell(t, kn_arg_int(argv, 1), kn_arg_int(argv, 2)) : NULL;
     if (!cell) {
         if (t) {
             char msg[96];
             snprintf(msg, sizeof msg, "row %d is outside a table of %d row(s)",
-                     (int)oe_arg_int(argv, 1), (int)ui_table_row_count(t));
-            oe_error_set(OE_ERR_OUT_OF_RANGE, msg);
+                     (int)kn_arg_int(argv, 1), (int)ui_table_row_count(t));
+            kn_error_set(KN_ERR_OUT_OF_RANGE, msg);
         }
-        oe_ret_text(ret, oe_dup("", 0));
+        kn_ret_text(ret, kn_dup("", 0));
         return;
     }
-    oe_error_clear();
-    oe_ret_text(ret, oe_dup(cell, strlen(cell)));
+    kn_error_clear();
+    kn_ret_text(ret, kn_dup(cell, strlen(cell)));
 }
 
-static void cmd_set_cell(int32_t kind, OpenEPL_Slot *ret, OpenEPL_Slot *argv) {
-    UiTable *t = table_named(kind, oe_arg_text(argv, 0));
-    if (!t) { oe_ret_bool(ret, 0); return; }
-    if (!ui_table_set_cell(t, oe_arg_int(argv, 1), oe_arg_int(argv, 2), oe_arg_text(argv, 3))) {
+static void cmd_set_cell(int32_t kind, Kiln_Slot *ret, Kiln_Slot *argv) {
+    UiTable *t = table_named(kind, kn_arg_text(argv, 0));
+    if (!t) { kn_ret_bool(ret, 0); return; }
+    if (!ui_table_set_cell(t, kn_arg_int(argv, 1), kn_arg_int(argv, 2), kn_arg_text(argv, 3))) {
         char msg[96];
         snprintf(msg, sizeof msg, "row %d, column %d is outside a table of %d row(s)",
-                 (int)oe_arg_int(argv, 1), (int)oe_arg_int(argv, 2), (int)ui_table_row_count(t));
-        oe_error_set(OE_ERR_OUT_OF_RANGE, msg);
-        oe_ret_bool(ret, 0);
+                 (int)kn_arg_int(argv, 1), (int)kn_arg_int(argv, 2), (int)ui_table_row_count(t));
+        kn_error_set(KN_ERR_OUT_OF_RANGE, msg);
+        kn_ret_bool(ret, 0);
         return;
     }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
-static void cmd_row_count(int32_t kind, OpenEPL_Slot *ret, OpenEPL_Slot *argv) {
-    UiTable *t = table_named(kind, oe_arg_text(argv, 0));
-    if (!t) { oe_ret_int(ret, -1); return; }
-    oe_error_clear();
-    oe_ret_int(ret, ui_table_row_count(t));
+static void cmd_row_count(int32_t kind, Kiln_Slot *ret, Kiln_Slot *argv) {
+    UiTable *t = table_named(kind, kn_arg_text(argv, 0));
+    if (!t) { kn_ret_int(ret, -1); return; }
+    kn_error_clear();
+    kn_ret_int(ret, ui_table_row_count(t));
 }
 
 #define UI_CMD(name, kind, fn) \
-    void name(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) { (void)argc; fn(kind, ret, argv); }
+    void name(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) { (void)argc; fn(kind, ret, argv); }
 
 UI_CMD(ui_grid_clear,           UI_ENTRY_GRID,       cmd_clear)
 UI_CMD(ui_grid_add_row,         UI_ENTRY_GRID,       cmd_add_row)

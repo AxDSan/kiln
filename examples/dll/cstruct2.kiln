@@ -1,0 +1,178 @@
+module cstruct2
+
+# The shapes a real Win32 header is full of, declared as c-records: a struct
+# nested by value, 16-bit `WORD` fields, a fixed inline array, and a `float`.
+# `structs.c` declares the same four in C, and reports its own `sizeof` and
+# `offsetof` for each, so every number printed here is checked against the C
+# compiler's rather than against a table written by hand.
+
+record Point is c
+  x: int
+  y: int
+end
+
+# A `MSG`: the `POINT` at the end sits inline, by value.
+record Msg is c
+  hwnd: ptr
+  message: int
+  wparam: int64
+  lparam: int64
+  time: int
+  pt: Point
+end
+
+# `WNDCLASSEX`-shaped: two `WORD` fields between an int and a pointer, so the
+# padding around them is what a wrong width would move.
+record WC is c
+  style: int
+  cls_extra: int16
+  wnd_extra: word
+  name: text
+end
+
+# `PAINTSTRUCT`-shaped: a fixed inline array member.
+record Blob is c
+  n: int
+  bytes: byte[16]
+end
+
+record FloatBox is c
+  value: float
+end
+
+dll fill_msg(m: Msg) from "structs" as "structs_fill_msg"
+dll move_point(p: Point, dx: int, dy: int) from "structs" as "structs_move_point"
+dll paint_blob(b: Blob, value: int) from "structs" as "structs_paint_blob"
+dll blob_byte(b: Blob, index0: int): int from "structs" as "structs_blob_byte"
+dll set_float(f: FloatBox, value: double) from "structs" as "structs_set_float"
+dll get_float(f: FloatBox): double from "structs" as "structs_get_float"
+dll fill_wndclass(w: WC) from "structs" as "structs_fill_wndclass"
+
+dll ref_msg_size(): int64 from "structs" as "structs_msg_sizeof"
+dll ref_msg_off_pt(): int64 from "structs" as "structs_msg_offset_pt"
+dll ref_point_size(): int64 from "structs" as "structs_point_sizeof"
+dll ref_wc_size(): int64 from "structs" as "structs_wndclass_sizeof"
+dll ref_wc_off_name(): int64 from "structs" as "structs_wndclass_offset_name"
+dll ref_blob_size(): int64 from "structs" as "structs_blob_sizeof"
+dll ref_blob_off_bytes(): int64 from "structs" as "structs_blob_offset_bytes"
+dll ref_floatbox_size(): int64 from "structs" as "structs_floatbox_sizeof"
+
+# A constant, and a module variable seeded from it: a `const` is a literal with
+# a name, so it stands where a literal does — including here.
+const START = 5
+var seeded: int = START
+
+sub main
+  # --- a nested record by value ----------------------------------------
+  var m: Msg
+  m.pt.x = 11
+  m.pt.y = 22
+  call print_int(m.pt.x)              # 11 — a nested field round-trips
+  call print_int(m.pt.y)              # 22
+
+  call print_int64(size of Msg)       # Kiln's layout
+  call print_int64(ref_msg_size())    # clang's sizeof(SMsg) — the same number
+  call print_int64(size of Point)
+  call print_int64(ref_point_size())
+
+  # C fills the whole struct through the pointer, including the nested POINT.
+  call fill_msg(m)
+  call print_int(m.pt.x)              # 300
+  call print_int(m.pt.y)              # 400
+  call print_int(m.message)           # 15
+  call print_int64(m.wparam)          # 1000000000000
+
+  # `address of` a nested field is a pointer to the nested struct itself: write
+  # through it at clang's own offset for `pt`, and the nested field must move.
+  var msg_base: ptr = address of m
+  var pt_at: ptr = address of m.pt
+  if ptr_to_int(pt_at) - ptr_to_int(msg_base) = ref_msg_off_pt()
+    call print_text("pt-offset-ok")
+  else
+    call print_text("pt-offset-BUG")
+  end
+  call ptr_write_int(pt_at, 0, 777)
+  call print_int(m.pt.x)              # 777
+
+  # A nested field passed where a `dll` declares that record: the pointer C gets
+  # is the nested struct's own address, so C moves the POINT inside the MSG.
+  call move_point(m.pt, 3, 4)
+  call print_int(m.pt.x)              # 780
+  call print_int(m.pt.y)              # 404
+
+  # --- 16-bit fields ----------------------------------------------------
+  var w: WC
+  w.cls_extra = 65535
+  w.wnd_extra = 258
+  call print_int(w.cls_extra)         # 65535 — read back unsigned
+  call print_int(w.wnd_extra)         # 258
+  call print_int64(size of WC)
+  call print_int64(ref_wc_size())     # clang's sizeof(SWndClass)
+  call fill_wndclass(w)
+  call print_int(w.cls_extra)         # 65535, written by C as a uint16_t
+  call print_int(w.wnd_extra)         # 258
+  call print_text(w.name)             # window
+  var wc_base: ptr = address of w
+  if ptr_to_int(address of w.name) - ptr_to_int(wc_base) = ref_wc_off_name()
+    call print_text("wc-name-offset-ok")
+  else
+    call print_text("wc-name-offset-BUG")
+  end
+
+  # --- a fixed inline array --------------------------------------------
+  var b: Blob
+  b.n = 9
+  for i in 1..16
+    b.bytes[i] = i * 3
+  end
+  call print_int(b.bytes[1])          # 3
+  call print_int(b.bytes[16])         # 48
+  # C reads index 0 where Kiln wrote position 1: the count starts at 1 here
+  # and at 0 there, and the same byte answers both.
+  call print_int(blob_byte(b, 0))     # 3
+  call print_int(blob_byte(b, 15))    # 48
+  call print_int64(size of Blob)      # 4 + 16, padded
+  call print_int64(ref_blob_size())   # clang's sizeof(SBlob)
+
+  # `address of` an array field points at its first element.
+  var bytes_at: ptr = address of b.bytes
+  if ptr_to_int(bytes_at) - ptr_to_int(address of b) = ref_blob_off_bytes()
+    call print_text("bytes-offset-ok")
+  else
+    call print_text("bytes-offset-BUG")
+  end
+
+  # C memsets the member alone: every element changes, `n` does not.
+  call paint_blob(b, 77)
+  call print_int(b.bytes[1])          # 77
+  call print_int(b.bytes[16])         # 77
+  call print_int(b.n)                 # 9 — untouched
+
+  # A computed index reaches the same element a literal one does.
+  var k: int = 16
+  b.bytes[k] = 200
+  call print_int(b.bytes[16])         # 200
+
+  # A `const` stands where a literal index does, and is bounds-checked the same
+  # way — the count is part of the type either way.
+  b.bytes[START] = 55
+  call print_int(b.bytes[5])          # 55
+
+  # --- a float field ----------------------------------------------------
+  var f: FloatBox
+  f.value = 1.5
+  call print_double(f.value)          # 1.5 — exact in binary
+  call print_int64(size of FloatBox)
+  call print_int64(ref_floatbox_size())
+  call set_float(f, 2.25)
+  call print_double(f.value)          # 2.25, stored by C as a float
+  call set_float(f, 0.5)
+  if get_float(f) = f.value
+    call print_text("float-agrees")
+  else
+    call print_text("float-BUG")
+  end
+
+  # --- a module variable seeded from a constant -------------------------
+  call print_int(seeded)              # 5
+end

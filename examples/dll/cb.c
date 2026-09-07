@@ -1,5 +1,5 @@
 /* A tiny C library that calls BACK into its caller through a function pointer —
- * the other half of `dll`. `dll` lets OpenEPL call C; this lets C call OpenEPL,
+ * the other half of `dll`. `dll` lets Kiln call C; this lets C call Kiln,
  * which is what every hook, thread entry and enumeration callback needs.
  *
  * Built to `libcb.so` (or `cb.dll` for the Windows case) beside the program

@@ -10,21 +10,21 @@
  * either, so `a11y_accesskit.cpp` and `ui_rmlui.cpp` never need to see each
  * other's headers.
  */
-#ifndef OPENEPL_A11Y_MODEL_H
-#define OPENEPL_A11Y_MODEL_H
+#ifndef KILN_A11Y_MODEL_H
+#define KILN_A11Y_MODEL_H
 
 #include <cstdint>
 #include <string>
 #include <vector>
 
-namespace openepl::a11y {
+namespace kiln::a11y {
 
 /* One accessible node, mirroring a widget. `id` IS the widget handle — the two
  * are both u64 and deliberately identical, so no mapping table can drift. */
 struct Node {
     uint64_t id = 0;
     uint64_t parent = 0;         /* 0 = root */
-    int32_t role = 0;            /* OE_ROLE_* (abi/openepl_abi.h) */
+    int32_t role = 0;            /* KN_ROLE_* (abi/kiln_abi.h) */
     std::string label;           /* accessible name; may be empty */
     float x = 0, y = 0, w = 0, h = 0;
     bool clickable = false;      /* exposes the default action */
@@ -59,5 +59,5 @@ std::vector<uint64_t> take_actions();
 /// Reset everything (shutdown).
 void clear();
 
-} // namespace openepl::a11y
+} // namespace kiln::a11y
 #endif

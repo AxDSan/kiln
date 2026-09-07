@@ -112,7 +112,7 @@ impl Program {
 
     /// The locals in scope at an address, in declaration order.
     ///
-    /// Scope is the whole subroutine: OpenEPL's locals are function-scoped, so
+    /// Scope is the whole subroutine: Kiln's locals are function-scoped, so
     /// a name declared anywhere in a body is a name that exists throughout it.
     /// A debugger showing one before its declaration has run shows whatever
     /// the slot happens to hold, which is the same thing the language itself
@@ -183,11 +183,11 @@ impl Program {
 }
 
 /// The prefix the backend gives every user subroutine.
-const USER_PREFIX: &str = "oe_user_";
+const USER_PREFIX: &str = "kn_user_";
 
 /// What the backend writes as `DW_AT_producer`. Everything else in the binary
 /// was compiled by something else and is not the user's code.
-const PRODUCER: &str = "OpenEPL";
+const PRODUCER: &str = "Kiln";
 
 /// A compile unit's `DW_AT_producer`, or an empty string when it has none.
 fn unit_producer(
@@ -501,7 +501,7 @@ mod tests {
     /// the middle of the second, and the end marker.
     fn program() -> Program {
         Program {
-            source: "demo.oir".into(),
+            source: "demo.kiln".into(),
             directory: "examples".into(),
             rows: vec![
                 Row { address: 0x1000, line: 3, column: 3, is_stmt: true, end_sequence: false },
@@ -512,7 +512,7 @@ mod tests {
             ],
             subs: vec![Subprogram {
                 name: "main".into(),
-                symbol: "oe_user_main".into(),
+                symbol: "kn_user_main".into(),
                 low_pc: 0x1000,
                 size: 0x30,
             }],
@@ -577,7 +577,7 @@ mod tests {
 
     /// A function's extent is half-open: the byte one past its last is the
     /// next function's first, and claiming both would put an address in two.
-    /// A local belongs to the whole subroutine, because OpenEPL's locals are
+    /// A local belongs to the whole subroutine, because Kiln's locals are
     /// function-scoped — and to no other.
     #[test]
     fn the_locals_of_an_address_are_the_ones_its_function_declared() {

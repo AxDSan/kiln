@@ -1,19 +1,19 @@
 #!/bin/bash
-# Build a relocatable OpenEPL bundle for Windows x86-64, cross-built from Linux.
+# Build a relocatable Kiln bundle for Windows x86-64, cross-built from Linux.
 #
-#   tools/package-windows.sh            -> dist/openepl-<version>-windows-x86_64{,.zip}
+#   tools/package-windows.sh            -> dist/kiln-<version>-windows-x86_64{,.zip}
 #   tools/package-windows.sh --no-zip   -> leave the tree, skip the archive
 #
 # The Linux counterpart is tools/package.sh, and the tree has the same shape
-# for the same reason: `openepl` finds its runtime by walking up from its own
-# executable, so `bin\openepl.exe` resolving to `<root>\runtime` is what makes
+# for the same reason: `kiln` finds its runtime by walking up from its own
+# executable, so `bin\kiln.exe` resolving to `<root>\runtime` is what makes
 # the tree relocatable.
 #
 # What goes in, and where it comes from:
-#   bin/openepl-studio.exe   designer/build-windows.sh — mingw-w64 g++, the
+#   bin/kiln-studio.exe   designer/build-windows.sh — mingw-w64 g++, the
 #                            Windows RmlUi, and the sysroot's SDL2 / SDL2_image
 #                            / freetype as DLLs, all copied beside it
-#   bin/openepl.exe          cargo, for the x86_64-pc-windows-gnu target, IF that
+#   bin/kiln.exe          cargo, for the x86_64-pc-windows-gnu target, IF that
 #                            build succeeds. It is attempted and reported, never
 #                            required: the bundle is still a bundle without it,
 #                            and the README says what is missing.
@@ -32,11 +32,11 @@ cd "$ROOT"
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 TRIPLE="windows-x86_64"
-NAME="openepl-${VERSION}-${TRIPLE}"
+NAME="kiln-${VERSION}-${TRIPLE}"
 OUT="$ROOT/dist/$NAME"
 MINGW=x86_64-w64-mingw32
 
-echo "==> OpenEPL $VERSION -> dist/$NAME"
+echo "==> Kiln $VERSION -> dist/$NAME"
 
 # --- prerequisites --------------------------------------------------------
 for dep in "$MINGW-g++" "$MINGW-gcc" "$MINGW-pkg-config" "$MINGW-objdump" cargo; do
@@ -60,9 +60,9 @@ echo "==> compiler (Windows)"
 mkdir -p "$ROOT/dist"
 CLI=""
 if rustup target list --installed 2>/dev/null | grep -qx x86_64-pc-windows-gnu; then
-    if cargo build --release --quiet --target x86_64-pc-windows-gnu -p openepl-cli 2>"$ROOT/dist/.cli-windows.log" \
-        && [ -f target/x86_64-pc-windows-gnu/release/openepl.exe ]; then
-        CLI="target/x86_64-pc-windows-gnu/release/openepl.exe"
+    if cargo build --release --quiet --target x86_64-pc-windows-gnu -p kiln-cli 2>"$ROOT/dist/.cli-windows.log" \
+        && [ -f target/x86_64-pc-windows-gnu/release/kiln.exe ]; then
+        CLI="target/x86_64-pc-windows-gnu/release/kiln.exe"
     else
         echo "    the compiler did not build for Windows; the bundle ships Studio without it" >&2
         echo "    (its errors are in dist/.cli-windows.log)" >&2
@@ -76,26 +76,26 @@ fi
 # A clean dist: every earlier version's tree and archives for THIS platform
 # go, so dist/ holds only what this build produced — no stale bundle a
 # release upload or a `ls dist` could pick up by mistake.
-rm -rf "$ROOT"/dist/openepl-*-windows-x86_64 "$ROOT"/dist/openepl-*-windows-x86_64.tar.gz \
-       "$ROOT"/dist/openepl-*-windows-x86_64.zip "$ROOT"/dist/openepl-*-windows-x86_64.*.sha256 \
-       "$ROOT"/dist/openepl-*-windows-x86_64.tar.gz.sha256 "$ROOT"/dist/openepl-*-windows-x86_64.zip.sha256
+rm -rf "$ROOT"/dist/kiln-*-windows-x86_64 "$ROOT"/dist/kiln-*-windows-x86_64.tar.gz \
+       "$ROOT"/dist/kiln-*-windows-x86_64.zip "$ROOT"/dist/kiln-*-windows-x86_64.*.sha256 \
+       "$ROOT"/dist/kiln-*-windows-x86_64.tar.gz.sha256 "$ROOT"/dist/kiln-*-windows-x86_64.zip.sha256
 mkdir -p "$OUT"/{bin,licenses}
 
-install -m755 "$STUDIO_DIR/openepl-studio.exe" "$OUT/bin/openepl-studio.exe"
+install -m755 "$STUDIO_DIR/kiln-studio.exe" "$OUT/bin/kiln-studio.exe"
 for dll in "$STUDIO_DIR"/*.dll; do
     install -m644 "$dll" "$OUT/bin/$(basename "$dll")"
 done
-"$MINGW-strip" "$OUT/bin/openepl-studio.exe" 2>/dev/null || true
+"$MINGW-strip" "$OUT/bin/kiln-studio.exe" 2>/dev/null || true
 if [ -n "$CLI" ]; then
-    install -m755 "$CLI" "$OUT/bin/openepl.exe"
-    "$MINGW-strip" "$OUT/bin/openepl.exe" 2>/dev/null || true
+    install -m755 "$CLI" "$OUT/bin/kiln.exe"
+    "$MINGW-strip" "$OUT/bin/kiln.exe" 2>/dev/null || true
     # Same check as the Linux bundle: the binary must agree with the archive's
     # name about what version it is. Under wine when wine is here.
     if command -v wine >/dev/null; then
         REPORTED="$(WINEDEBUG=-all WINEDLLOVERRIDES="winex11.drv,winewayland.drv=d" \
-            env -u DISPLAY -u WAYLAND_DISPLAY wine "$OUT/bin/openepl.exe" version 2>/dev/null | tr -d '\r' | sed -n 's/^openepl //p')"
+            env -u DISPLAY -u WAYLAND_DISPLAY wine "$OUT/bin/kiln.exe" version 2>/dev/null | tr -d '\r' | sed -n 's/^kiln //p')"
         if [ "$REPORTED" != "$VERSION" ]; then
-            echo "bin/openepl.exe reports '$REPORTED' but Cargo.toml says $VERSION" >&2
+            echo "bin/kiln.exe reports '$REPORTED' but Cargo.toml says $VERSION" >&2
             exit 1
         fi
     fi
@@ -133,6 +133,20 @@ fi
 
 mkdir -p "$OUT/docs"
 cp docs/editors.md "$OUT/docs/editors.md"
+
+# The handbook, as in the Linux bundle: HTML for a browser, Markdown for
+# Studio's own viewer. See tools/package.sh for why both.
+if ! command -v mdbook >/dev/null 2>&1; then
+    echo "mdbook is not installed; the bundle would ship without its handbook" >&2
+    echo "install it with: cargo install mdbook" >&2
+    exit 1
+fi
+mdbook build docs-site >/dev/null
+cp -r docs-site/book "$OUT/docs/book"
+mkdir -p "$OUT/docs/src"
+cp docs-site/src/*.md "$OUT/docs/src/"
+cp -r docs-site/src/assets "$OUT/docs/src/assets"
+cp docs/editors.md "$OUT/docs/src/editors.md"
 # At the root, beside the README: it is what the compiler names when clang is
 # not on PATH, which is the first thing a new Windows user hits, and a file
 # they have to go looking for in a subdirectory is one they will not find.
@@ -165,7 +179,7 @@ find "$OUT/examples" "$OUT/libs" "$OUT/kits" \( -name '*.o' -o -name '*.so' -o -
 sed -e "s/__VERSION__/$VERSION/g" tools/bundle-README.md > "$OUT/README.md"
 printf '%s\ncommit %s\n' "$VERSION" "$COMMIT" > "$OUT/VERSION"
 if [ -z "$CLI" ]; then
-    printf '\nThis bundle has no bin\\openepl.exe: the compiler did not cross-build when it was made.\n' >> "$OUT/README.md"
+    printf '\nThis bundle has no bin\\kiln.exe: the compiler did not cross-build when it was made.\n' >> "$OUT/README.md"
 fi
 
 # --- archive --------------------------------------------------------------
@@ -182,6 +196,6 @@ fi
 
 echo
 echo "bundle:  dist/$NAME"
-[ -n "$CLI" ] && echo "         with bin/openepl.exe" || echo "         WITHOUT bin/openepl.exe (see above)"
+[ -n "$CLI" ] && echo "         with bin/kiln.exe" || echo "         WITHOUT bin/kiln.exe (see above)"
 [ -f "$ROOT/dist/$NAME.zip" ] && \
     echo "archive: dist/$NAME.zip ($(du -h "$ROOT/dist/$NAME.zip" | cut -f1))"

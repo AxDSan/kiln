@@ -1073,7 +1073,7 @@ end
 ```
 
 The members are numbered from **1**, in declaration order, like every other
-position in OpenEPL. They may be written one per line or several to a line,
+position in Kiln. They may be written one per line or several to a line,
 separated by commas.
 
 A member is reached only through the enum's name — `severity.info`, never a
@@ -1111,7 +1111,7 @@ failing status, so a script that runs the program can tell. With no message of
 its own it quotes the condition as you wrote it — `assertion failed:
 amount <= balance` — which is usually the message you would have typed.
 
-**A release build compiles asserts out entirely.** `openepl build --release`
+**A release build compiles asserts out entirely.** `kiln build --release`
 emits no check, no branch and no message for one: an `assert` costs a debug
 build a comparison and costs a release build nothing. So an `assert` is for
 stating what you believe, not for validating input a user typed — check that
@@ -1119,10 +1119,10 @@ with an `if`, which is there in both builds.
 
 ## The two tours
 
-`examples/sugar_tour.oir` puts the operator and iteration shorthands into one
+`examples/sugar_tour.kiln` puts the operator and iteration shorthands into one
 short program — compound assignment, text `+`, interpolation, a range loop,
 `for each` over a dictionary, `in`, and a one-line `if`.
-`examples/sugar09_tour.oir` does the same for the rest: block and raw text, a slice, the dot call, an
+`examples/sugar09_tour.kiln` does the same for the rest: block and raw text, a slice, the dot call, an
 inferred `let`, the value `if`, `enum`, `match`, `repeat`, `assert`, a
 parameter default, a named argument, a record literal and an update, an
 optional opened with `otherwise` and with `if some`, a list built by a loop,

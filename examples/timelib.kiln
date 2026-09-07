@@ -1,0 +1,85 @@
+# Dates and clocks: the `time` support library.
+#
+# Every command here works in UTC and speaks Unix seconds as int64 — the same
+# basis core's now() uses, so the two compose.
+#
+#   kiln run examples/timelib.kiln
+module timelib
+use time
+
+sub main
+  # --- a known moment: the first Apollo 11 moonwalk, 1969-07-21T02:56:15Z ---
+  let apollo = time_from_parts(1969, 7, 21, 2, 56, 15)
+  call print_int64(apollo)
+  call print_text(time_format_iso(apollo))
+  call print_int(time_month(apollo))
+  call print_int(time_day(apollo))
+  call print_int(time_hour(apollo))
+  call print_int(time_minute(apollo))
+  call print_int(time_second(apollo))
+  call print_int(time_day_of_year(apollo))
+
+  # The epoch itself. 1970-01-01 was a Thursday: weekday is ISO, Mon=1..Sun=7.
+  let epoch = int_to_int64(0)
+  call print_text(time_format_iso(epoch))
+  call print_int(time_weekday(epoch))
+
+  # --- round trip: format then parse gives the same instant back ---
+  if time_parse_iso(time_format_iso(apollo)) = apollo
+    call print_text("iso round trip ok")
+  end
+
+  # --- moving in time ---
+  let day_later = time_add_seconds(apollo, int_to_int64(86400))
+  call print_text(time_format_iso(day_later))
+  call print_int64(time_diff_seconds(day_later, apollo))
+
+  # --- the calendar ---
+  if time_is_leap_year(2024) and time_is_leap_year(2000)
+    call print_text("2024 and 2000 are leap years")
+  end
+  if time_is_leap_year(1900)
+    call print_text("wrong: 1900 is not a leap year")
+  else
+    call print_text("1900 is not a leap year")
+  end
+  call print_int(time_days_in_month(2024, 2))
+  call print_int(time_days_in_month(2023, 2))
+
+  # --- failure reporting -------------------------------------------------
+  # A bad string returns -1 AND sets the error slot. That matters because -1
+  # is itself a real timestamp (1969-12-31T23:59:59Z), so the sentinel alone
+  # cannot be trusted: the code is what distinguishes them.
+  let bad = time_parse_iso("21 July 1969")
+  call print_int64(bad)
+  if last_error_code() <> 0
+    call print_text("rejected: {last_error_text()}")
+  end
+
+  # 30 February does not exist.
+  call print_int64(time_from_parts(2023, 2, 30, 0, 0, 0))
+  call print_int(last_error_code())
+
+  # Success clears the slot again, so the next check is not fooled by the old
+  # failure — and -1 here is a genuine timestamp, not an error.
+  let last_sec = time_parse_iso("1969-12-31T23:59:59Z")
+  call print_int64(last_sec)
+  call print_int(last_error_code())
+
+  # --- clocks ------------------------------------------------------------
+  # The wall clock agrees with core's now(): the same instant, finer grained.
+  let secs = time_now_ms() / int_to_int64(1000)
+  let drift = time_diff_seconds(secs, now())
+  if int_to_int64(-1) <= drift <= int_to_int64(0)
+    call print_text("now_ms agrees with now()")
+  end
+
+  # The monotonic clock has an arbitrary origin: only differences mean
+  # anything. It never runs backwards.
+  let t0 = time_monotonic_ms()
+  repeat 200_000 times
+  end
+  if time_diff_seconds(time_monotonic_ms(), t0) >= int_to_int64(0)
+    call print_text("monotonic clock does not run backwards")
+  end
+end

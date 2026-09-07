@@ -1,6 +1,6 @@
-//! The lines the designer reads: `openepl inspect` and `openepl commands`.
+//! The lines the designer reads: `kiln inspect` and `kiln commands`.
 //!
-//! Studio never parses `.oir` itself, so these two listings are its entire
+//! Studio never parses `.kiln` itself, so these two listings are its entire
 //! knowledge of a file and of a library. A line kind that changes shape, or a
 //! value that spills onto a second line, is not a formatting bug there — it is
 //! a save that writes something else back.
@@ -16,22 +16,22 @@ fn repo() -> PathBuf {
 }
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_inspect_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_inspect_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch");
     dir
 }
 
-fn openepl(cwd: &Path, args: &[&str]) -> String {
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+fn kiln(cwd: &Path, args: &[&str]) -> String {
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(args)
         .current_dir(cwd)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(
         out.status.success(),
-        "openepl {args:?} failed:\n{}",
+        "kiln {args:?} failed:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -71,8 +71,8 @@ end
 #[test]
 fn module_components_are_a_distinct_line_kind_with_a_span() {
     let dir = scratch("modcomponent");
-    std::fs::write(dir.join("rt.oir"), SOURCE).unwrap();
-    let out = openepl(&dir, &["inspect", "rt.oir"]);
+    std::fs::write(dir.join("rt.kiln"), SOURCE).unwrap();
+    let out = kiln(&dir, &["inspect", "rt.kiln"]);
 
     // `record point` is the same two tokens as a component header, and the
     // sub above it holds a nested `end`; neither may shift the span.
@@ -91,8 +91,8 @@ fn module_components_are_a_distinct_line_kind_with_a_span() {
 #[test]
 fn a_property_value_stays_on_one_line() {
     let dir = scratch("escape");
-    std::fs::write(dir.join("rt.oir"), SOURCE).unwrap();
-    let out = openepl(&dir, &["inspect", "rt.oir"]);
+    std::fs::write(dir.join("rt.kiln"), SOURCE).unwrap();
+    let out = kiln(&dir, &["inspect", "rt.kiln"]);
 
     assert!(
         has_line(&out, "prop: notes text first\\nsecond \\\\ back"),
@@ -123,11 +123,11 @@ fn a_property_value_stays_on_one_line() {
 #[test]
 fn commands_reports_kind_and_editor() {
     let dir = scratch("commands");
-    let core = openepl(&dir, &["commands"]);
+    let core = kiln(&dir, &["commands"]);
     assert!(has_line(&core, "component: timer"), "{core}");
     assert!(has_line(&core, "kind: timer nonvisual"), "{core}");
 
-    let ui = openepl(&dir, &["commands", "--use", "ui"]);
+    let ui = kiln(&dir, &["commands", "--use", "ui"]);
     assert!(has_line(&ui, "kind: button visual"), "{ui}");
     assert!(has_line(&ui, "editor: memo text multiline"), "{ui}");
     // The lines a reader already parses are untouched: an `editor:` line is

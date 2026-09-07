@@ -1,4 +1,4 @@
-//! The `win` kit's USER32 half: `kits/win/user32.oed`.
+//! The `win` kit's USER32 half: `kits/win/user32.kdecl`.
 //!
 //! Three things have to be true of a transcribed system header, and each one
 //! gets its own test.
@@ -6,10 +6,10 @@
 //!   1. The structs have the layout Windows has. A c-record that is one field
 //!      or one padding byte out of step corrupts the stack of the first API
 //!      that fills it in, and nothing about the build says so. So the layout
-//!      is checked from BOTH sides against one table: the OpenEPL side prints
+//!      is checked from BOTH sides against one table: the Kiln side prints
 //!      `size of` and the `address of` deltas under wine, and the mingw
 //!      Windows SDK headers are asked the same questions with `_Static_assert`
-//!      on `sizeof`/`offsetof`. Either side alone would only prove the .oed
+//!      on `sizeof`/`offsetof`. Either side alone would only prove the .kdecl
 //!      self-consistent.
 //!   2. The functions are really there and really callable. The ones whose
 //!      effect is visible with no window, no display driver and no second
@@ -52,7 +52,7 @@ fn mingw_present() -> bool {
 }
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_win_user32_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_win_user32_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -61,16 +61,16 @@ fn scratch(tag: &str) -> PathBuf {
 /// Build `source` for Windows with the working directory pinned to the repo,
 /// so `kits/win` resolves as the project kit `use win` asks for.
 fn build_windows(dir: &Path, source: &str, out: &str) -> Result<PathBuf, String> {
-    let srcpath = dir.join("prog.oir");
+    let srcpath = dir.join("prog.kiln");
     std::fs::write(&srcpath, source).expect("write program source");
     let outpath = dir.join(out);
-    let output = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", srcpath.to_str().unwrap(), "--os", "windows", "-o"])
         .arg(&outpath)
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).into_owned());
     }
@@ -114,7 +114,7 @@ fn wine_lines(image: &Path, cwd: &Path) -> Option<Vec<String>> {
     )
 }
 
-/// One table, two readers. Each row is a label, the number the `.oed` layout
+/// One table, two readers. Each row is a label, the number the `.kdecl` layout
 /// implies, and the `sizeof`/`offsetof` expression the Windows SDK is asked
 /// for the same number. `layout_program` prints the numbers in this order and
 /// `sdk_agrees_with_the_table` static-asserts the C side of each row.
@@ -143,7 +143,7 @@ const LAYOUT: &[(&str, i64, &str)] = &[
     ("sizeof INPUT", 40, "sizeof(INPUT)"),
     ("sizeof INPUTMOUSE", 40, "sizeof(INPUT)"),
     ("offsetof INPUT.ki", 8, "offsetof(INPUT, ki)"),
-    // PAINTSTRUCT and RECT are declared in the kit's gdi32.oed; the calls
+    // PAINTSTRUCT and RECT are declared in the kit's gdi32.kdecl; the calls
     // here take them, so their layout is this file's business too.
     ("sizeof PAINTSTRUCT", 72, "sizeof(PAINTSTRUCT)"),
     ("offsetof PAINTSTRUCT.paint", 12, "offsetof(PAINTSTRUCT, rcPaint)"),
@@ -182,7 +182,7 @@ const CONSTANTS: &[&str] = &[
     "MAPVK_VK_TO_VSC == 0 && LR_LOADFROMFILE == 16 && IMAGE_ICON == 1",
 ];
 
-/// The OpenEPL half of the layout check: `size of` for a whole struct, and
+/// The Kiln half of the layout check: `size of` for a whole struct, and
 /// the difference of two `address of` for a member's offset.
 fn layout_program() -> String {
     let mut body = String::from("module layout\nuse win\n\nsub main\n");
@@ -217,7 +217,7 @@ fn layout_program() -> String {
             "offsetof PAINTSTRUCT.paint" => offset("ps", "ps.paint"),
             "offsetof PAINTSTRUCT.reserved" => offset("ps", "ps.reserved"),
             "sizeof RECT" => "size of RECT".into(),
-            other => panic!("no OpenEPL spelling for {other}"),
+            other => panic!("no Kiln spelling for {other}"),
         };
         body.push_str(&format!("  call print_int64({line})\n"));
     }
@@ -257,12 +257,12 @@ fn sdk_agrees_with_the_table() {
         .expect("run x86_64-w64-mingw32-gcc");
     assert!(
         out.status.success(),
-        "the Windows SDK headers disagree with kits/win/user32.oed:\n{}",
+        "the Windows SDK headers disagree with kits/win/user32.kdecl:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
 }
 
-/// The OpenEPL side of the same table, measured by a real program on a real
+/// The Kiln side of the same table, measured by a real program on a real
 /// Windows loader. A struct one field out of step shows up here as a number
 /// that does not match the row.
 #[test]
@@ -294,8 +294,8 @@ end
 sub main
   # An atom for a private clipboard format and a private window message: both
   # come out of the same 0xC000..0xFFFF range, so both must be >= 49152.
-  call print_int(RegisterClipboardFormatA(\"OpenEPLUser32Format\"))
-  call print_int(RegisterWindowMessageA(\"OpenEPLUser32Message\"))
+  call print_int(RegisterClipboardFormatA(\"KilnUser32Format\"))
+  call print_int(RegisterWindowMessageA(\"KilnUser32Message\"))
 
   # A screen this program will never draw on still has a width and a height.
   call print_int(GetSystemMetrics(SM_CXSCREEN))
@@ -472,7 +472,7 @@ sub wndproc(hwnd: ptr, msg: int, wparam: int64, lparam: int64): int64 system
     call FillRect(dc, ps.paint, ptr_from_int(int_to_int64(COLOR_WINDOW + 1)))
     var area: RECT
     call GetClientRect(hwnd, area)
-    call DrawTextA(dc, \"OpenEPL\", -1, area, DT_CENTER + DT_VCENTER + DT_SINGLELINE)
+    call DrawTextA(dc, \"Kiln\", -1, area, DT_CENTER + DT_VCENTER + DT_SINGLELINE)
     call EndPaint(hwnd, ps)
     return 0
   end
@@ -499,7 +499,7 @@ sub main
   wc.cursor = LoadCursorA(ptr_null(), ptr_from_int(IDC_ARROW))
   wc.icon = LoadIconA(ptr_null(), ptr_from_int(IDI_APPLICATION))
   wc.background = ptr_from_int(int_to_int64(COLOR_WINDOW + 1))
-  wc.class_name = \"OpenEPLWindow\"
+  wc.class_name = \"KilnWindow\"
   let atom: int = RegisterClassExA(wc)
 
   var menu: ptr = CreateMenu()
@@ -507,7 +507,7 @@ sub main
   call AppendMenuA(popup, MF_STRING, 1001, \"E&xit\")
   call AppendSubMenuA(menu, MF_POPUP, popup, \"&File\")
 
-  var hwnd: ptr = CreateWindowExA(WS_EX_CLIENTEDGE, \"OpenEPLWindow\", \"OpenEPL\", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 640, 480, ptr_null(), menu, ptr_null(), ptr_null())
+  var hwnd: ptr = CreateWindowExA(WS_EX_CLIENTEDGE, \"KilnWindow\", \"Kiln\", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 640, 480, ptr_null(), menu, ptr_null(), ptr_null())
   call ShowWindow(hwnd, SW_SHOWNORMAL)
   call UpdateWindow(hwnd)
   call SetMenu(hwnd, menu)
@@ -515,7 +515,7 @@ sub main
   call print_int64(GetWindowLongPtrA(hwnd, GWLP_USERDATA))
   call MoveWindow(hwnd, 10, 10, 320, 240, true)
   call SetWindowPos(hwnd, ptr_from_int(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE + SWP_NOSIZE)
-  call SetWindowTextA(hwnd, \"OpenEPL\")
+  call SetWindowTextA(hwnd, \"Kiln\")
   call InvalidateRect(hwnd, ptr_null(), true)
 
   var area: RECT
@@ -542,7 +542,7 @@ sub main
     call CloseClipboard()
   end
 
-  let answer: int = MessageBoxA(hwnd, \"Built with a kit.\", \"OpenEPL\", MB_YESNO + MB_ICONINFORMATION)
+  let answer: int = MessageBoxA(hwnd, \"Built with a kit.\", \"Kiln\", MB_YESNO + MB_ICONINFORMATION)
   if answer = IDYES
     call print_text(\"yes\")
   end
@@ -557,7 +557,7 @@ sub main
   call UnhookWindowsHookEx(hook)
   call DestroyMenu(menu)
   call DestroyWindow(hwnd)
-  call UnregisterClassA(\"OpenEPLWindow\", ptr_null())
+  call UnregisterClassA(\"KilnWindow\", ptr_null())
   call print_int(atom)
 end
 ";
@@ -592,18 +592,18 @@ fn a_whole_windowed_program_cross_builds() {
     assert_pe32_plus(&bin);
 }
 
-/// The kit's declarations reach `openepl commands`, which is what the
+/// The kit's declarations reach `kiln commands`, which is what the
 /// language server's completion and the generated reference read.
 #[test]
 fn the_declarations_are_listed() {
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["commands", "--use", "win"])
         .current_dir(repo())
         .output()
-        .expect("run openepl commands");
+        .expect("run kiln commands");
     assert!(
         out.status.success(),
-        "openepl commands --use win failed:\n{}",
+        "kiln commands --use win failed:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
     let listing = String::from_utf8_lossy(&out.stdout);
@@ -646,13 +646,13 @@ fn the_declarations_are_listed() {
     ] {
         assert!(
             listing.contains(&format!("dll: {name}(")) || listing.contains(&format!("dll: {name}()")),
-            "`{name}` is not in `openepl commands --use win`"
+            "`{name}` is not in `kiln commands --use win`"
         );
     }
     for record in ["MSG", "WNDCLASSEXA", "KBDLLHOOKSTRUCT", "INPUT"] {
         assert!(
             listing.contains(&format!("crecord: {record} ")),
-            "`{record}` is not in `openepl commands --use win`"
+            "`{record}` is not in `kiln commands --use win`"
         );
     }
     for name in [
@@ -663,7 +663,7 @@ fn the_declarations_are_listed() {
     ] {
         assert!(
             listing.contains(&format!("const: {name} ")),
-            "`{name}` is not in `openepl commands --use win`"
+            "`{name}` is not in `kiln commands --use win`"
         );
     }
 }

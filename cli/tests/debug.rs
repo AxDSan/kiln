@@ -1,9 +1,9 @@
-//! `openepl debug` — the symbol layer, checked against an external oracle.
+//! `kiln debug` — the symbol layer, checked against an external oracle.
 //!
 //! The engine's own line table is compared with `objdump`'s reading of the
 //! same binary. That is deliberately a tool nothing here depends on: an engine
 //! checked only against itself is checked against its own mistakes, and this
-//! one is the foundation every later phase stands on. OpenEPL's debugger does
+//! one is the foundation every later phase stands on. Kiln's debugger does
 //! not use objdump, gdb or lldb — it reads DWARF itself. They are used here as
 //! a second opinion, which is a different thing.
 
@@ -19,30 +19,30 @@ fn repo() -> PathBuf {
 
 fn build(name: &str, tag: &str, release: bool) -> PathBuf {
     let repo = repo();
-    let example = repo.join("examples").join(format!("{name}.oir"));
-    let dir = std::env::temp_dir().join("openepl_debug_tests");
+    let example = repo.join("examples").join(format!("{name}.kiln"));
+    let dir = std::env::temp_dir().join("kiln_debug_tests");
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join(format!("{name}_{tag}"));
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_openepl"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_kiln"));
     cmd.args(["build", example.to_str().unwrap()]);
     if release {
         cmd.arg("--release");
     }
     let status = cmd
         .args(["-o", out.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo.join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(status.success(), "build failed for {name}");
     out
 }
 
 fn debug_cmd(args: &[&str]) -> (String, String, bool) {
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .arg("debug")
         .args(args)
         .output()
-        .expect("run openepl debug");
+        .expect("run kiln debug");
     (
         String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
@@ -53,7 +53,7 @@ fn debug_cmd(args: &[&str]) -> (String, String, bool) {
 /// `(line, address)` for every row, as the engine reports them.
 fn ours(bin: &Path) -> Vec<(u32, u64)> {
     let (stdout, stderr, ok) = debug_cmd(&["--dump-lines", bin.to_str().unwrap()]);
-    assert!(ok, "openepl debug failed: {stderr}");
+    assert!(ok, "kiln debug failed: {stderr}");
     stdout
         .lines()
         .filter(|l| l.starts_with("line: "))
@@ -93,7 +93,7 @@ fn theirs(bin: &Path, source: &str) -> Vec<(u32, u64)> {
 fn the_line_table_agrees_with_objdump() {
     let bin = build("loops", "lines", false);
     let mut a = ours(&bin);
-    let mut b = theirs(&bin, "loops.oir");
+    let mut b = theirs(&bin, "loops.kiln");
     assert!(b.len() > 5, "objdump found no table to compare against");
     a.sort();
     b.sort();
@@ -102,16 +102,16 @@ fn the_line_table_agrees_with_objdump() {
 
 /// A binary carries other people's debug information — glibc's `atexit.c` is
 /// in every one built here. Those rows must not be attributed to the user's
-/// source, or a debugger reports `loops.oir:45` for an address in the C
+/// source, or a debugger reports `loops.kiln:45` for an address in the C
 /// library and steps a user into it.
 #[test]
 fn another_compile_units_lines_are_not_the_users() {
     let bin = build("loops", "units", false);
     let (stdout, _, ok) = debug_cmd(&["--dump-lines", bin.to_str().unwrap()]);
     assert!(ok);
-    assert!(stdout.contains("source: loops.oir"), "{stdout}");
+    assert!(stdout.contains("source: loops.kiln"), "{stdout}");
     let ours = ours(&bin);
-    let theirs = theirs(&bin, "loops.oir");
+    let theirs = theirs(&bin, "loops.kiln");
     assert_eq!(
         ours.len(),
         theirs.len(),
@@ -122,7 +122,7 @@ fn another_compile_units_lines_are_not_the_users() {
 #[test]
 fn a_breakpoint_resolves_to_the_line_it_was_asked_for() {
     let bin = build("loops", "resolve", false);
-    let (stdout, stderr, ok) = debug_cmd(&["--resolve", bin.to_str().unwrap(), "loops.oir:24"]);
+    let (stdout, stderr, ok) = debug_cmd(&["--resolve", bin.to_str().unwrap(), "loops.kiln:24"]);
     assert!(ok, "{stderr}");
     assert!(stdout.contains("line: 24"), "{stdout}");
     assert!(stdout.contains("sub: main"), "{stdout}");
@@ -176,20 +176,20 @@ fn a_release_build_is_refused_with_a_reason() {
 
 /// A whole debugging session, driven the way an editor drives one.
 ///
-/// This is the assertion that says OpenEPL has a debugger: a program is built,
+/// This is the assertion that says Kiln has a debugger: a program is built,
 /// a breakpoint is planted on a line inside a loop, the program runs and stops
 /// there, stepping walks the body and around the loop's back edge, and
 /// continuing comes back round to the breakpoint on the next turn. Every part
-/// of it — the traps, the stepping, the stack — is OpenEPL's own; nothing here
+/// of it — the traps, the stepping, the stack — is Kiln's own; nothing here
 /// runs gdb or lldb.
 #[test]
 fn a_debug_session_stops_steps_and_comes_back_round() {
     use std::io::{BufReader, Read, Write};
     use std::process::Stdio;
 
-    let dir = std::env::temp_dir().join("openepl_dap_session_test");
+    let dir = std::env::temp_dir().join("kiln_dap_session_test");
     std::fs::create_dir_all(&dir).unwrap();
-    let source = dir.join("t.oir");
+    let source = dir.join("t.kiln");
     std::fs::write(
         &source,
         "module stepdemo\n\
@@ -204,10 +204,10 @@ fn a_debug_session_stops_steps_and_comes_back_round() {
     )
     .unwrap();
 
-    let mut adapter = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let mut adapter = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .arg("dap")
         .current_dir(&dir)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -231,11 +231,11 @@ fn a_debug_session_stops_steps_and_comes_back_round() {
         input.flush().unwrap();
     };
 
-    send("initialize", r#"{"adapterID":"openepl"}"#);
-    send("launch", r#"{"program":"t.oir"}"#);
+    send("initialize", r#"{"adapterID":"kiln"}"#);
+    send("launch", r#"{"program":"t.kiln"}"#);
     send(
         "setBreakpoints",
-        r#"{"source":{"path":"t.oir"},"breakpoints":[{"line":6}]}"#,
+        r#"{"source":{"path":"t.kiln"},"breakpoints":[{"line":6}]}"#,
     );
     send("configurationDone", "");
     // The requests are all sent up front on purpose: an adapter that only
@@ -313,10 +313,10 @@ fn a_stopped_program_shows_the_values_of_its_variables() {
     use std::io::{BufReader, Read, Write};
     use std::process::Stdio;
 
-    let dir = std::env::temp_dir().join("openepl_dap_locals_test");
+    let dir = std::env::temp_dir().join("kiln_dap_locals_test");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("v.oir"),
+        dir.join("v.kiln"),
         "module locals\n\
          \n\
          sub main\n\
@@ -329,10 +329,10 @@ fn a_stopped_program_shows_the_values_of_its_variables() {
     )
     .unwrap();
 
-    let mut adapter = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let mut adapter = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .arg("dap")
         .current_dir(&dir)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -356,11 +356,11 @@ fn a_stopped_program_shows_the_values_of_its_variables() {
         input.flush().unwrap();
     };
 
-    send("initialize", r#"{"adapterID":"openepl"}"#);
-    send("launch", r#"{"program":"v.oir"}"#);
+    send("initialize", r#"{"adapterID":"kiln"}"#);
+    send("launch", r#"{"program":"v.kiln"}"#);
     send(
         "setBreakpoints",
-        r#"{"source":{"path":"v.oir"},"breakpoints":[{"line":7}]}"#,
+        r#"{"source":{"path":"v.kiln"},"breakpoints":[{"line":7}]}"#,
     );
     send("configurationDone", "");
     send("scopes", r#"{"frameId":0}"#);
@@ -404,10 +404,10 @@ fn a_record_shows_its_fields_and_text_shows_its_characters() {
     use std::io::{BufReader, Read, Write};
     use std::process::Stdio;
 
-    let dir = std::env::temp_dir().join("openepl_dap_record_test");
+    let dir = std::env::temp_dir().join("kiln_dap_record_test");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("r.oir"),
+        dir.join("r.kiln"),
         concat!(
             "module recs\n\n",
             "record point\n  x: int\n  y: int\nend\n\n",
@@ -420,10 +420,10 @@ fn a_record_shows_its_fields_and_text_shows_its_characters() {
     )
     .unwrap();
 
-    let mut adapter = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let mut adapter = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .arg("dap")
         .current_dir(&dir)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -447,11 +447,11 @@ fn a_record_shows_its_fields_and_text_shows_its_characters() {
         input.flush().unwrap();
     };
 
-    send("initialize", r#"{"adapterID":"openepl"}"#);
-    send("launch", r#"{"program":"r.oir"}"#);
+    send("initialize", r#"{"adapterID":"kiln"}"#);
+    send("launch", r#"{"program":"r.kiln"}"#);
     send(
         "setBreakpoints",
-        r#"{"source":{"path":"r.oir"},"breakpoints":[{"line":11}]}"#,
+        r#"{"source":{"path":"r.kiln"},"breakpoints":[{"line":11}]}"#,
     );
     send("configurationDone", "");
     send("scopes", r#"{"frameId":0}"#);
@@ -499,10 +499,10 @@ fn a_running_program_can_be_paused_and_says_where_it_stopped() {
     use std::io::{BufReader, Read, Write};
     use std::process::Stdio;
 
-    let dir = std::env::temp_dir().join("openepl_dap_pause_test");
+    let dir = std::env::temp_dir().join("kiln_dap_pause_test");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("idle.oir"),
+        dir.join("idle.kiln"),
         "module idle\n\
          \n\
          use system\n\
@@ -515,10 +515,10 @@ fn a_running_program_can_be_paused_and_says_where_it_stopped() {
     )
     .unwrap();
 
-    let mut adapter = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let mut adapter = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .arg("dap")
         .current_dir(&dir)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -542,8 +542,8 @@ fn a_running_program_can_be_paused_and_says_where_it_stopped() {
         input.flush().unwrap();
     };
 
-    send("initialize", r#"{"adapterID":"openepl"}"#);
-    send("launch", r#"{"program":"idle.oir"}"#);
+    send("initialize", r#"{"adapterID":"kiln"}"#);
+    send("launch", r#"{"program":"idle.kiln"}"#);
     send("configurationDone", "");
     // Long enough for the build to finish and the program to be running. The
     // pause has to arrive *while* it runs — sent before the program exists it

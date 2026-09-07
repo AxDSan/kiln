@@ -1,21 +1,21 @@
 [book]
-title = "OpenEPL"
+title = "Kiln"
 description = "Draw an app, wire an event, ship a native binary."
-authors = ["The OpenEPL Contributors"]
+authors = ["The Kiln Contributors"]
 language = "en"
 src = "src"
 
 [output.html]
 default-theme = "light"
 preferred-dark-theme = "navy"
-git-repository-url = "https://github.com/AxDSan/openepl"
-edit-url-template = "https://github.com/AxDSan/openepl/edit/main/docs-site/{path}"
-# A project page lives under /openepl/, so every generated link and asset URL
+git-repository-url = "https://github.com/AxDSan/kiln"
+edit-url-template = "https://github.com/AxDSan/kiln/edit/main/docs-site/{path}"
+# A project page lives under /kiln/, so every generated link and asset URL
 # has to be built with that prefix. Without it the site deploys "successfully"
 # and then 404s on its own stylesheet.
 # The landing page owns the site root; the book is published beneath it.
-site-url = "/openepl/docs/"
-additional-css = ["theme/openepl.css"]
+site-url = "/kiln/docs/"
+additional-css = ["theme/kiln.css"]
 
 [output.html.fold]
 enable = true

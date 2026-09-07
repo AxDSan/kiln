@@ -1,6 +1,6 @@
 # Limitations
 
-OpenEPL is young. This page is the honest list, kept current against the
+Kiln is young. This page is the honest list, kept current against the
 toolchain — it is more useful than discovering these one at a time, and a
 limitation that has since been solved is removed rather than left to teach
 you to ignore the page.
@@ -38,7 +38,7 @@ and must be laid out by hand.
 
 ## Programs you build
 
-**A release build is hardened, not hidden.** `openepl build --release`
+**A release build is hardened, not hidden.** `kiln build --release`
 compiles at `-O2` with `_FORTIFY_SOURCE`, a stack protector, full RELRO with
 symbols bound at load time, position independence, and no symbol table — see
 [Build targets](./build-targets.md). That is a smaller, faster, harder-to-attack

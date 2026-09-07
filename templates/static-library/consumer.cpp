@@ -1,12 +1,12 @@
 // A C++ host for the library. Build the archive first — the header lands
 // beside it — then compile this against that header and link the archive:
 //
-//   openepl build main.oir -o lib__MODULE__.a
+//   kiln build main.kiln -o lib__MODULE__.a
 //   clang++ consumer.cpp -I. lib__MODULE__.a -lm -o consumer && ./consumer
 //
 // For Windows, cross-built from Linux (mingw keeps the Unix archive name):
 //
-//   openepl build main.oir --os windows -o lib__MODULE__.a
+//   kiln build main.kiln --os windows -o lib__MODULE__.a
 //   x86_64-w64-mingw32-g++ consumer.cpp lib__MODULE__.a -lws2_32 -o consumer.exe
 //
 // The archive was built by mingw, so it links with mingw; MSVC's link wants a

@@ -22,8 +22,8 @@
 //     user a gutter full of hollow dots for breakpoints that would have bound
 //     perfectly well. So the handshake is a state machine advanced from
 //     `handle`, not a burst of messages in `start`.
-#ifndef OPENEPL_DESIGNER_DBGCLIENT_H
-#define OPENEPL_DESIGNER_DBGCLIENT_H
+#ifndef KILN_DESIGNER_DBGCLIENT_H
+#define KILN_DESIGNER_DBGCLIENT_H
 
 #include <fcntl.h>
 #include <map>
@@ -39,12 +39,12 @@
 #include "json.h"
 #include "portable.h"
 
-namespace openepl::dbg {
+namespace kiln::dbg {
 
 /// The subcommand the adapter is started with.
 ///
 /// It is spelled once, here, because the toolchain has not settled whether the
-/// Debug Adapter Protocol is served by `openepl debug` or by an `openepl dap`
+/// Debug Adapter Protocol is served by `kiln debug` or by an `kiln dap`
 /// of its own. Changing this string is the whole of the change.
 inline constexpr const char* ADAPTER_SUBCOMMAND = "dap";
 
@@ -178,7 +178,7 @@ public:
     /// has gone wrong.
     const std::string& error() const { return error_; }
 
-    /// The `.oir` the session is debugging, absolute.
+    /// The `.kiln` the session is debugging, absolute.
     const std::string& program() const { return oir_; }
 
     /// Start the adapter on `oir_path` and begin the handshake.
@@ -190,17 +190,17 @@ public:
     ///
     /// Returns as soon as the process is up. Nothing about the session is
     /// known yet; `poll` carries it the rest of the way.
-    bool start(const std::string& openepl_bin, const std::string& oir_path) {
+    bool start(const std::string& kiln_bin, const std::string& oir_path) {
         stop();
         reset();
-        const std::string real = openepl::sys::real_path(oir_path);
+        const std::string real = kiln::sys::real_path(oir_path);
         oir_ = real.empty() ? oir_path : real;
 
 #ifdef _WIN32
         // Both pipes, and the adapter's stderr to the null device: it logs
         // there, and a GUI program has no terminal for it to reach.
-        if (!openepl::sys::spawn(child_,
-                                 openepl::sys::quote_arg(openepl_bin) + " " + ADAPTER_SUBCOMMAND,
+        if (!kiln::sys::spawn(child_,
+                                 kiln::sys::quote_arg(kiln_bin) + " " + ADAPTER_SUBCOMMAND,
                                  false, true))
             return false;
 #else
@@ -222,7 +222,7 @@ public:
             // The adapter's own logging goes to stderr; let it reach the
             // terminal rather than mixing into the protocol stream, which one
             // stray byte desynchronises for good.
-            ::execlp(openepl_bin.c_str(), openepl_bin.c_str(), ADAPTER_SUBCOMMAND, (char*)nullptr);
+            ::execlp(kiln_bin.c_str(), kiln_bin.c_str(), ADAPTER_SUBCOMMAND, (char*)nullptr);
             _exit(127);
         }
         ::close(to_child[0]);
@@ -239,18 +239,18 @@ public:
 #endif
 
         state_ = State::Launching;
-        // Lines and columns pass through unconverted: gutter row N is `.oir`
+        // Lines and columns pass through unconverted: gutter row N is `.kiln`
         // line N is the line the debug information names, and a mapping layer
         // between them would be one more thing to drift.
         initialize_seq_ = request("initialize",
-                                  "{\"clientID\":\"openepl-studio\",\"adapterID\":\"openepl\","
+                                  "{\"clientID\":\"kiln-studio\",\"adapterID\":\"kiln\","
                                   "\"linesStartAt1\":true,\"columnsStartAt1\":true,"
                                   "\"pathFormat\":\"path\",\"supportsVariableType\":false,"
                                   "\"supportsRunInTerminalRequest\":false}");
         return true;
     }
 
-    /// Replace the breakpoint set with `lines`, which are 1-based `.oir` lines.
+    /// Replace the breakpoint set with `lines`, which are 1-based `.kiln` lines.
     ///
     /// DAP replaces a file's whole set on every request, so this must always
     /// be called with every breakpoint Studio holds, never with the one that
@@ -298,14 +298,14 @@ public:
         }
         fire("disconnect", "{\"restart\":false,\"terminateDebuggee\":true}");
 #ifdef _WIN32
-        openepl::sys::close_stdin(child_);
+        kiln::sys::close_stdin(child_);
         int code = 0;
-        for (int i = 0; i < 100 && !openepl::sys::try_wait(child_, code); i++) Sleep(10);
-        if (!openepl::sys::try_wait(child_, code)) {
-            openepl::sys::terminate(child_);
+        for (int i = 0; i < 100 && !kiln::sys::try_wait(child_, code); i++) Sleep(10);
+        if (!kiln::sys::try_wait(child_, code)) {
+            kiln::sys::terminate(child_);
             WaitForSingleObject(child_.process, INFINITE);
         }
-        openepl::sys::release(child_);
+        kiln::sys::release(child_);
 #else
         if (in_ >= 0) { ::close(in_); in_ = -1; }
         // Closing stdin is what lets the adapter's read loop finish; without
@@ -367,9 +367,9 @@ public:
         char buf[4096];
 #ifdef _WIN32
         int n;
-        while ((n = openepl::sys::read_nonblocking(child_.out, buf, sizeof buf)) > 0)
+        while ((n = kiln::sys::read_nonblocking(child_.out, buf, sizeof buf)) > 0)
             inbuf_.append(buf, (size_t)n);
-        if (n == 0) openepl::sys::close_output(child_);   // the adapter closed its end
+        if (n == 0) kiln::sys::close_output(child_);   // the adapter closed its end
 #else
         ssize_t n;
         while ((n = ::read(out_, buf, sizeof buf)) > 0) inbuf_.append(buf, (size_t)n);
@@ -470,8 +470,8 @@ private:
             "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
 #ifdef _WIN32
         if (!child_.in) return;
-        if (!openepl::sys::write_all(child_.in, frame.data(), frame.size()))
-            openepl::sys::close_stdin(child_);   // the adapter died; drop the pipe
+        if (!kiln::sys::write_all(child_.in, frame.data(), frame.size()))
+            kiln::sys::close_stdin(child_);   // the adapter died; drop the pipe
         return;
 #else
         if (in_ < 0) return;
@@ -769,7 +769,7 @@ private:
     }
 
 #ifdef _WIN32
-    openepl::sys::Child child_;
+    kiln::sys::Child child_;
 #else
     pid_t pid_ = 0;
     int in_ = -1;
@@ -814,6 +814,6 @@ private:
     std::set<int> ignored_;
 };
 
-} // namespace openepl::dbg
+} // namespace kiln::dbg
 
 #endif

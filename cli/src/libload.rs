@@ -3,7 +3,7 @@
 //! For the implicit `core` library and each `use <name>`, the loader:
 //!   1. builds an introspection shared object from the library's sources
 //!      (impls + the `*_libinfo.c` metadata TU, minus the program entry),
-//!   2. `dlopen`s it and calls `openepl_get_lib_info` to read the `LibInfo`
+//!   2. `dlopen`s it and calls `kiln_get_lib_info` to read the `LibInfo`
 //!      metadata, populating a `Registry` (the authoritative signatures — no
 //!      hard-coded Rust table), and
 //!   3. records the library's *implementation* sources (everything except the
@@ -23,9 +23,9 @@ use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use openepl_ir::registry::{ComponentDesc, ComponentKind, DllSig, PropertyDesc};
-use openepl_ir::validate::validate_decls;
-use openepl_ir::{parse, Item, Module, Registry, Signature, Target, Ty};
+use kiln_ir::registry::{CommandDoc, ComponentDesc, ComponentKind, DllSig, PropertyDesc};
+use kiln_ir::validate::validate_decls;
+use kiln_ir::{parse, Item, Module, Registry, Signature, Target, Ty};
 
 #[cfg(unix)]
 extern "C" {
@@ -78,6 +78,11 @@ struct CommandDescC {
     ret_tag: i32,
     argc: i32,
     arg_tags: *const i32,
+    /// Both NULL for a command that has not been documented yet — which is
+    /// most of them, and is why every consumer treats an absent doc as
+    /// "signature only" rather than an error.
+    doc: *const c_char,
+    example: *const c_char,
 }
 
 #[repr(C)]
@@ -123,7 +128,7 @@ struct LibInfoC {
     components: *const ComponentDescC,
 }
 
-const OPENEPL_ABI_VERSION: i32 = 3;
+const KILN_ABI_VERSION: i32 = 4;
 
 /// The result of resolving a module's libraries.
 pub struct LibPlan {
@@ -138,7 +143,7 @@ pub struct LibPlan {
     /// Kits that restrict themselves to a set of operating systems, as
     /// `(kit name, platforms)` — from a declaration kit's `lib.json`
     /// `"platforms"`. Empty for a portable kit. The *build* consults this to
-    /// refuse a windows-only kit on a Linux target; listing (`openepl
+    /// refuse a windows-only kit on a Linux target; listing (`kiln
     /// commands`, the language server) does not, so a Win32 kit still documents
     /// and completes on a machine that cannot build for Windows.
     pub gated: Vec<(String, Vec<String>)>,
@@ -247,7 +252,7 @@ fn load_with(
         if so_srcs.is_empty() && decls.is_none() {
             return Err(format!(
                 "library `{name}`: no `{name}_libinfo.c` metadata source and no \
-                 `*.oed` declaration bundle found in {}",
+                 `*.kdecl` declaration bundle found in {}",
                 dir.display()
             ));
         }
@@ -268,7 +273,7 @@ fn load_with(
                     .collect::<Vec<_>>()
                     .join("\n");
                 return Err(format!(
-                    "kit `{name}`: its declaration bundle (`*.oed`) is invalid:\n{joined}"
+                    "kit `{name}`: its declaration bundle (`*.kdecl`) is invalid:\n{joined}"
                 ));
             }
             for rec in decl_mod.records() {
@@ -336,12 +341,12 @@ fn load_with(
     })
 }
 
-/// Read a kit's declaration bundle — every `*.oed` in the kit directory,
+/// Read a kit's declaration bundle — every `*.kdecl` in the kit directory,
 /// merged — if it has one.
 ///
-/// This is the ONE reader of an `.oed`: the loader merges what it returns into
-/// the registry, and `openepl kits` lists it — two readers of one file is the
-/// drift the CLI keeps a single parser for `.oir` to avoid. A file is a module
+/// This is the ONE reader of an `.kdecl`: the loader merges what it returns into
+/// the registry, and `kiln kits` lists it — two readers of one file is the
+/// drift the CLI keeps a single parser for `.kiln` to avoid. A file is a module
 /// body without the header: a run of `dll`, `record` and `const` declarations
 /// and nothing else. It is parsed by prepending a synthetic `module <name>`
 /// line and reusing the whole language parser, so a declaration in a kit reads
@@ -349,8 +354,8 @@ fn load_with(
 /// variable, a `target` or a `use` is refused, because a declaration bundle
 /// declares, it does not define or build.
 ///
-/// A kit may spread its declarations over as many `.oed` files as it likes —
-/// `user32.oed`, `kernel32.oed`, `gdi32.oed` — and they are merged into one
+/// A kit may spread its declarations over as many `.kdecl` files as it likes —
+/// `user32.kdecl`, `kernel32.kdecl`, `gdi32.kdecl` — and they are merged into one
 /// bundle. Order across files does not matter: the merged bundle is validated
 /// and registered as a unit, so a record declared in one file and used by a
 /// `dll` in another resolves exactly as it would within one file. Two files
@@ -360,7 +365,7 @@ pub fn read_decls(dir: &Path, name: &str) -> Result<Option<Module>, String> {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let p = entry.path();
-            if p.extension().and_then(|s| s.to_str()) == Some("oed") && p.is_file() {
+            if p.extension().and_then(|s| s.to_str()) == Some("kdecl") && p.is_file() {
                 files.push(p);
             }
         }
@@ -387,7 +392,7 @@ pub fn read_decls(dir: &Path, name: &str) -> Result<Option<Module>, String> {
         let body = std::fs::read_to_string(path)
             .map_err(|e| format!("read {}: {e}", path.display()))?;
         // The header is one prepended line, so a parse error's line number is
-        // one past the `.oed`'s own — subtract it back before reporting.
+        // one past the `.kdecl`'s own — subtract it back before reporting.
         let src = format!("module {name}\n{body}");
         let module = parse(&src).map_err(|e| {
             format!(
@@ -489,7 +494,7 @@ fn build_introspection_so(
     sources: &[PathBuf],
     manifest: &Manifest,
 ) -> Result<PathBuf, String> {
-    let build_dir = std::env::temp_dir().join("openepl-build");
+    let build_dir = std::env::temp_dir().join("kiln-build");
     std::fs::create_dir_all(&build_dir).map_err(|e| e.to_string())?;
     let so_path = build_dir.join(format!("lib{name}_introspect_{}.so", std::process::id()));
 
@@ -500,7 +505,7 @@ fn build_introspection_so(
         .arg("-I")
         .arg(repo_root.join("abi"))
         .arg("-I")
-        .arg(repo_root.join("runtime")); // for openepl_core.h
+        .arg(repo_root.join("runtime")); // for kiln_core.h
     for d in &manifest.include_dirs {
         cmd.arg("-I").arg(d);
     }
@@ -530,12 +535,12 @@ fn introspect_into(so_path: &Path, name: &str, registry: &mut Registry) -> Resul
             let e = CStr::from_ptr(dlerror()).to_string_lossy().into_owned();
             return Err(format!("dlopen `{name}`: {e}"));
         }
-        let sym = CString::new("openepl_get_lib_info").unwrap();
+        let sym = CString::new("kiln_get_lib_info").unwrap();
         let getfn = dlsym(handle, sym.as_ptr());
         if getfn.is_null() {
             dlclose(handle);
             return Err(format!(
-                "library `{name}` does not export openepl_get_lib_info"
+                "library `{name}` does not export kiln_get_lib_info"
             ));
         }
         let getfn: extern "C" fn() -> *const LibInfoC = std::mem::transmute(getfn);
@@ -549,10 +554,10 @@ fn introspect_into(so_path: &Path, name: &str, registry: &mut Registry) -> Resul
         // back out of a library that is no longer mapped, so the one path that
         // exists to report a bad ABI would segfault instead of reporting it.
         let found = info.abi_version;
-        if found != OPENEPL_ABI_VERSION {
+        if found != KILN_ABI_VERSION {
             dlclose(handle);
             return Err(format!(
-                "library `{name}` ABI version {found} != {OPENEPL_ABI_VERSION}"
+                "library `{name}` ABI version {found} != {KILN_ABI_VERSION}"
             ));
         }
 
@@ -612,6 +617,23 @@ unsafe fn register_commands(
                 "command `{cmd_name}` (from `{lib}`) collides with an already-registered command"
             ));
         }
+
+        // Documentation, when the library carries any. Both pointers are NULL
+        // for a row written before the fields existed, which is most of them.
+        let text = |p: *const c_char| -> String {
+            if p.is_null() {
+                String::new()
+            } else {
+                CStr::from_ptr(p).to_string_lossy().into_owned()
+            }
+        };
+        registry.set_doc(
+            cmd_name,
+            CommandDoc {
+                summary: text(desc.doc),
+                example: text(desc.example),
+            },
+        );
     }
 
     // Visual components come through the same LibInfo mechanism.

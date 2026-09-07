@@ -1,4 +1,4 @@
 name: GUI Application
 desc: A window with a label and a button, and a handler wired to its click.
 target: gui
-entry: main.oir
+entry: main.kiln

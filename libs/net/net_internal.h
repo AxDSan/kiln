@@ -6,8 +6,8 @@
  * server would be a second set of Winsock spellings to keep in step, and the
  * first divergence would only show up on Windows.
  */
-#ifndef OPENEPL_NET_INTERNAL_H
-#define OPENEPL_NET_INTERNAL_H
+#ifndef KILN_NET_INTERNAL_H
+#define KILN_NET_INTERNAL_H
 
 #include <stddef.h>
 #include <stdio.h>
@@ -73,7 +73,7 @@ typedef SSIZE_T ssize_t;
 #endif
 #endif
 
-#include "openepl_abi.h"
+#include "kiln_abi.h"
 
 /* Winsock refuses every call until WSAStartup has run; a POSIX build answers 1
  * with nothing to do.  Both halves of the library call it before their first
@@ -83,8 +83,8 @@ int net_start(void);
 /* A connected socket behind a handle.
  *
  * An HTTP request is a NetSock followed by its parsed request, and the request
- * handle carries the SAME kind as a client socket (OE_HK_SOCKET), because
- * handle kinds are assigned in abi/openepl_abi.h and a library may not invent
+ * handle carries the SAME kind as a client socket (KN_HK_SOCKET), because
+ * handle kinds are assigned in abi/kiln_abi.h and a library may not invent
  * one.  Making this the first member is what keeps that safe: a request handle
  * passed to net_tcp_send reaches a real, live socket view of the same
  * connection rather than a struct reinterpreted as one. */
@@ -146,7 +146,7 @@ long net_tls_recv(NetTls *t, char *p, size_t n);         /* 0 = end, -1 err */
 void net_tls_free(NetTls *t);                            /* not the socket  */
 
 /* --- components (net_component.c) ---------------------------------------
- * The library's entry points — oe_net_component_create and its four siblings
+ * The library's entry points — kn_net_component_create and its four siblings
  * — are ONE set for the whole library, and the backend numbers handles per
  * library in creation order whatever the type (backend/src/lib.rs,
  * `build_component`): a tcpserver declared after an httpserver is handle 2.
@@ -160,29 +160,29 @@ typedef struct {
     int32_t     (*set)(void *obj, const char *prop, const char *value);
     const char *(*get)(void *obj, const char *prop);
     int32_t     (*get_int)(void *obj, const char *prop);
-    int32_t     (*on)(void *obj, const char *event, OpenEPL_HandlerFn fn);
+    int32_t     (*on)(void *obj, const char *event, Kiln_HandlerFn fn);
 } NetComponentType;
 
 void       *net_httpd_create(void);
 int32_t     net_httpd_set(void *obj, const char *prop, const char *value);
 const char *net_httpd_get(void *obj, const char *prop);
 int32_t     net_httpd_get_int(void *obj, const char *prop);
-int32_t     net_httpd_on(void *obj, const char *event, OpenEPL_HandlerFn fn);
+int32_t     net_httpd_on(void *obj, const char *event, Kiln_HandlerFn fn);
 
 void       *net_tcpserver_create(void);
 int32_t     net_tcpserver_set(void *obj, const char *prop, const char *value);
 const char *net_tcpserver_get(void *obj, const char *prop);
 int32_t     net_tcpserver_get_int(void *obj, const char *prop);
-int32_t     net_tcpserver_on(void *obj, const char *event, OpenEPL_HandlerFn fn);
+int32_t     net_tcpserver_on(void *obj, const char *event, Kiln_HandlerFn fn);
 
 void       *net_tcpclient_create(void);
 int32_t     net_tcpclient_set(void *obj, const char *prop, const char *value);
 const char *net_tcpclient_get(void *obj, const char *prop);
 int32_t     net_tcpclient_get_int(void *obj, const char *prop);
-int32_t     net_tcpclient_on(void *obj, const char *event, OpenEPL_HandlerFn fn);
+int32_t     net_tcpclient_on(void *obj, const char *event, Kiln_HandlerFn fn);
 
 /* A truth value crosses the property boundary as text, spelled the way the
  * source and every descriptor default spell it. */
 int net_bool_of(const char *value);
 
-#endif /* OPENEPL_NET_INTERNAL_H */
+#endif /* KILN_NET_INTERNAL_H */

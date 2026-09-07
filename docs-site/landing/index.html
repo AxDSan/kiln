@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenEPL — draw an app, wire an event, ship a native binary</title>
+<title>Kiln — draw an app, wire an event, ship a native binary</title>
 <meta name="description" content="An open implementation of Easy Programming Language (EPL, 易语言): a RAD environment where you draw a window, wire a button, and build an ordinary native binary — nothing to install, nothing to unpack.">
-<link rel="icon" href="assets/openepl-icon.png">
-<meta property="og:title" content="OpenEPL">
+<link rel="icon" href="assets/kiln-icon.png">
+<meta property="og:title" content="Kiln">
 <meta property="og:description" content="Draw an app. Wire an event. Ship a native binary.">
 <meta property="og:image" content="assets/screenshot-designer.png">
 <style>
@@ -183,11 +183,11 @@ footer .right { margin-left: auto; display: flex; gap: 20px; }
 
 <nav class="nav">
   <div class="wrap">
-    <span class="brand"><img src="assets/openepl-icon.png" alt=""> OpenEPL</span>
+    <span class="brand"><img src="assets/kiln-icon.png" alt=""> Kiln</span>
     <span class="links">
       <a href="docs/">Documentation</a>
       <a class="secondary" href="docs/quick-start.html">Quick start</a>
-      <a class="secondary" href="https://github.com/AxDSan/openepl">GitHub</a>
+      <a class="secondary" href="https://github.com/AxDSan/kiln">GitHub</a>
       <a class="cta" href="docs/installation.html">Get started</a>
     </span>
   </div>
@@ -195,7 +195,7 @@ footer .right { margin-left: auto; display: flex; gap: 20px; }
 
 <header class="hero">
   <div class="wrap">
-    <img class="wordmark" src="assets/openepl-wordmark.png" alt="OpenEPL">
+    <img class="wordmark" src="assets/kiln-wordmark.png" alt="Kiln">
     <h1>Draw an app. Wire an event.<br>Ship a native binary.</h1>
     <p class="sub">
       An open implementation of <strong>Easy Programming Language</strong> (易语言) —
@@ -205,18 +205,18 @@ footer .right { margin-left: auto; display: flex; gap: 20px; }
     </p>
     <div class="buttons">
       <a class="btn btn-primary" href="docs/quick-start.html">Get started</a>
-      <a class="btn btn-ghost" href="https://github.com/AxDSan/openepl">View on GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/AxDSan/kiln">View on GitHub</a>
     </div>
     <div class="install">
-      <span class="p">$</span> tar xzf openepl-0.11.1-linux-x86_64.tar.gz<br>
-      <span class="p">$</span> cd openepl-0.11.1-linux-x86_64<br>
-      <span class="p">$</span> bin/openepl-studio
+      <span class="p">$</span> tar xzf kiln-0.11.1-linux-x86_64.tar.gz<br>
+      <span class="p">$</span> cd kiln-0.11.1-linux-x86_64<br>
+      <span class="p">$</span> bin/kiln-studio
     </div>
   </div>
 </header>
 
 <div class="wrap shot">
-  <img src="assets/screenshot-designer.png" alt="The OpenEPL Studio visual designer, with a form on the canvas and its properties in the inspector">
+  <img src="assets/screenshot-designer.png" alt="The Kiln Studio visual designer, with a form on the canvas and its properties in the inspector">
   <p class="caption">The designer and the source are the same file — drag a button and the code changes.</p>
 </div>
 
@@ -241,7 +241,7 @@ footer .right { margin-left: auto; display: flex; gap: 20px; }
         <h3>The EPL model, opened up</h3>
         <p>Easy Programming Language showed that drawing an application and
         compiling it to a real executable is the right way to build desktop
-        software. OpenEPL implements that model as open source, in English, on
+        software. Kiln implements that model as open source, in English, on
         an inspectable toolchain — a fresh implementation, not a clone: it does
         not run existing EPL programs.</p>
       </div>
@@ -281,12 +281,12 @@ footer .right { margin-left: auto; display: flex; gap: 20px; }
       </p>
       <p><a href="docs/tour.html">Take the tour →</a> · <a href="docs/language.html">Read the language guide →</a></p>
     </div>
-    <pre><span class="c"># hello.oir</span>
+    <pre><span class="c"># hello.kiln</span>
 <span class="k">module</span> hello
 <span class="k">target</span> console
 
 <span class="k">sub</span> main
-  <span class="k">call</span> print_text(<span class="s">"Hello from OpenEPL."</span>)
+  <span class="k">call</span> print_text(<span class="s">"Hello from Kiln."</span>)
 
   <span class="k">let</span> answer: <span class="k">int</span> = <span class="n">6</span> * <span class="n">7</span>
   <span class="k">call</span> print_text(<span class="s">"six times seven is {answer}"</span>)
@@ -328,7 +328,7 @@ footer .right { margin-left: auto; display: flex; gap: 20px; }
       <code>use</code> line to add, the name you probably meant, the handler
       header to paste.
     </p>
-    <img src="assets/screenshot-editor.png" alt="The OpenEPL code editor with syntax highlighting and a problems pane"
+    <img src="assets/screenshot-editor.png" alt="The Kiln code editor with syntax highlighting and a problems pane"
          style="width:100%;border-radius:12px;border:1px solid var(--line);box-shadow:0 10px 30px rgba(16,22,48,0.14)">
     <p style="margin-top:20px"><a href="docs/editors.html">Set up your editor →</a></p>
   </div>
@@ -337,7 +337,7 @@ footer .right { margin-left: auto; display: flex; gap: 20px; }
 <section>
   <div class="wrap">
     <div class="note">
-      <h3>OpenEPL is young — here is the honest part</h3>
+      <h3>Kiln is young — here is the honest part</h3>
       <p>Linux on x86-64 only. A release build is hardened and stripped, not
       hidden — a native binary can always be disassembled. TLS is opt-in and
       client-side only. Memory is reclaimed when a program exits, not before.
@@ -356,8 +356,8 @@ footer .right { margin-left: auto; display: flex; gap: 20px; }
     <span>MIT OR BSD-3-Clause</span>
     <span class="right">
       <a href="docs/">Documentation</a>
-      <a href="https://github.com/AxDSan/openepl">GitHub</a>
-      <a href="https://github.com/AxDSan/openepl/blob/main/LICENSE">Licence</a>
+      <a href="https://github.com/AxDSan/kiln">GitHub</a>
+      <a href="https://github.com/AxDSan/kiln/blob/main/LICENSE">Licence</a>
     </span>
   </div>
 </footer>

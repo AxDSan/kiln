@@ -1,5 +1,5 @@
-// Thin client: everything intelligent lives in `openepl lsp` and
-// `openepl dap`, so this file only starts them and gets out of the way.
+// Thin client: everything intelligent lives in `kiln lsp` and
+// `kiln dap`, so this file only starts them and gets out of the way.
 const { workspace, debug, DebugAdapterExecutable } = require("vscode");
 const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
 
@@ -9,7 +9,7 @@ let client;
 /// adapter. One setting rather than two: they are the same program, and two
 /// paths that could disagree would be two ways to get it wrong.
 function toolchain() {
-  return workspace.getConfiguration("openepl").get("serverPath", "openepl");
+  return workspace.getConfiguration("kiln").get("serverPath", "kiln");
 }
 
 function activate(context) {
@@ -21,10 +21,10 @@ function activate(context) {
   };
 
   client = new LanguageClient(
-    "openepl",
-    "OpenEPL Language Server",
+    "kiln",
+    "Kiln Language Server",
     serverOptions,
-    { documentSelector: [{ scheme: "file", language: "openepl" }] }
+    { documentSelector: [{ scheme: "file", language: "kiln" }] }
   );
   context.subscriptions.push(client.start());
 
@@ -33,7 +33,7 @@ function activate(context) {
   // is read then, and a user who moves their toolchain does not have to
   // reinstall the extension.
   context.subscriptions.push(
-    debug.registerDebugAdapterDescriptorFactory("openepl", {
+    debug.registerDebugAdapterDescriptorFactory("kiln", {
       createDebugAdapterDescriptor() {
         return new DebugAdapterExecutable(toolchain(), ["dap"]);
       },
@@ -44,17 +44,17 @@ function activate(context) {
   // this VS Code asks the user to write a configuration first, which is a
   // poor answer for a language whose programs are usually one file.
   context.subscriptions.push(
-    debug.registerDebugConfigurationProvider("openepl", {
+    debug.registerDebugConfigurationProvider("kiln", {
       resolveDebugConfiguration(folder, config) {
         if (config.type || config.request || config.name) {
           return config;
         }
         const editor = require("vscode").window.activeTextEditor;
-        if (!editor || editor.document.languageId !== "openepl") {
+        if (!editor || editor.document.languageId !== "kiln") {
           return config;
         }
         return {
-          type: "openepl",
+          type: "kiln",
           request: "launch",
           name: "Debug the current file",
           program: editor.document.fileName,

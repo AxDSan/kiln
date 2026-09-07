@@ -39,16 +39,16 @@ codedb.snapshot
 /vendor/
 
 # Designer binary
-/designer/openepl-designer
+/designer/kiln-designer
 
 # Designer scratch
-openepl_dotgrid.tga
+kiln_dotgrid.tga
 
 # Documentation site build output
 /docs-site/book/
 /_site/
 
-# `openepl build x.oir` with no -o writes the module name into the current
+# `kiln build x.kiln` with no -o writes the module name into the current
 # directory, which is how three ELF binaries came to be committed. Ignore
 # extension-less files at the root — every real one has a suffix or lives in a
 # subdirectory. The re-includes must come before the directory rules below, or
@@ -58,7 +58,7 @@ openepl_dotgrid.tga
 !/*/
 # ...but `!/*.*` re-includes every dotted name at the root, which brings back
 # the build products the rules above already excluded. A stray `main.ll` from
-# `openepl emit` is untracked-but-not-ignored without this, and fifteen of them
+# `kiln emit` is untracked-but-not-ignored without this, and fifteen of them
 # once accumulated at the root of a working tree.
 /*.ll
 /*.o
@@ -77,4 +77,4 @@ openepl_dotgrid.tga
 /vendor/
 /docs-site/book/
 /_site/
-/designer/openepl-designer
+/designer/kiln-designer

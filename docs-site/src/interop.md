@@ -1,7 +1,7 @@
 # Interop
 
-OpenEPL talks to C in both directions: a program calls into native libraries,
-and native code calls back into it. A shared library OpenEPL builds can go one
+Kiln talks to C in both directions: a program calls into native libraries,
+and native code calls back into it. A shared library Kiln builds can go one
 step further and carry a loader hook — a real `DllMain` on Windows, an ELF
 constructor on Linux — so it runs the instant it is mapped into a process. This
 page collects the pieces that reach across that boundary, starting with the raw
@@ -18,7 +18,7 @@ bytes through it explicitly, or you do not move them at all.
 
 `ptr_null()` is the zero address, and `ptr_is_null` tests for it:
 
-```openepl
+```kiln
 module nullcheck
 
 sub main
@@ -39,7 +39,7 @@ itself. `mem_zero` and `mem_copy` are `memset` and `memcpy`.
 Write typed values into the block at a byte offset and read them back. Offsets
 and sizes are `int64`, so a buffer may be larger than two gigabytes:
 
-```openepl
+```kiln
 module buffer
 
 sub main
@@ -74,9 +74,9 @@ it reads better than passing an offset to every call.
 `ptr_of_text` hands back the `char*` behind a text, to pass to a C function that
 takes a string. It is borrowed: valid only while that text is, and pointing at
 read-only bytes when the text is a literal. `ptr_read_text` does the reverse,
-copying a NUL-terminated C string at an address into an OpenEPL text you own:
+copying a NUL-terminated C string at an address into an Kiln text you own:
 
-```openepl
+```kiln
 module strings
 
 sub main
@@ -85,7 +85,7 @@ sub main
   call print_text(ptr_read_text(borrowed))
 
   var owned: ptr = mem_alloc(32)
-  call ptr_write_text(owned, 0, "OpenEPL")
+  call ptr_write_text(owned, 0, "Kiln")
   call print_text(ptr_read_text(owned))
   call mem_free(owned)
 end
@@ -103,7 +103,7 @@ turns a `ptr` back into an `int64`. This is the only bridge between the two, and
 it is spelled out on purpose: an address is not an integer you can accidentally
 do arithmetic on.
 
-```openepl
+```kiln
 module escape
 
 sub main
@@ -130,13 +130,13 @@ or any C export the language does not wrap.
 
 The declaration sits at module level, beside `sub`:
 
-```openepl
+```kiln
 module messagebox
 
 dll MessageBoxA(handle: ptr, text: text, caption: text, kind: int): int from "user32"
 
 sub main
-  let clicked: int = MessageBoxA(ptr_null(), "Built with OpenEPL.", "Hello", 0)
+  let clicked: int = MessageBoxA(ptr_null(), "Built with Kiln.", "Hello", 0)
   call print_int(clicked)
 end
 ```
@@ -162,7 +162,7 @@ dll NAME(param: type, ...): return-type from "library" as "symbol" convention
   exports is not what the program wants to call it by. It is optional; without
   it the declaration name is the symbol name.
 - `convention` — one of `stdcall`, `cdecl` or `system`, last on the line — names
-  the C calling convention. It is optional and, on every target OpenEPL builds,
+  the C calling convention. It is optional and, on every target Kiln builds,
   a no-op; [Calling conventions](#calling-conventions) below says why, and why
   `system` is the one to write on a Win32 declaration anyway.
 
@@ -170,7 +170,7 @@ The types that cross the boundary are `int`, `int64`, `double`, `bool`, `text`
 and `ptr`. A `text` is passed as a C `char *` and a returned `char *` is copied
 into a managed text; a `ptr` is passed straight through. A parameter may also be
 a [C-struct record](#c-struct-records), which passes a pointer to a real struct
-— the way a C API that takes a `RECT *` or a `MSG *` is reached. An OpenEPL
+— the way a C API that takes a `RECT *` or a `MSG *` is reached. An Kiln
 array or dictionary, and a plain (non-`is c`) record, are runtime-owned objects
 with no by-value C shape — pass a `ptr` to bytes you laid out instead.
 
@@ -181,7 +181,7 @@ Given a small C library `mathdll` with `int add_ints(int, int)`,
 program calls each the way its signature reads. `bump` takes a pointer the callee
 writes through, so the program hands it a `ptr` to a cell it allocated:
 
-```openepl
+```kiln
 module mathdll
 
 dll add_ints(a: int, b: int): int from "mathdll"
@@ -263,7 +263,7 @@ void bump(int *cell) { *cell += 1; }
 a program opens it, asks for three addresses, and calls all three. Not one of
 them is declared anywhere:
 
-```openepl
+```kiln
 module plugin
 
 dll dlopen(path: text, mode: int): ptr from "libdl.so.2"
@@ -328,13 +328,13 @@ call through (ptr_read_ptr(vtable, 24))(obj)      # any expression
 ```
 
 A table of function pointers lives in a c-record's inline `ptr[N]`, as `vt.fn`
-above does — an OpenEPL list holds no `ptr`, so that and `ptr_read_ptr` at a
+above does — an Kiln list holds no `ptr`, so that and `ptr_read_ptr` at a
 counted offset are the two ways to index one.
 
 That last line is the whole of a COM method call. A COM object is a pointer to a
 pointer to a table of function pointers, so the method at slot 4 is
 `ptr_read_ptr` twice and a `call through` with the object as the first argument
-— the `this` C++ passes invisibly and OpenEPL passes by hand.
+— the `this` C++ passes invisibly and Kiln passes by hand.
 
 ### What is not checked
 
@@ -375,11 +375,11 @@ The two belong together, because neither does much alone: a bit decides which
 address to call, and the flag word handed to the function at that address is
 built by combining constants. Two runnable programs put both to work and check
 themselves as they go.
-[`examples/dll/dispatch.oir`](https://github.com/axdsan/openepl/tree/main/examples/dll)
+[`examples/dll/dispatch.kiln`](https://github.com/axdsan/kiln/tree/main/examples/dll)
 opens a plug-in it never declares, fetches five same-shaped exports into a
 `ptr[5]`, lets a request word choose which of them to call, and holds C's `&`,
-`|`, `^`, `<<` and `>>` against OpenEPL's own operators.
-[`examples/win/flags.oir`](https://github.com/axdsan/openepl/tree/main/examples/win)
+`|`, `^`, `<<` and `>>` against Kiln's own operators.
+[`examples/win/flags.kiln`](https://github.com/axdsan/kiln/tree/main/examples/win)
 asks `GetProcAddress` for `GetCurrentProcessId` and calls the address it gets,
 checking the answer against the same function reached as a declared import —
 one process has one id — and hands `VirtualAlloc` and `OpenProcess` the words
@@ -443,11 +443,11 @@ typedef struct { int x; int y; } Point;
 void move_point(Point *p, int dx, int dy) { p->x += dx; p->y += dy; }
 ```
 
-the OpenEPL side declares the record with the same layout and the function with
+the Kiln side declares the record with the same layout and the function with
 a `Point` parameter — a c-record parameter means the C prototype takes a pointer
 to that struct, and the record is passed as that pointer automatically:
 
-```openepl
+```kiln
 module geometry
 
 record Point is c
@@ -471,7 +471,7 @@ end
 ```
 
 `move_point` writes through the pointer, and the change is visible on the next
-line: `here` is one struct, in one place, that OpenEPL and C both hold.
+line: `here` is one struct, in one place, that Kiln and C both hold.
 
 ### Passing the pointer two ways
 
@@ -480,7 +480,7 @@ takes the pointer for you. The other way is to type the parameter `ptr` and pass
 `address of` the record yourself, which is what a Win32 signature reads like when
 the API is declared in terms of the handle and the out-struct:
 
-```openepl
+```kiln
 module window
 target sharedlib
 
@@ -514,7 +514,7 @@ these scalar fields. A field sits at the next offset aligned to its own width,
 and the struct is padded at the end to its widest member, so a record of a
 `byte`, an `int`, a `byte` and an `int64`:
 
-```openepl
+```kiln
 module layout
 
 record Mixed is c
@@ -537,7 +537,7 @@ lays it out. `size of Mixed` reports that number, and it is the number to pass t
 
 A `text` field is a `char *`. Reading one copies the C string into a managed
 text you own — a NULL field reads as the empty text — so the value outlives the
-struct. Writing one stores the borrowed pointer behind an OpenEPL text: it is
+struct. Writing one stores the borrowed pointer behind an Kiln text: it is
 valid only while that text is, the same bargain `ptr_of_text` makes, so keep the
 text alive as long as the struct is in use.
 
@@ -554,12 +554,12 @@ so `0xFFFF` in the struct is `65535` and not `-1`, and writing keeps the low 16
 bits. That is the same bargain `byte` makes, and it is the right one because the
 field this exists for is a `WORD`, not a `SHORT`.
 
-`float` is the same idea one type over. OpenEPL has a single floating type,
+`float` is the same idea one type over. Kiln has a single floating type,
 `double`, so a `float` field is read and written as a `double` and the narrowing
 happens at the store: what sits in the struct is a real 4-byte IEEE `float`,
 which is what a C API that declares one reads back.
 
-```openepl
+```kiln
 module widths
 
 record WndClass is c
@@ -597,7 +597,7 @@ and no second object.
 Reach through it with another `.`, as deep as the nesting goes, and take
 `address of` it for the pointer to the nested struct alone:
 
-```openepl
+```kiln
 module nested
 
 record Point is c
@@ -650,12 +650,12 @@ the struct, not a pointer to a runtime array. The element type is any c-record
 field type — including another `is c` record — and the count is a literal,
 because `size of` and every offset after the field are compile-time numbers.
 
-Elements count **from 1**, like everything else in OpenEPL, so `r.rgb[1]` is the
+Elements count **from 1**, like everything else in Kiln, so `r.rgb[1]` is the
 first byte and `r.rgb[32]` is the last. `address of r.rgb` is a pointer to the
 first element, which is where C's own `&r.rgb` points, so a `memset` or a
 `memcpy` reaches the member and nothing around it:
 
-```openepl
+```kiln
 module inline_array
 
 record Paint is c
@@ -696,7 +696,7 @@ bytes through `address of`.
 ## Callbacks: passing a sub to C
 
 `dll` lets a program call C. `address of` is the other direction: it hands C the
-address of a subroutine, so C can call back into OpenEPL. This is what a hook
+address of a subroutine, so C can call back into Kiln. This is what a hook
 detour, a `CreateThread` ThreadProc, an `EnumWindows` callback or a Lua C
 function all need — "here is my function, you call it".
 
@@ -723,7 +723,7 @@ void each(void (*fn)(int), int n) { for (int i = 1; i <= n; i++) fn(i); }
 a program declares each as a `dll` taking a `ptr` where C takes the function
 pointer, and passes `address of` a matching sub:
 
-```openepl
+```kiln
 module callbacks
 
 dll apply(fn: ptr, a: int, b: int): int from "cb"
@@ -747,14 +747,14 @@ end
 
 `apply` calls `summer` for its result and the program prints `42`; `each` calls
 `announce` with 1, 2 and 3 from inside its own loop, and the program prints that
-sequence. C is driving OpenEPL code in both.
+sequence. C is driving Kiln code in both.
 
 The subroutine runs on whatever thread and stack C calls it from, with C's
 calling convention, and it makes no assumption about an event loop — a ThreadProc
 handed to `CreateThread` runs on the new thread, and coordinating that with the
 rest of the program is the program's own affair. A `text` parameter arrives as
 the C `char *` the caller passed, read for the duration of the call; a `text` the
-callback returns is storage the OpenEPL runtime owns and frees.
+callback returns is storage the Kiln runtime owns and frees.
 
 A callback sub may carry the same optional convention marker a `dll` does —
 `sub wndproc(hwnd: ptr, msg: int, wparam: int64, lparam: int64): int64 system` —
@@ -769,7 +769,7 @@ slots carry the arguments, who pops them afterwards, how the return comes back.
 cleans the stack, and calling a `stdcall` function as `cdecl` corrupts it. A
 `dll` declaration and a callback sub may name one, last on the line:
 
-```openepl
+```kiln
 module conventions
 
 dll MessageBoxA(handle: ptr, text: text, caption: text, kind: int): int from "user32" system
@@ -790,7 +790,7 @@ Win32 declaration written `from "user32" system` stays correct no matter the
 target. `stdcall` and `cdecl` name a specific convention outright, for a library
 that documents one.
 
-On every target OpenEPL builds today the marker is a **no-op**. The three
+On every target Kiln builds today the marker is a **no-op**. The three
 targets — x86-64 Linux, x64 Windows, 64-bit macOS — are all 64-bit, and a 64-bit
 target has a *single* C calling convention: `cdecl`, `stdcall` and `system` all
 resolve to the same one, and the compiler emits identical code whether a
@@ -814,14 +814,14 @@ them, so a program says `use win` and has `MessageBoxA`, `RECT` and `MB_OK`
 without transcribing a single one.
 
 A kit is the directory [Kits](./kits.md) describes. A kit that ships
-declarations puts them in a `.oed` file beside its `lib.json` — a small kit in
-one named for the kit, `<name>.oed`. The file is a run of declarations with no
+declarations puts them in a `.kdecl` file beside its `lib.json` — a small kit in
+one named for the kit, `<name>.kdecl`. The file is a run of declarations with no
 `module` header — `dll`, `record` and `const`, and nothing else. A `sub`, a
 `form`, a component or a module variable does not belong in one and is refused,
 because a declaration bundle *declares*; it does not define or build.
 
 ```text
-# win.oed — the bundle `use win` brings in
+# win.kdecl — the bundle `use win` brings in
 dll MessageBoxA(handle: ptr, text: text, caption: text, kind: int): int from "user32" system
 dll GetLastError(): int from "kernel32" system
 
@@ -838,7 +838,7 @@ const WM_DESTROY = 2
 ```
 
 `use win` finds the kit exactly as `use net` does — a `kits/` beside the
-project first, then `~/.openepl/kits/`, then the bundled `libs/` — and merges
+project first, then `~/.kiln/kits/`, then the bundled `libs/` — and merges
 its declarations into the program as if they had been typed there. From then on
 `MessageBoxA` is called like any `dll`, `RECT` is a c-record like any other, and
 `MB_OK` is the number `0` everywhere a `0` could go:
@@ -853,36 +853,36 @@ sub main
 end
 ```
 
-A kit can ship declarations, C-implemented commands, or both: a `.oed` beside a
+A kit can ship declarations, C-implemented commands, or both: a `.kdecl` beside a
 `<name>_libinfo.c` contributes to the one registry from both halves.
-`openepl commands --use <name>` lists a kit's `dll:`, `crecord:` and `const:`
+`kiln commands --use <name>` lists a kit's `dll:`, `crecord:` and `const:`
 lines beside its `command:` lines, so Studio's completion and the reference see
-them; `openepl kits` reports the bundle a kit carries.
+them; `kiln kits` reports the bundle a kit carries.
 
 ### A bundle across several files
 
 One file per kit stops reading well the moment a kit is large. A Win32 kit wraps
-half a dozen system libraries, and a thousand declarations in one `win.oed` is a
-file nobody can find anything in. So a kit may carry **as many `.oed` files as it
+half a dozen system libraries, and a thousand declarations in one `win.kdecl` is a
+file nobody can find anything in. So a kit may carry **as many `.kdecl` files as it
 likes**, and every one in the kit directory is merged into a single bundle:
 
 ```text
 kits/win/
   lib.json
-  user32.oed      # windows, messages, MessageBoxA
-  kernel32.oed    # handles, modules, GetLastError
-  gdi32.oed       # drawing
+  user32.kdecl      # windows, messages, MessageBoxA
+  kernel32.kdecl    # handles, modules, GetLastError
+  gdi32.kdecl       # drawing
 ```
 
 Order across files does not matter any more than order within one does: the
 merged bundle is registered whole before any cross-reference is checked, so a
-`dll` in `user32.oed` may take a `RECT` declared in `gdi32.oed`. What the files
+`dll` in `user32.kdecl` may take a `RECT` declared in `gdi32.kdecl`. What the files
 share is one namespace — `dll`, `record` and `const` names all land in the same
 registry — so declaring one name in two files is a kit-authoring error naming
 both, caught the moment the kit is used or listed.
 
 `use` is unchanged: a program says `use win` and gets everything from every
-file. So is `openepl kits`, which lists the whole merged bundle.
+file. So is `kiln kits`, which lists the whole merged bundle.
 
 ### Constants
 
@@ -890,7 +890,7 @@ A `const` names a literal — an integer, a double, a text or a bool — and sta
 for it everywhere a literal is allowed: a `dll` argument, a comparison, a `let`.
 It is module-level, and a program writes its own the same way a kit does:
 
-```openepl
+```kiln
 module flags
 
 const RETRIES = 3
@@ -926,11 +926,11 @@ error that names the kit and the OS it needs, rather than a wall of linker
 errors at the end:
 
 ```text
-$ openepl build hello.oir --os linux
-openepl: kit `win` supports windows — it cannot be built for linux. Build with `--os windows`.
+$ kiln build hello.kiln --os linux
+kiln: kit `win` supports windows — it cannot be built for linux. Build with `--os windows`.
 ```
 
-Listing the kit's contents is still allowed anywhere — `openepl commands --use
+Listing the kit's contents is still allowed anywhere — `kiln commands --use
 win` and the language server complete a Win32 declaration on a Linux machine, so
 the documentation and the editor work even where a build cannot. A kit with no
 `platforms` key is portable and builds everywhere, which is why the bundled
@@ -999,11 +999,11 @@ void hookrt_install(void *detour) {                    /* redirect the slot */
 }
 ```
 
-The OpenEPL library declares the two functions it needs as `dll`, writes the
+The Kiln library declares the two functions it needs as `dll`, writes the
 detour as an ordinary subroutine, and installs it from `dll_attach` with
 `address of`:
 
-```openepl
+```kiln
 module hook
 target sharedlib
 
@@ -1020,7 +1020,7 @@ end
 ```
 
 A host program links `hookrt` and calls `hookrt_call` directly — it is the
-application whose function gets hooked. It calls once, loads the OpenEPL library,
+application whose function gets hooked. It calls once, loads the Kiln library,
 and calls again:
 
 ```c
@@ -1044,8 +1044,8 @@ int main(void) {
 
 Loading the library is the whole of it: `dll_attach` runs under the loader,
 installs the detour into the one loaded `hookrt`, and the host's next call —
-made through the same slot — lands in the OpenEPL `detour`, which reaches the
+made through the same slot — lands in the Kiln `detour`, which reaches the
 original through the trampoline and adds one. The program prints `before 20`
 then `after 21`, on Linux through the constructor and on Windows through
 `DllMain`. The complete, buildable example is in
-[`examples/hook/`](https://github.com/axdsan/openepl/tree/main/examples/hook).
+[`examples/hook/`](https://github.com/axdsan/kiln/tree/main/examples/hook).

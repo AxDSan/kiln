@@ -1,0 +1,107 @@
+# The `math` support library — what core arithmetic leaves out.
+#
+#   kiln run examples/mathlib.kiln
+#
+# Core already has sqrt, sin/cos/tan, pow, exp, ln, log10, floor/ceil/round,
+# abs and min/max. This library adds the inverse and hyperbolic functions, the
+# constants, angle conversion, interpolation, and the integer functions that
+# have no floating-point form.
+module mathlib
+use math
+
+# Every check goes through here, which is what a subroutine with parameters is
+# for. Doubles are compared with a tolerance because binary floating point does
+# not represent most decimals exactly — `0.1 + 0.2 = 0.3` is false in every
+# language with IEEE-754 doubles, including this one.
+sub near(label: text, got: double, want: double)
+  let diff = abs_double(got - want)
+  if diff < 0.000000001
+    call print_text("ok   {label}")
+  else
+    call print_text("FAIL {label}: got {got}")
+  end
+end
+
+sub truth(label: text, got: bool)
+  if got
+    call print_text("ok   {label}")
+  else
+    call print_text("FAIL {label}")
+  end
+end
+
+sub same(label: text, got: int, want: int)
+  if got = want
+    call print_text("ok   {label}")
+  else
+    call print_text("FAIL {label}: got {got}")
+  end
+end
+
+sub main
+  call print_text("-- constants --")
+  call near("pi", math_pi(), 3.141592653589793)
+  call near("tau is two pi", math_tau(), 2.0 * math_pi())
+  call near("e", math_e(), 2.718281828459045)
+
+  call print_text("-- inverse trigonometry --")
+  call near("asin(1) is a quarter turn", math_asin(1.0), math_pi() / 2.0)
+  call near("acos(1) is zero", math_acos(1.0), 0.0)
+  call near("atan2(1, 1) is an eighth turn", math_atan2(1.0, 1.0), math_pi() / 4.0)
+  # atan2 knows its quadrant; atan alone cannot.
+  call near("atan2 keeps the quadrant", math_atan2(-1.0, -1.0), -3.0 * math_pi() / 4.0)
+
+  call print_text("-- hyperbolic --")
+  call near("cosh(0)", math_cosh(0.0), 1.0)
+  call near("tanh flattens to 1", math_tanh(20.0), 1.0)
+
+  call print_text("-- logarithms and roots --")
+  call near("log2(1024)", math_log2(1024.0), 10.0)
+  call near("log base 3 of 81", math_log_base(81.0, 3.0), 4.0)
+  call near("cbrt(27)", math_cbrt(27.0), 3.0)
+  call near("hypot(3, 4)", math_hypot(3.0, 4.0), 5.0)
+
+  call print_text("-- rounding --")
+  call near("trunc cuts toward zero", math_trunc(-2.7), -2.0)
+  call near("round_to two places", math_round_to(3.14159, 2), 3.14)
+  call near("fmod(7.5, 2)", math_fmod(7.5, 2.0), 1.5)
+
+  call print_text("-- range and interpolation --")
+  call near("clamp holds the ceiling", math_clamp(99.0, 0.0, 1.0), 1.0)
+  call near("lerp halfway", math_lerp(10.0, 20.0, 0.5), 15.0)
+  # Written as a + t*(b - a), so the end point comes back exactly.
+  call near("lerp at 1 is exactly b", math_lerp(10.0, 20.0, 1.0), 20.0)
+  call same("sign of a negative", math_sign(-4.5), -1)
+  call same("clamp_int", math_clamp_int(50, 1, 10), 10)
+
+  call print_text("-- angles --")
+  call near("180 degrees is pi", math_radians(180.0), math_pi())
+  call near("and back again", math_degrees(math_pi()), 180.0)
+
+  call print_text("-- integers --")
+  call same("gcd(48, 18)", math_gcd(48, 18), 6)
+  call same("lcm(4, 6)", int64_to_int(math_lcm(4, 6)), 12)
+  # 20! is 2432902008176640000 — it fits in int64 and nothing smaller.
+  call truth("20! is exact", text_eq(int64_to_text(math_factorial(20)), "2432902008176640000"))
+  call truth("7 is prime", math_is_prime(7))
+  call truth("1 is not prime", not math_is_prime(1))
+  call truth("large prime", math_is_prime(7919))
+
+  call print_text("-- failure reporting --")
+  # A double command with no answer returns NaN and sets the slot. NaN is not
+  # equal to itself, so math_is_nan is the only way to test for it.
+  let bad = math_asin(2.0)
+  if math_is_nan(bad) and last_error_code() <> 0
+    call print_text("ok   asin(2) refused: {last_error_text()}")
+  else
+    call print_text("FAIL asin(2) should have failed")
+  end
+  if text_eq(int64_to_text(math_factorial(21)), "-1")
+    call print_text("ok   21! refused: {last_error_text()}")
+  else
+    call print_text("FAIL 21! should have overflowed")
+  end
+  # A success clears the slot, so a stale code is never mistaken for a fresh one.
+  call near("recovered", math_asin(0.0), 0.0)
+  call same("slot cleared by the next success", last_error_code(), 0)
+end

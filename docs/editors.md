@@ -1,7 +1,7 @@
 # Editors and the language server
 
-OpenEPL ships a language server, `openepl lsp`, that speaks LSP over stdio. Any
-LSP-capable editor becomes an OpenEPL editor by pointing it at that command —
+Kiln ships a language server, `kiln lsp`, that speaks LSP over stdio. Any
+LSP-capable editor becomes an Kiln editor by pointing it at that command —
 the intelligence lives in one server rather than in any single editor.
 
 ## What works today
@@ -61,10 +61,10 @@ end
 at the end of the file, with the parameter list the event declares. That is
 the whole loop: place a component, wire an event, write the body.
 
-The server locates the OpenEPL runtime three ways, in order: by walking up from
-the editor's workspace root looking for `runtime/openepl_core.h`; failing that,
-from `OPENEPL_RUNTIME_DIR`, which an installed toolchain sets; failing that, by
-walking up from the `openepl` binary itself — which is how a relocatable bundle
+The server locates the Kiln runtime three ways, in order: by walking up from
+the editor's workspace root looking for `runtime/kiln_core.h`; failing that,
+from `KILN_RUNTIME_DIR`, which an installed toolchain sets; failing that, by
+walking up from the `kiln` binary itself — which is how a relocatable bundle
 finds its own runtime when your project lives somewhere else entirely, as
 anything made from a template does. If none of the three finds one it stays up
 and serves parse errors, reporting the degradation as a diagnostic on line 1
@@ -75,14 +75,14 @@ rather than going silent.
 With `nvim-lspconfig` (or plain `vim.lsp.start`):
 
 ```lua
-vim.filetype.add({ extension = { oir = "openepl" } })
+vim.filetype.add({ extension = { kiln = "kiln" } })
 
 vim.api.nvim_create_autocmd("FileType", {
-  pattern = "openepl",
+  pattern = "kiln",
   callback = function(args)
     vim.lsp.start({
-      name = "openepl",
-      cmd = { "openepl", "lsp" },
+      name = "kiln",
+      cmd = { "kiln", "lsp" },
       root_dir = vim.fs.root(args.buf, { "runtime", ".git" }),
     })
   end,
@@ -91,36 +91,36 @@ vim.api.nvim_create_autocmd("FileType", {
 
 ## VS Code
 
-`editors/vscode/` is a working extension: syntax highlighting, `.oir` file
-association, and an LSP client that launches `openepl lsp`. It is not published
+`editors/vscode/` is a working extension: syntax highlighting, `.kiln` file
+association, and an LSP client that launches `kiln lsp`. It is not published
 to the marketplace, so install it locally:
 
 ```sh
 cd editors/vscode
 npm install
 # then either symlink it into your extensions folder…
-ln -s "$PWD" ~/.vscode/extensions/openepl
+ln -s "$PWD" ~/.vscode/extensions/kiln
 # …or package it
-npx @vscode/vsce package && code --install-extension openepl-*.vsix
+npx @vscode/vsce package && code --install-extension kiln-*.vsix
 ```
 
-Set `openepl.serverPath` if `openepl` is not on your `PATH`.
+Set `kiln.serverPath` if `kiln` is not on your `PATH`.
 
 ## Helix
 
 In `languages.toml`:
 
 ```toml
-[language-server.openepl]
-command = "openepl"
+[language-server.kiln]
+command = "kiln"
 args = ["lsp"]
 
 [[language]]
-name = "openepl"
-scope = "source.openepl"
-file-types = ["oir"]
+name = "kiln"
+scope = "source.kiln"
+file-types = ["kiln"]
 roots = ["runtime", ".git"]
-language-servers = ["openepl"]
+language-servers = ["kiln"]
 comment-token = "#"
 indent = { tab-width = 2, unit = "  " }
 ```
@@ -129,7 +129,7 @@ indent = { tab-width = 2, unit = "  " }
 
 ```json
 {
-  "lsp": { "openepl": { "binary": { "path": "openepl", "arguments": ["lsp"] } } }
+  "lsp": { "kiln": { "binary": { "path": "kiln", "arguments": ["lsp"] } } }
 }
 ```
 
@@ -139,7 +139,7 @@ The server logs to stderr (stdout is the protocol channel — a stray print ther
 corrupts the stream). Watch it with your editor's LSP log, or drive it by hand:
 
 ```sh
-openepl lsp   # then send framed JSON-RPC on stdin
+kiln lsp   # then send framed JSON-RPC on stdin
 ```
 
 The repository's `cli/tests/lsp.rs` does exactly that, and is the reference

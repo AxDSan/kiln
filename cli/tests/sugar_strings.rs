@@ -19,18 +19,18 @@ fn repo() -> PathBuf {
 /// Build `src` to a temp binary, run it, and return its stdout lines. `tag` must
 /// be unique per test so parallel runs never share an output path.
 fn build_run(tag: &str, src: &str) -> Vec<String> {
-    let dir = std::env::temp_dir().join(format!("openepl_strings_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_strings_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
-    let srcpath = dir.join("prog.oir");
+    let srcpath = dir.join("prog.kiln");
     std::fs::write(&srcpath, src).expect("write program source");
     let bin = dir.join("prog");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", srcpath.to_str().unwrap(), "-o"])
         .arg(&bin)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(
         out.status.success(),
         "the program failed to build:\n{}",
@@ -52,17 +52,17 @@ fn build_run(tag: &str, src: &str) -> Vec<String> {
 /// here (a GUI), where the point is that the desugar reaches the backend and
 /// type-checks.
 fn build_ok(tag: &str, src: &str) {
-    let dir = std::env::temp_dir().join(format!("openepl_strings_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_strings_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
-    let srcpath = dir.join("prog.oir");
+    let srcpath = dir.join("prog.kiln");
     std::fs::write(&srcpath, src).expect("write program source");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", srcpath.to_str().unwrap(), "-o"])
         .arg(dir.join("prog"))
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(
         out.status.success(),
         "the program was expected to build but failed:\n{}",
@@ -72,17 +72,17 @@ fn build_ok(tag: &str, src: &str) {
 
 /// Build `src`, assert it FAILS, and return the compiler's stderr.
 fn build_fails(tag: &str, src: &str) -> String {
-    let dir = std::env::temp_dir().join(format!("openepl_strings_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_strings_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
-    let srcpath = dir.join("prog.oir");
+    let srcpath = dir.join("prog.kiln");
     std::fs::write(&srcpath, src).expect("write program source");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", srcpath.to_str().unwrap(), "-o"])
         .arg(dir.join("prog"))
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(
         !out.status.success(),
         "the program was expected to fail to build but succeeded"
@@ -295,10 +295,10 @@ fn interpolation_cross_builds_and_runs_under_wine() {
         eprintln!("mingw is not installed; skipping the Windows interpolation test");
         return;
     }
-    let dir = std::env::temp_dir().join("openepl_strings_windows_test");
+    let dir = std::env::temp_dir().join("kiln_strings_windows_test");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
-    let srcpath = dir.join("prog.oir");
+    let srcpath = dir.join("prog.kiln");
     std::fs::write(
         &srcpath,
         r#"module winstrings
@@ -314,13 +314,13 @@ end
     )
     .expect("write source");
     let out = dir.join("prog");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", srcpath.to_str().unwrap(), "--os", "windows", "-o"])
         .arg(&out)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl build --os windows");
-    assert!(status.success(), "openepl build --os windows failed");
+        .expect("run kiln build --os windows");
+    assert!(status.success(), "kiln build --os windows failed");
     let image = dir.join("prog.exe");
     assert!(image.is_file(), "expected {} to be written", image.display());
 

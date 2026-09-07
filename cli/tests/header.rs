@@ -18,7 +18,7 @@ fn repo() -> PathBuf {
 
 /// A scratch directory per test: two tests must not share one artifact.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_header_{tag}_test"));
+    let dir = std::env::temp_dir().join(format!("kiln_header_{tag}_test"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -60,23 +60,23 @@ const HOST_SRC: &str = "#include <stdio.h>\n\
                           return 0;\n\
                         }\n";
 
-fn openepl(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_openepl"))
+fn kiln(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(args)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl")
+        .expect("run kiln")
 }
 
 fn build_lib(dir: &Path, extra: &[&str]) -> (PathBuf, std::process::Output) {
-    let src = dir.join("greet.oir");
+    let src = dir.join("greet.kiln");
     std::fs::write(&src, LIB_SRC).expect("write source");
     let mut args = vec!["build", src.to_str().unwrap()];
     args.extend_from_slice(extra);
-    let out = openepl(&args);
+    let out = kiln(&args);
     assert!(
         out.status.success(),
-        "openepl build failed: {}",
+        "kiln build failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     (src, out)
@@ -229,14 +229,14 @@ fn static_library_writes_the_same_header() {
 #[test]
 fn a_program_writes_no_header() {
     let dir = scratch("exe");
-    let src = dir.join("hello.oir");
+    let src = dir.join("hello.kiln");
     std::fs::write(
         &src,
         "module hello\nsub main\n  call print_text(\"hi\")\nend\n",
     )
     .unwrap();
     let bin = dir.join("hello");
-    let out = openepl(&["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()]);
+    let out = kiln(&["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()]);
     assert!(out.status.success());
     assert!(!dir.join("hello.h").exists(), "a program grew a header");
 }

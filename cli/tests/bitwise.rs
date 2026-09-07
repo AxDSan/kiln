@@ -6,7 +6,7 @@
 //! division tricks, and every one of the win kit's ~880 constants was a
 //! decimal with the hex in a comment beside it.
 //!
-//! `examples/bitwise.oir` is a self-checking transcript: every line prints `ok`
+//! `examples/bitwise.kiln` is a self-checking transcript: every line prints `ok`
 //! or `FAIL`. The tests below run it and then pin the handful of answers that
 //! would be silently wrong rather than loudly wrong if a rule slipped — the
 //! width of a literal, the sign of a shift, the precedence of a flag test —
@@ -20,25 +20,25 @@ fn repo() -> PathBuf {
 }
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_bitwise_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_bitwise_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create the scratch directory");
     dir
 }
 
 fn build(src: &Path, out: &Path) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_openepl"))
+    Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", out.to_str().unwrap()])
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build")
+        .expect("run kiln build")
 }
 
 /// Build a one-off `main` whose body is `body`, and answer what the compiler
 /// said. Used by the diagnostic tests, which care about the message.
 fn build_body(dir: &Path, tag: &str, body: &str) -> (bool, String) {
-    let src = dir.join(format!("{tag}.oir"));
+    let src = dir.join(format!("{tag}.kiln"));
     std::fs::write(&src, format!("module t\nsub main\n{body}\nend\n")).expect("write the case");
     let out = build(&src, &dir.join(format!("{tag}.bin")));
     let mut said = String::from_utf8_lossy(&out.stdout).into_owned();
@@ -48,7 +48,7 @@ fn build_body(dir: &Path, tag: &str, body: &str) -> (bool, String) {
 
 /// Build a `main` that prints one expression, run it, and answer the line.
 fn value_of(dir: &Path, tag: &str, decls: &str, printer: &str, expr: &str) -> String {
-    let src = dir.join(format!("{tag}.oir"));
+    let src = dir.join(format!("{tag}.kiln"));
     std::fs::write(
         &src,
         format!("module t\nsub main\n{decls}\n  call {printer}({expr})\nend\n"),
@@ -69,15 +69,15 @@ fn value_of(dir: &Path, tag: &str, decls: &str, printer: &str, expr: &str) -> St
 
 // --- the transcript ---------------------------------------------------------
 
-/// The whole surface at once: `examples/bitwise.oir` checks its own answers.
+/// The whole surface at once: `examples/bitwise.kiln` checks its own answers.
 #[test]
 fn the_bitwise_example_passes_its_own_checks() {
     let dir = scratch("example");
     let bin = dir.join("bitwise");
-    let built = build(&repo().join("examples/bitwise.oir"), &bin);
+    let built = build(&repo().join("examples/bitwise.kiln"), &bin);
     assert!(
         built.status.success(),
-        "examples/bitwise.oir did not build:\n{}",
+        "examples/bitwise.kiln did not build:\n{}",
         String::from_utf8_lossy(&built.stderr)
     );
     let out = Command::new(&bin).output().expect("run the example");
@@ -138,7 +138,7 @@ fn a_hex_literal_widens_with_zeros() {
         "-1"
     );
     // A constant is its literal, so it widens the same way.
-    let src = dir.join("w4.oir");
+    let src = dir.join("w4.kiln");
     std::fs::write(
         &src,
         "module t\nconst HKEY_CLASSES_ROOT = 0x8000_0000\nsub main\n  \
@@ -182,18 +182,18 @@ fn a_malformed_bit_pattern_is_refused() {
 #[test]
 fn a_property_may_be_written_as_a_bit_pattern() {
     let dir = scratch("prop");
-    let src = dir.join("form.oir");
+    let src = dir.join("form.kiln");
     std::fs::write(
         &src,
         "module t\nuse ui\nform w\n  title = \"x\"\n  width = 0x1E0\n           label g\n    text = \"hi\"\n    left = 0b1_0000\n  end\nend\nsub main\nend\n",
     )
     .unwrap();
-    let emitted = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let emitted = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["emit", src.to_str().unwrap()])
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl emit");
+        .expect("run kiln emit");
     assert!(
         emitted.status.success(),
         "a form with hex properties did not lower:\n{}",
@@ -201,11 +201,11 @@ fn a_property_may_be_written_as_a_bit_pattern() {
     );
     // ...and `inspect`, which is how the designer reads a project, shows the
     // number rather than a blank.
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["inspect", src.to_str().unwrap()])
         .current_dir(repo())
         .output()
-        .expect("run openepl inspect");
+        .expect("run kiln inspect");
     let said = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(said.contains("prop: w width 480"), "inspect said:\n{said}");
     assert!(said.contains("prop: g left 16"), "inspect said:\n{said}");
@@ -293,7 +293,7 @@ fn precedence() {
     // `(6 band 4) = 4` and not `6 band (4 = 4)` — which would not even type.
     // `and`/`or` are looser still, so a two-flag test needs no parentheses
     // anywhere.
-    let src = dir.join("p7.oir");
+    let src = dir.join("p7.kiln");
     std::fs::write(
         &src,
         "module t\nsub main\n             if 6 band 4 = 4\n    call print_text(\"cmp is looser\")\n  end\n             if 6 band 4 <> 0 and 1 band 1 <> 0\n    call print_text(\"and is looser\")\n  end\n         end\n",
@@ -330,7 +330,7 @@ fn loword_hiword_and_a_flag_test() {
         "3"
     );
 
-    let src = dir.join("flags.oir");
+    let src = dir.join("flags.kiln");
     std::fs::write(
         &src,
         "module t\n\
@@ -451,7 +451,7 @@ fn the_operator_words_are_still_ordinary_names() {
     // The operator itself, including in front of a parenthesised expression.
     assert_eq!(value_of(&dir, "n5", "", "print_int", "bnot (1 bor 2)"), "-4");
     // A field may be named for one too.
-    let src = dir.join("field.oir");
+    let src = dir.join("field.kiln");
     std::fs::write(
         &src,
         "module t\nrecord flags\n  band: int\n  shl: int\nend\n\

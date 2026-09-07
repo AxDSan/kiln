@@ -19,8 +19,8 @@
 //   - the null device on a shell line  `NUL`, not `/dev/null`. Wine maps Z:\ to
 //                                    `/`, so `2>/dev/null` passes under wine and
 //                                    fails on Windows; do not trust that test.
-#ifndef OPENEPL_DESIGNER_PORTABLE_H
-#define OPENEPL_DESIGNER_PORTABLE_H
+#ifndef KILN_DESIGNER_PORTABLE_H
+#define KILN_DESIGNER_PORTABLE_H
 
 #include <cstdio>
 #include <cstdlib>
@@ -47,7 +47,35 @@
 #include <unistd.h>
 #endif
 
-namespace openepl::sys {
+namespace kiln::sys {
+
+/// Does a path end in this extension?
+///
+/// Spelled out rather than written inline as `compare(n - 4, 4, ".x")`,
+/// because the inline form hard-codes the extension's length beside it and the
+/// two fall out of step the moment the extension is renamed. That is exactly
+/// what happened at 1.0.0: `.oir` became `.kiln`, every literal was updated,
+/// every `4` was not, and Studio decided no file was ever a project and opened
+/// the welcome screen instead.
+inline bool has_ext(const std::string& path, const std::string& ext) {
+    return path.size() > ext.size() &&
+           path.compare(path.size() - ext.size(), ext.size(), ext) == 0;
+}
+
+/// Hand a URL — or a file:// path — to whatever the desktop opens it with.
+/// Returns false when the launcher itself could not be run; a browser that
+/// opens and then fails is beyond anything we can see from here.
+inline bool open_url(const std::string& url) {
+#ifdef _WIN32
+    // `start` is a cmd builtin, not a program, so it needs a shell. The empty
+    // quoted argument is the window title `start` would otherwise take the
+    // URL to be.
+    const std::string cmd = "start \"\" \"" + url + "\"";
+#else
+    const std::string cmd = "xdg-open '" + url + "' >/dev/null 2>&1 &";
+#endif
+    return std::system(cmd.c_str()) == 0;
+}
 
 /// Backslashes to forward slashes. Studio splits and joins paths on '/',
 /// and every Windows API accepts either.
@@ -84,11 +112,11 @@ inline std::string exe_dir() {
 }
 
 /// The name the toolchain's executable has beside Studio.
-inline const char* openepl_exe_name() {
+inline const char* kiln_exe_name() {
 #ifdef _WIN32
-    return "openepl.exe";
+    return "kiln.exe";
 #else
-    return "openepl";
+    return "kiln";
 #endif
 }
 
@@ -230,15 +258,15 @@ inline std::string temp_dir() {
 /// of the list a person sees on their next real start. "" when nowhere.
 inline std::string data_dir() {
     const char* xdg = std::getenv("XDG_DATA_HOME");
-    if (xdg && *xdg) return slashes(xdg) + "/openepl";
+    if (xdg && *xdg) return slashes(xdg) + "/kiln";
 #ifdef _WIN32
     const char* app = std::getenv("APPDATA");
-    if (app && *app) return slashes(app) + "/openepl";
+    if (app && *app) return slashes(app) + "/kiln";
     return "";
 #else
     const char* home = std::getenv("HOME");
     if (!home) return "";
-    return std::string(home) + "/.local/share/openepl";
+    return std::string(home) + "/.local/share/kiln";
 #endif
 }
 
@@ -246,14 +274,14 @@ inline std::string data_dir() {
 /// somewhere: the scratch directory is the last resort.
 inline std::string cache_dir() {
     const char* xdg = std::getenv("XDG_CACHE_HOME");
-    if (xdg && *xdg) return slashes(xdg) + "/openepl";
+    if (xdg && *xdg) return slashes(xdg) + "/kiln";
 #ifdef _WIN32
     const char* local = std::getenv("LOCALAPPDATA");
-    if (local && *local) return slashes(local) + "/openepl/cache";
+    if (local && *local) return slashes(local) + "/kiln/cache";
     return temp_dir();
 #else
     const char* home = std::getenv("HOME");
-    if (home && *home) return std::string(home) + "/.cache/openepl";
+    if (home && *home) return std::string(home) + "/.cache/kiln";
     return "/tmp";
 #endif
 }
@@ -309,7 +337,7 @@ inline std::string program_name(const std::string& stem) {
 /// A cancelled dialog is also "": the caller shows its own browser, which has
 /// a Back button. Telling the two apart would buy nothing.
 ///
-/// `patterns` is a display name and a glob, e.g. {"OpenEPL project", "*.oir"}.
+/// `patterns` is a display name and a glob, e.g. {"Kiln project", "*.kiln"}.
 inline std::string pick_open_file(const std::string& title, const std::string& start_dir,
                                   const std::string& filter_name,
                                   const std::string& filter_glob) {
@@ -407,7 +435,7 @@ inline bool has_native_file_dialog() {
 /// piped in — what fork + pipe + O_NONBLOCK give Studio on POSIX. The reads
 /// never block: `PeekNamedPipe` says what is there before `ReadFile` takes
 /// it. Console-subsystem children get no console of their own
-/// (CREATE_NO_WINDOW): Studio is a GUI program, and every `openepl.exe` it
+/// (CREATE_NO_WINDOW): Studio is a GUI program, and every `kiln.exe` it
 /// runs would otherwise flash a black window.
 struct Child {
     HANDLE process = nullptr;
@@ -588,6 +616,6 @@ inline int capture_output(const std::string& cmd, bool merge_stderr, std::string
 #endif
 }
 
-} // namespace openepl::sys
+} // namespace kiln::sys
 
 #endif

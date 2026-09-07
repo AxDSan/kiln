@@ -8,15 +8,15 @@
 // sent as a JSON string, and one unescaped quote or backslash corrupts the
 // frame silently — the server sees malformed JSON and simply stops answering,
 // which looks like the editor going dead rather than like a bug here.
-#ifndef OPENEPL_DESIGNER_JSON_H
-#define OPENEPL_DESIGNER_JSON_H
+#ifndef KILN_DESIGNER_JSON_H
+#define KILN_DESIGNER_JSON_H
 
 #include <cstdio>
 #include <map>
 #include <string>
 #include <vector>
 
-namespace openepl::json {
+namespace kiln::json {
 
 struct Value;
 using Object = std::map<std::string, Value>;
@@ -226,6 +226,6 @@ inline Value parse(const std::string& text) {
     return v;
 }
 
-} // namespace openepl::json
+} // namespace kiln::json
 
 #endif

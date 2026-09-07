@@ -1,0 +1,8 @@
+# Uses a third-party support library (libs/hello) via the ABI.
+module hellolib
+use hello
+
+sub main
+  call print_text(greet("Kiln"))
+  call print_text(greet("world").uppercase())   # read left to right: greet, then shout
+end

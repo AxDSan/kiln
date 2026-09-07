@@ -32,7 +32,7 @@ fn on_path(tool: &str) -> bool {
 /// library beside its own executable, so the built lib and the built program
 /// must share one directory — and two tests must not share it.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_declkit_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_declkit_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -51,20 +51,20 @@ fn build_demoffi_lib(dir: &Path, soname: &str, cc: &str) {
     assert!(status.success(), "{cc} failed to build {soname}");
 }
 
-/// Build `src_text` (written into `dir/prog.oir`) to `dir/prog`, with the
+/// Build `src_text` (written into `dir/prog.kiln`) to `dir/prog`, with the
 /// working directory pinned to the repo so `kits/demoffi` resolves as a project
 /// kit. `extra` carries `--os windows` and the like.
 fn build_program(dir: &Path, src_text: &str, out: &str, extra: &[&str]) -> Result<PathBuf, String> {
-    let srcpath = dir.join("prog.oir");
+    let srcpath = dir.join("prog.kiln");
     std::fs::write(&srcpath, src_text).expect("write program source");
     let outpath = dir.join(out);
-    let output = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", srcpath.to_str().unwrap(), "-o", outpath.to_str().unwrap()])
         .args(extra)
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).into_owned());
     }
@@ -129,16 +129,16 @@ fn use_demoffi_supplies_dll_record_and_const() {
     assert_eq!(lines, EXPECTED, "unexpected output from the demoffi program");
 }
 
-/// `openepl commands --use demoffi` lists the kit's dlls, its c-record and its
+/// `kiln commands --use demoffi` lists the kit's dlls, its c-record and its
 /// constants, so Studio completion and the generated docs can see them.
 #[test]
 fn commands_lists_the_bundle() {
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["commands", "--use", "demoffi"])
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl commands");
+        .expect("run kiln commands");
     assert!(out.status.success(), "commands --use demoffi failed: {}", String::from_utf8_lossy(&out.stderr));
     let text = String::from_utf8_lossy(&out.stdout);
     let has = |needle: &str| text.lines().any(|l| l.contains(needle));
@@ -159,7 +159,7 @@ fn a_windows_only_kit_is_refused_on_linux() {
     let kit = dir.join("kits").join("winonly");
     std::fs::create_dir_all(&kit).expect("create kit dir");
     std::fs::write(
-        kit.join("winonly.oed"),
+        kit.join("winonly.kdecl"),
         "dll MessageBeep(kind: int): bool from \"user32\" system\nconst MB_OK = 0\n",
     )
     .unwrap();
@@ -168,15 +168,15 @@ fn a_windows_only_kit_is_refused_on_linux() {
         "{ \"display\": \"Win Only\", \"version\": \"1.0.0\", \"platforms\": [\"windows\"] }\n",
     )
     .unwrap();
-    let src = dir.join("app.oir");
+    let src = dir.join("app.kiln");
     std::fs::write(&src, "module app\nuse winonly\nsub main\n  call print_int(MB_OK)\nend\n").unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "--os", "linux", "-o", dir.join("app").to_str().unwrap()])
         .current_dir(&dir) // so kits/winonly resolves as the project kit
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(!output.status.success(), "a windows-only kit must not build for linux");
     let err = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -186,12 +186,12 @@ fn a_windows_only_kit_is_refused_on_linux() {
 
     // And listing its contents is still allowed on Linux — a Win32 kit must
     // document and complete on a machine that cannot build for Windows.
-    let listed = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let listed = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["commands", "--use", "winonly"])
         .current_dir(&dir)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl commands");
+        .expect("run kiln commands");
     assert!(listed.status.success(), "listing a windows-only kit on linux must work");
     assert!(
         String::from_utf8_lossy(&listed.stdout).contains("MessageBeep"),
@@ -210,15 +210,15 @@ struct Lsp {
 
 impl Lsp {
     fn start() -> Lsp {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_openepl"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_kiln"))
             .arg("lsp")
             .current_dir(repo())
-            .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+            .env("KILN_RUNTIME_DIR", repo().join("runtime"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .expect("spawn openepl lsp");
+            .expect("spawn kiln lsp");
         let stdin = child.stdin.take().unwrap();
         let stdout = BufReader::new(child.stdout.take().unwrap());
         let mut c = Lsp { child, stdin, stdout, id: 1 };
@@ -271,7 +271,7 @@ impl Lsp {
     fn open(&mut self, uri: &str, text: &str) {
         self.send(serde_json::json!({
             "jsonrpc": "2.0", "method": "textDocument/didOpen",
-            "params": { "textDocument": { "uri": uri, "languageId": "openepl", "version": 1, "text": text } }
+            "params": { "textDocument": { "uri": uri, "languageId": "kiln", "version": 1, "text": text } }
         }));
     }
 
@@ -303,7 +303,7 @@ impl Lsp {
 #[test]
 fn lsp_completes_a_kit_declaration() {
     let mut c = Lsp::start();
-    let uri = "file:///tmp/openepl_declkit_complete.oir";
+    let uri = "file:///tmp/kiln_declkit_complete.kiln";
     // Caret on the blank line inside `main`.
     c.open(uri, "module m\nuse demoffi\nsub main\n  \nend\n");
     let labels = c.completion_labels(uri, 3, 2);

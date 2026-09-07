@@ -2,7 +2,7 @@
 
 # Project templates
 
-`openepl new <template> <directory>` creates a project from one of these. Each
+`kiln new <template> <directory>` creates a project from one of these. Each
 one compiles and runs as it stands.
 
 | Template | Builds | What you get |

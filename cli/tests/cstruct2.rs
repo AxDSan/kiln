@@ -6,11 +6,11 @@
 //! `examples/dll/structs.c` declares the same four structs in C and reports its
 //! own `sizeof` and `offsetof` for each, so every layout number the program
 //! prints is checked against the C compiler's rather than against a table
-//! written by hand — the whole point of a c-record is that clang and OpenEPL
+//! written by hand — the whole point of a c-record is that clang and Kiln
 //! agree about the bytes.
 //!
 //! Also here: a module variable seeded from a `const`, and a kit whose
-//! declarations are split across two `.oed` files.
+//! declarations are split across two `.kdecl` files.
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -33,7 +33,7 @@ fn on_path(tool: &str) -> bool {
 /// beside its own executable, so the two must share one directory, and two
 /// tests must not race on it.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_cstruct2_{tag}_test"));
+    let dir = std::env::temp_dir().join(format!("kiln_cstruct2_{tag}_test"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -51,10 +51,10 @@ fn build_structs_lib(dir: &Path, cc: &str, soname: &str, shared_flags: &[&str]) 
     assert!(status.success(), "{cc} failed to build {soname}");
 }
 
-/// Every line `cstruct2.oir` must print — the same on Linux and, below, under
-/// wine. The pairs of equal numbers are OpenEPL's `size of` beside the same
+/// Every line `cstruct2.kiln` must print — the same on Linux and, below, under
+/// wine. The pairs of equal numbers are Kiln's `size of` beside the same
 /// `sizeof` computed by the C compiler that built `structs.c`; the `*-ok` lines
-/// are OpenEPL's own field offsets held to clang's `offsetof`.
+/// are Kiln's own field offsets held to clang's `offsetof`.
 const EXPECT: &[&str] = &[
     "11",             // m.pt.x — a nested field round-trips
     "22",             // m.pt.y
@@ -93,8 +93,8 @@ const EXPECT: &[&str] = &[
     "1.5",            // a float field round-trips (exact in binary)
     "4",              // size of FloatBox
     "4",              // clang's sizeof(SFloatBox)
-    "2.25",           // C stored 2.25 as a float; OpenEPL reads it as a double
-    "float-agrees",   // and C reads back exactly what OpenEPL wrote
+    "2.25",           // C stored 2.25 as a float; Kiln reads it as a double
+    "float-agrees",   // and C reads back exactly what Kiln wrote
     "5",              // a module variable seeded from a `const`
 ];
 
@@ -125,17 +125,17 @@ fn nested_records_arrays_words_and_floats_match_clang() {
     build_structs_lib(&dir, "clang", "libstructs.so", &["-shared", "-fPIC"]);
 
     let bin = dir.join("cstruct2");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
-            repo().join("examples/dll/cstruct2.oir").to_str().unwrap(),
+            repo().join("examples/dll/cstruct2.kiln").to_str().unwrap(),
             "-o",
         ])
         .arg(&bin)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl");
-    assert!(status.success(), "openepl build cstruct2 failed");
+        .expect("run kiln");
+    assert!(status.success(), "kiln build cstruct2 failed");
     run_and_check(&bin, &dir, "linux");
 }
 
@@ -153,19 +153,19 @@ fn nested_c_structs_cross_build_for_windows_and_run_under_wine() {
     build_structs_lib(&dir, "x86_64-w64-mingw32-gcc", "structs.dll", &["-shared"]);
 
     let bin = dir.join("cstruct2.exe");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
-            repo().join("examples/dll/cstruct2.oir").to_str().unwrap(),
+            repo().join("examples/dll/cstruct2.kiln").to_str().unwrap(),
             "--os",
             "windows",
             "-o",
         ])
         .arg(&bin)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl --os windows");
-    assert!(status.success(), "openepl build --os windows failed");
+        .expect("run kiln --os windows");
+    assert!(status.success(), "kiln build --os windows failed");
 
     if !on_path("wine") {
         eprintln!("wine is not installed; the Windows image was built but not run");
@@ -188,7 +188,7 @@ fn nested_c_structs_cross_build_for_windows_and_run_under_wine() {
     assert_eq!(lines, EXPECT, "unexpected output under wine");
 }
 
-/// A kit whose declarations are split across two `.oed` files: `use` sees
+/// A kit whose declarations are split across two `.kdecl` files: `use` sees
 /// everything from both, and a `dll` in one file resolves a record declared in
 /// the other — order across files matters no more than order within one.
 #[test]
@@ -208,8 +208,8 @@ fn a_kit_may_split_its_declarations_across_files() {
         .expect("run clang for libdemoffi.so");
     assert!(status.success(), "clang failed to build libdemoffi.so");
 
-    // `SplitPoint`, `SPLIT_ANSWER` and `SPLIT_TAG` come from `shapes.oed`;
-    // `split_add`, `split_greeting` and `split_move` from `calls.oed`.
+    // `SplitPoint`, `SPLIT_ANSWER` and `SPLIT_TAG` come from `shapes.kdecl`;
+    // `split_add`, `split_greeting` and `split_move` from `calls.kdecl`.
     let src = "module split\nuse split_demo\n\n\
                var seeded: int = SPLIT_ANSWER\n\n\
                sub main\n\
@@ -223,18 +223,18 @@ fn a_kit_may_split_its_declarations_across_files() {
                \x20 call print_text(SPLIT_TAG)\n\
                \x20 call print_int(seeded)\n\
                end\n";
-    let srcpath = dir.join("prog.oir");
+    let srcpath = dir.join("prog.kiln");
     std::fs::write(&srcpath, src).expect("write program source");
     let bin = dir.join("prog");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", srcpath.to_str().unwrap(), "-o"])
         .arg(&bin)
         // The kit resolves as a project kit from `kits/` beside the project,
         // which is the repo's own `kits/` — the same way `use demoffi` does.
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(
         out.status.success(),
         "the split-kit program failed to build:\n{}",
@@ -260,21 +260,21 @@ fn a_kit_may_split_its_declarations_across_files() {
     );
 }
 
-/// `openepl kits` lists what a split kit declares, from every one of its files
+/// `kiln kits` lists what a split kit declares, from every one of its files
 /// — the listing and the build read the bundle through the same reader, so they
 /// cannot disagree about what a kit carries.
 #[test]
-fn openepl_kits_lists_a_split_kits_whole_bundle() {
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+fn kiln_kits_lists_a_split_kits_whole_bundle() {
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .arg("kits")
         .current_dir(repo())
         .output()
-        .expect("run openepl kits");
+        .expect("run kiln kits");
     let text = String::from_utf8_lossy(&out.stdout);
     for line in [
-        "dll: split_demo split_add demoffi",     // calls.oed
-        "crecord: split_demo SplitPoint",        // shapes.oed
-        "const: split_demo SPLIT_ANSWER int",    // shapes.oed
+        "dll: split_demo split_add demoffi",     // calls.kdecl
+        "crecord: split_demo SplitPoint",        // shapes.kdecl
+        "const: split_demo SPLIT_ANSWER int",    // shapes.kdecl
     ] {
         assert!(text.contains(line), "expected `{line}` in:\n{text}");
     }
@@ -288,24 +288,24 @@ fn a_name_declared_in_two_files_of_one_kit_is_an_error() {
     let dir = scratch("dupkit");
     let kit = dir.join("kits/dupkit");
     std::fs::create_dir_all(&kit).expect("create the kit dir");
-    std::fs::write(kit.join("one.oed"), "const SHARED = 1\n").unwrap();
-    std::fs::write(kit.join("two.oed"), "const SHARED = 2\n").unwrap();
+    std::fs::write(kit.join("one.kdecl"), "const SHARED = 1\n").unwrap();
+    std::fs::write(kit.join("two.kdecl"), "const SHARED = 2\n").unwrap();
     std::fs::write(
-        dir.join("prog.oir"),
+        dir.join("prog.kiln"),
         "module d\nuse dupkit\nsub main\nend\n",
     )
     .unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
-        .args(["build", "prog.oir", "-o", "prog"])
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["build", "prog.kiln", "-o", "prog"])
         // `kits/` beside the project is the first tier `use` looks in.
         .current_dir(&dir)
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl");
+        .expect("run kiln");
     assert!(!out.status.success(), "a duplicated name should not build");
     let msg = String::from_utf8_lossy(&out.stderr);
     assert!(
-        msg.contains("one.oed") && msg.contains("two.oed") && msg.contains("SHARED"),
+        msg.contains("one.kdecl") && msg.contains("two.kdecl") && msg.contains("SHARED"),
         "expected both files and the name in:\n{msg}"
     );
 }
@@ -371,14 +371,14 @@ fn the_new_field_shapes_have_build_time_rules() {
         ),
     ];
     for (i, (src, needle)) in cases.iter().enumerate() {
-        let path = dir.join(format!("bad{i}.oir"));
+        let path = dir.join(format!("bad{i}.kiln"));
         std::fs::write(&path, src).unwrap();
-        let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+        let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
             .args(["build", path.to_str().unwrap(), "-o"])
             .arg(dir.join(format!("bad{i}")))
-            .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+            .env("KILN_RUNTIME_DIR", repo().join("runtime"))
             .output()
-            .expect("run openepl");
+            .expect("run kiln");
         assert!(!out.status.success(), "case {i} should not build:\n{src}");
         let msg = String::from_utf8_lossy(&out.stderr);
         assert!(

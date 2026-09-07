@@ -1,0 +1,90 @@
+# Counting, and leaving a loop early.
+#
+#   kiln run examples/loops.kiln
+#
+# `while` used to be the only loop, so every counted loop was hand-written
+# index bookkeeping and every search ran to the end with a sentinel variable.
+#
+#   for i in 1..10        counts up; `i` is an `int` that belongs to the loop
+#   for i in 10..1 step -1   counts down; the step is a literal, so the
+#                            direction is decided when the program is compiled
+#   break                  leave the innermost loop now
+#   continue               go straight to the next turn of it
+#
+# The start and limit are read ONCE, before the first turn. A loop cannot be
+# made longer by its own body, which is the bug that hand-written index
+# bookkeeping invites.
+#
+# Locals are function-scoped, here as everywhere in the language, so two loops
+# in one subroutine need two different variable names — hence `n`, `down`,
+# `hit` below rather than `i` three times.
+module loops
+
+sub main
+  call print_text("-- fizzbuzz, counted --")
+  for n in 1..15
+    call print_text(fizzbuzz(n))
+  end
+
+  call print_text("-- counting down --")
+  for down in 5..1 step -1
+    call print_int(down)
+  end
+
+  # `continue` skips the rest of this turn; `break` ends the loop. Together
+  # they are how you say "the first one that fits" without a sentinel.
+  call print_text("-- first multiple of 7 above 100 --")
+  for hit in 101..200
+    if hit % 7 <> 0
+      continue
+    end
+    call print_int(hit)
+    break
+  end
+
+  # `break` and `continue` work in a `while` too.
+  call print_text("-- three vowel-free words --")
+  var found: int = 0
+  var i: int = 0
+  while true
+    increment i
+    if i > 100
+      break
+    end
+    let word: text = candidate(i)
+    if word = ""
+      continue
+    end
+    call print_text(word)
+    increment found
+    if found = 3
+      break
+    end
+  end
+
+  # Loops nest, and `break` leaves only the innermost one.
+  call print_text("-- times table --")
+  for row in 1..4
+    var line: text = ""
+    for col in 1..9
+      if col > row
+        break
+      end
+      line &= "{row * col} "
+    end
+    call print_text(line)
+  end
+end
+
+sub fizzbuzz(n: int): text
+  return "FizzBuzz" if n % 15 = 0
+  return "Fizz" if n % 3 = 0
+  return "Buzz" if n % 5 = 0
+  return int_to_text(n)
+end
+
+# Every third number names a word; the rest name nothing.
+sub candidate(i: int): text
+  return "" if i % 3 <> 0
+  return "word-{i}"
+end

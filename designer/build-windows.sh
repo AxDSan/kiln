@@ -1,11 +1,11 @@
 #!/bin/bash
-# Cross-build OpenEPL Studio for Windows x86-64 with mingw-w64.
-#   designer/build-windows.sh          -> designer/openepl-studio.exe, and the
+# Cross-build Kiln Studio for Windows x86-64 with mingw-w64.
+#   designer/build-windows.sh          -> designer/kiln-studio.exe, and the
 #                                         DLLs it imports beside it (designer/windows/)
 #
 # The same recipe as designer/build.sh — RmlUi statically, SDL2, SDL2_image
 # and freetype from the sysroot's packages — with the Windows toolchain the
-# ui library uses for `openepl build --os windows`: mingw's own g++ for C++,
+# ui library uses for `kiln build --os windows`: mingw's own g++ for C++,
 # because it built the Windows RmlUi archive and clang's C++ objects will not
 # link against it (libs/ui/lib.json, cli/src/main.rs say the same).
 #
@@ -18,7 +18,7 @@ cd "$ROOT"
 TRIPLE=x86_64-w64-mingw32
 SYSROOT="${SYSROOT:-/usr/$TRIPLE/sys-root/mingw}"
 OUT_DIR="${OUT_DIR:-designer/windows}"
-EXE="$OUT_DIR/openepl-studio.exe"
+EXE="$OUT_DIR/kiln-studio.exe"
 
 command -v "$TRIPLE-g++" >/dev/null || { echo "missing $TRIPLE-g++ (mingw64-gcc-c++ on Fedora)" >&2; exit 1; }
 command -v "$TRIPLE-pkg-config" >/dev/null || { echo "missing $TRIPLE-pkg-config (mingw64-filesystem on Fedora)" >&2; exit 1; }
@@ -33,7 +33,7 @@ fi
 
 # The ui library's Windows flags (libs/ui/lib.json): RMLUI_STATIC_LIB so the
 # headers do not ask for dllimport, and the same backend defines as build.sh.
-# `_Static_assert` is C11; g++ has only `static_assert`, and abi/openepl_abi.h
+# `_Static_assert` is C11; g++ has only `static_assert`, and abi/kiln_abi.h
 # uses the C spelling — the same shim libs/ui/ui_rmlui.cpp carries for the
 # ui library's own cross build.
 FLAGS=(-std=gnu++17 -O1 -Wall -Wextra -Wformat=2 -DRMLUI_SDL_VERSION_MAJOR=2 -DSDL_VIDEO_RENDER_OGL=1
@@ -61,7 +61,7 @@ trap 'rm -rf "$OBJ"' EXIT
   "${LIBS[@]}" -o "$EXE"
 
 # The DLLs it imports, transitively, from the sysroot — read from the
-# images' import tables, as `openepl build --os windows` does, never from a
+# images' import tables, as `kiln build --os windows` does, never from a
 # list kept by hand. sdl2-compat's SDL2.dll loads SDL3.dll by hand rather
 # than importing it, so that one is named here (libs/ui/lib.json,
 # windows_extra_dlls).

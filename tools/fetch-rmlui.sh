@@ -2,7 +2,7 @@
 # Fetch + build the pinned RmlUi into vendor/ (gitignored). Run once.
 # Pinned: this version is the one the UI layer is built and tested against.
 # This is the Linux build; tools/build-rmlui-windows.sh builds the same
-# checkout a second time with mingw-w64, for `openepl build --os windows`.
+# checkout a second time with mingw-w64, for `kiln build --os windows`.
 set -eu
 VER=6.3
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

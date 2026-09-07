@@ -1,17 +1,17 @@
-// Splash and Welcome screens for OpenEPL Studio.
+// Splash and Welcome screens for Kiln Studio.
 //
 // Two separate documents shown before the IDE chrome exists, for two reasons.
 // The splash has to be on screen *during* the expensive startup work — loading
-// the runtime registry through `openepl inspect` — so it must render before
+// the runtime registry through `kiln inspect` — so it must render before
 // that work begins, which means before the model exists. And the welcome screen
 // has no project yet, so a half-initialised IDE behind it would have nothing
 // coherent to draw.
 //
-// The template tiles are generated from `openepl templates` rather than from a
+// The template tiles are generated from `kiln templates` rather than from a
 // list here: the CLI is the single reader of the templates directory, so adding
 // a template adds a tile with no change to this file.
-#ifndef OPENEPL_DESIGNER_WELCOME_H
-#define OPENEPL_DESIGNER_WELCOME_H
+#ifndef KILN_DESIGNER_WELCOME_H
+#define KILN_DESIGNER_WELCOME_H
 
 #include <dirent.h>
 #include <cstdio>
@@ -26,42 +26,41 @@
 #include "portable.h"
 #include "theme.h"
 
-namespace openepl::welcome {
+namespace kiln::welcome {
 
 /// Strip the line ending `fgets` leaves on.
 inline void chomp(std::string& line) {
     while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
 }
 
-/// What the toolchain says it is — the first line of `openepl version`, e.g.
-/// `openepl 0.9.0` — or "" when it cannot be asked. Shown on the welcome
+/// What the toolchain says it is — the first line of `kiln version`, e.g.
+/// `kiln 0.9.0` — or "" when it cannot be asked. Shown on the welcome
 /// screen so the product says somewhere what it is; before this it did not.
-inline std::string version_string(const std::string& openepl_bin) {
-    if (openepl_bin.empty()) return "";
+inline std::string version_string(const std::string& kiln_bin) {
+    if (kiln_bin.empty()) return "";
     std::string text;
-    openepl::sys::capture_output(openepl_bin + " version", false, text);
+    kiln::sys::capture_output(kiln_bin + " version", false, text);
     std::string line = text.substr(0, text.find('\n'));
     chomp(line);
     return line;
 }
 
-/// Is this path a project — a `.oeproj`, or a directory holding one?
+/// Is this path a project — a `.kproj`, or a directory holding one?
 inline bool is_project_path(const std::string& path) {
     struct stat st;
     if (::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) return true;
-    const std::string ext = ".oeproj";
-    return path.size() > ext.size() && path.compare(path.size() - ext.size(), ext.size(), ext) == 0;
+    return kiln::sys::has_ext(path, ".kproj");
 }
 
 /// The file Studio should open for `path`: the `main:` of a project, as
-/// `openepl project` resolves it, or the path itself when it is already an
-/// `.oir`. Studio never reads a project file — the CLI is its only reader —
+/// `kiln project` resolves it, or the path itself when it is already an
+/// `.kiln`. Studio never reads a project file — the CLI is its only reader —
 /// so this is one subprocess, and "" when the project cannot be read.
-inline std::string resolve_open(const std::string& openepl_bin, const std::string& path) {
+inline std::string resolve_open(const std::string& kiln_bin, const std::string& path) {
     if (!is_project_path(path)) return path;
-    if (openepl_bin.empty()) return "";
+    if (kiln_bin.empty()) return "";
     std::string text;
-    openepl::sys::capture_output(openepl_bin + " project " + path, false, text);
+    kiln::sys::capture_output(kiln_bin + " project " + path, false, text);
     std::string main, line;
     std::istringstream lines(text);
     while (std::getline(lines, line)) {
@@ -71,7 +70,7 @@ inline std::string resolve_open(const std::string& openepl_bin, const std::strin
     return main;
 }
 
-/// One project template, as reported by `openepl templates`.
+/// One project template, as reported by `kiln templates`.
 struct TemplateInfo {
     std::string id;
     std::string target;
@@ -80,21 +79,21 @@ struct TemplateInfo {
     std::string entry;
 };
 
-/// Run `openepl templates` and parse its line-based output.
+/// Run `kiln templates` and parse its line-based output.
 ///
-/// Same shape as the designer's use of `openepl inspect`: the CLI reads the
+/// Same shape as the designer's use of `kiln inspect`: the CLI reads the
 /// templates directory, this only renders what it reports.
-inline std::vector<TemplateInfo> load_templates(const std::string& openepl_bin) {
+inline std::vector<TemplateInfo> load_templates(const std::string& kiln_bin) {
     std::vector<TemplateInfo> out;
     std::string text;
-    openepl::sys::capture_output(openepl_bin + " templates", false, text);
+    kiln::sys::capture_output(kiln_bin + " templates", false, text);
     std::istringstream lines(text);
 
     auto find = [&out](const std::string& id) -> TemplateInfo& {
         for (auto& t : out) {
             if (t.id == id) return t;
         }
-        out.push_back(TemplateInfo{id, "", id, "", "main.oir"});
+        out.push_back(TemplateInfo{id, "", id, "", "main.kiln"});
         return out.back();
     };
 
@@ -122,7 +121,7 @@ inline std::vector<TemplateInfo> load_templates(const std::string& openepl_bin) 
 /// Shared styling for both screens: the same palette as the IDE, so startup
 /// does not flash a different-looking product.
 inline std::string base_styles() {
-    using namespace openepl::designer::theme;
+    using namespace kiln::designer::theme;
     std::string s;
     // RmlUi has no HTML-like default stylesheet: every element is `inline`
     // unless told otherwise. Without this the tiles flow into one another
@@ -202,7 +201,7 @@ inline std::string splash_markup(const std::string& family, int w, int h,
     s += "#logo{display:block;width:420px;margin-left:auto;margin-right:auto}";
     s += "</style></head><body><div id='box'><div id='inner'>";
     if (wordmark.empty()) {
-        s += "<div id='mark'>OpenEPL <span class='accent'>Studio</span></div>";
+        s += "<div id='mark'>Kiln <span class='accent'>Studio</span></div>";
     } else {
         s += "<img id='logo' src='" + wordmark + "'/>";
     }
@@ -219,23 +218,23 @@ inline std::string splash_markup(const std::string& family, int w, int h,
 /// The welcome screen: pick a project kind, open a project or a file, or
 /// reopen something recent.
 ///
-/// `openepl_bin` is what lets the screen say which toolchain it is and turn a
+/// `kiln_bin` is what lets the screen say which toolchain it is and turn a
 /// recent PROJECT into the file to open: a recent entry is recorded as its
-/// `project.oeproj` when it has one, and `oe-open` must still carry an `.oir`,
+/// `project.kproj` when it has one, and `oe-open` must still carry an `.kiln`,
 /// because the caller reads that path into the code editor. With no binary the
 /// screen shows no version and hands the recent path over as recorded.
 ///
 /// Attributes the caller's click listener reads:
 ///   oe-new='<template id>'   create from a template
-///   oe-open='<path.oir>'     open that file
+///   oe-open='<path.kiln>'     open that file
 ///   oe-browse='project'|'file'   show the path browser (`browse_markup`)
 inline std::string welcome_markup(const std::string& family, int w, int h,
                                   const std::vector<TemplateInfo>& templates,
                                   const std::vector<std::string>& recent,
                                   const std::string& wordmark,
-                                  const std::string& openepl_bin) {
-    using namespace openepl::designer::theme;
-    const std::string version = version_string(openepl_bin);
+                                  const std::string& kiln_bin) {
+    using namespace kiln::designer::theme;
+    const std::string version = version_string(kiln_bin);
     std::string s = "<rml><head><style>";
     s += "body{width:" + std::to_string(w) + "px;height:" + std::to_string(h) +
          "px;font-family:'" + family + "'}";
@@ -278,7 +277,7 @@ inline std::string welcome_markup(const std::string& family, int w, int h,
     s += "</style></head><body><div id='bg'/>" + window_controls_markup();
 
     s += "<div id='head'>";
-    s += wordmark.empty() ? "<div id='mark'>OpenEPL <span class='accent'>Studio</span></div>"
+    s += wordmark.empty() ? "<div id='mark'>Kiln <span class='accent'>Studio</span></div>"
                           : "<img id='logo' src='" + wordmark + "'/>";
     s += ""
          "<div id='tag'>Start something. Every template below compiles to a clean native "
@@ -299,9 +298,9 @@ inline std::string welcome_markup(const std::string& family, int w, int h,
 
     s += "<div id='right'><div class='colhead'>OPEN</div>";
     s += "<div class='open' oe-browse='project'><div class='tname'>Open Project\u2026</div>"
-         "<div class='tdesc'>A project.oeproj, or its folder</div></div>";
+         "<div class='tdesc'>A project.kproj, or its folder</div></div>";
     s += "<div class='open' oe-browse='file'><div class='tname'>Open File\u2026</div>"
-         "<div class='tdesc'>Any .oir</div></div>";
+         "<div class='tdesc'>Any .kiln</div></div>";
 
     s += "<div class='colhead'>RECENT</div>";
     for (const auto& r : recent) {
@@ -314,7 +313,7 @@ inline std::string welcome_markup(const std::string& family, int w, int h,
         }
         const size_t slash = shown.find_last_of('/');
         const std::string base = slash == std::string::npos ? shown : shown.substr(slash + 1);
-        const std::string open = openepl_bin.empty() ? r : resolve_open(openepl_bin, r);
+        const std::string open = kiln_bin.empty() ? r : resolve_open(kiln_bin, r);
         if (open.empty()) continue;   // a project that no longer reads
         s += "<div class='recent' oe-open='" + open + "'><div>" + base + "</div>";
         s += "<div class='rpath'>" + r + "</div></div>";
@@ -324,7 +323,7 @@ inline std::string welcome_markup(const std::string& family, int w, int h,
     }
     s += "</div></div>";
 
-    s += "<div id='foot'>openepl-designer &lt;project.oir&gt; opens a file directly</div>";
+    s += "<div id='foot'>kiln-designer &lt;project.kiln&gt; opens a file directly</div>";
     if (!version.empty()) s += "<div id='version'>" + version + "</div>";
     s += "</body></rml>";
     return s;
@@ -346,7 +345,7 @@ struct DirEntry {
     std::string name;
     std::string path;
     bool is_dir = false;
-    /// A `project.oeproj` (browsing for a project) or an `.oir` (for a file).
+    /// A `project.kproj` (browsing for a project) or an `.kiln` (for a file).
     bool is_openable = false;
 };
 
@@ -361,13 +360,13 @@ inline std::vector<DirEntry> list_dir(const std::string& dir, const std::string&
     while (dirent* e = ::readdir(d)) {
         const std::string name = e->d_name;
         if (name == "." || name == ".." || name[0] == '.') continue;
-        const std::string path = openepl::sys::is_root_dir(dir) ? dir + name : dir + "/" + name;
+        const std::string path = kiln::sys::is_root_dir(dir) ? dir + name : dir + "/" + name;
         struct stat st;
         if (::stat(path.c_str(), &st) != 0) continue;
         if (S_ISDIR(st.st_mode)) {
             dirs.push_back(DirEntry{name, path, true, false});
-        } else if (mode == "project" ? name == "project.oeproj"
-                                     : name.size() > 4 && name.compare(name.size() - 4, 4, ".oir") == 0) {
+        } else if (mode == "project" ? name == "project.kproj"
+                                     : kiln::sys::has_ext(name, ".kiln")) {
             files.push_back(DirEntry{name, path, false, true});
         }
     }
@@ -377,8 +376,8 @@ inline std::vector<DirEntry> list_dir(const std::string& dir, const std::string&
     std::sort(files.begin(), files.end(), by_name);
 
     std::vector<DirEntry> out;
-    if (!openepl::sys::is_root_dir(dir)) {
-        out.push_back(DirEntry{"..", openepl::sys::parent_dir(dir), true, false});
+    if (!kiln::sys::is_root_dir(dir)) {
+        out.push_back(DirEntry{"..", kiln::sys::parent_dir(dir), true, false});
     }
     out.insert(out.end(), dirs.begin(), dirs.end());
     out.insert(out.end(), files.begin(), files.end());
@@ -390,12 +389,12 @@ inline std::vector<DirEntry> list_dir(const std::string& dir, const std::string&
 ///
 /// Attributes the caller's click listener reads:
 ///   oe-browse-dir='<path>'   relist that directory (`list_dir` + this again)
-///   oe-open='<path.oir>'     open that file — for a project entry it is
+///   oe-open='<path.kiln>'     open that file — for a project entry it is
 ///                            already the project's `main`, resolved here
 ///   oe-browse-cancel=''      back to the welcome screen
 inline std::string browse_markup(const std::string& family, int w, int h, const std::string& dir,
-                                 const std::string& mode, const std::string& openepl_bin) {
-    using namespace openepl::designer::theme;
+                                 const std::string& mode, const std::string& kiln_bin) {
+    using namespace kiln::designer::theme;
     std::string s = "<rml><head><style>";
     s += "body{width:" + std::to_string(w) + "px;height:" + std::to_string(h) +
          "px;font-family:'" + family + "'}";
@@ -429,7 +428,7 @@ inline std::string browse_markup(const std::string& family, int w, int h, const 
             s += "<div class='row dir' oe-browse-dir='" + e.path + "'>" + e.name + "/</div>";
             continue;
         }
-        const std::string open = mode == "project" ? resolve_open(openepl_bin, e.path) : e.path;
+        const std::string open = mode == "project" ? resolve_open(kiln_bin, e.path) : e.path;
         if (open.empty()) continue;   // a project file the CLI refuses is not offered
         s += "<div class='row' oe-open='" + open + "'>" + e.name + "</div>";
     }
@@ -445,7 +444,7 @@ inline std::string recent_path() {
     // XDG_DATA_HOME first: it is how a test run keeps its scratch files out of
     // the list a person sees on their next real start. Then the platform's
     // per-user data directory — %APPDATA% on Windows.
-    const std::string dir = openepl::sys::data_dir();
+    const std::string dir = kiln::sys::data_dir();
     return dir.empty() ? "" : dir + "/recent";
 }
 
@@ -472,22 +471,22 @@ inline std::vector<std::string> load_recent(size_t limit = 8) {
 /// Stored absolute: a relative path is meaningless from the next session's
 /// working directory, and the entry would silently vanish from the list.
 ///
-/// A file with a `project.oeproj` beside it is recorded as that project, not
+/// A file with a `project.kproj` beside it is recorded as that project, not
 /// as the file: the list is of things a person worked on, and what they
-/// worked on was the project. A loose `.oir` is still recorded as itself.
+/// worked on was the project. A loose `.kiln` is still recorded as itself.
 inline void remember_recent(const std::string& relative_or_absolute, size_t limit = 8) {
     std::string path = relative_or_absolute;
-    if (const std::string real = openepl::sys::real_path(relative_or_absolute); !real.empty()) path = real;
+    if (const std::string real = kiln::sys::real_path(relative_or_absolute); !real.empty()) path = real;
     if (!is_project_path(path)) {
         const size_t slash = path.find_last_of('/');
         const std::string sibling =
-            (slash == std::string::npos ? std::string() : path.substr(0, slash + 1)) + "project.oeproj";
+            (slash == std::string::npos ? std::string() : path.substr(0, slash + 1)) + "project.kproj";
         if (::access(sibling.c_str(), R_OK) == 0) path = sibling;
     }
     const std::string file = recent_path();
     if (file.empty()) return;
     const size_t slash = file.find_last_of('/');
-    if (slash != std::string::npos) openepl::sys::make_dirs(file.substr(0, slash));
+    if (slash != std::string::npos) kiln::sys::make_dirs(file.substr(0, slash));
     std::vector<std::string> keep{path};
     for (const auto& r : load_recent(limit * 2)) {
         if (r != path && keep.size() < limit) keep.push_back(r);
@@ -498,6 +497,6 @@ inline void remember_recent(const std::string& relative_or_absolute, size_t limi
     std::fclose(f);
 }
 
-} // namespace openepl::welcome
+} // namespace kiln::welcome
 
 #endif

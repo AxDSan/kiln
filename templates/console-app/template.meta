@@ -1,4 +1,4 @@
 name: Console Application
 desc: A terminal program. Starts at `main`, prints, and does arithmetic.
 target: console
-entry: main.oir
+entry: main.kiln

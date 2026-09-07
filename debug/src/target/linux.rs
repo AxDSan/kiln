@@ -48,7 +48,7 @@ use std::sync::{Arc, Mutex};
 
 /// The requests this file makes of `ptrace`.
 ///
-/// Spelled out rather than taken from a crate, because `openepl-debug` depends
+/// Spelled out rather than taken from a crate, because `kiln-debug` depends
 /// on `gimli` and `object` and nothing else, and a process-control binding is
 /// a large dependency to acquire for two dozen integers.
 mod request {
@@ -1125,7 +1125,7 @@ fn failed(what: &str) -> Error {
 /// Taken from `AT_ENTRY`, which the kernel puts in the auxiliary vector: it is
 /// the entry point as loaded, and the ELF header holds the entry point as
 /// linked, so the difference is the bias for the executable itself. Zero for
-/// the non-relocatable programs OpenEPL builds today, and correct without a
+/// the non-relocatable programs Kiln builds today, and correct without a
 /// change on the day it builds a position-independent one.
 fn load_bias(pid: i32, program: &Path) -> u64 {
     /// The entry point, as the kernel actually loaded it.
@@ -1185,13 +1185,13 @@ mod tests {
     use super::*;
     use crate::unwind::Unwinder;
 
-    /// Where `line 14` of `hello.oir` begins — `call print_int(answer)`.
+    /// Where `line 14` of `hello.kiln` begins — `call print_int(answer)`.
     ///
     /// Taken from the line table rather than written down, so a change in the
     /// backend moves the test rather than breaking it.
     const LINE: u32 = 14;
 
-    /// A built copy of `examples/hello.oir`, or nothing when the compiler has
+    /// A built copy of `examples/hello.kiln`, or nothing when the compiler has
     /// not been built yet.
     ///
     /// Skipping is said out loud. A test that quietly passes because it did
@@ -1209,14 +1209,14 @@ mod tests {
                 .parent()
                 .expect("the workspace root")
                 .to_path_buf();
-            let compiler = root.join("target/release/openepl");
+            let compiler = root.join("target/release/kiln");
             if !compiler.exists() {
                 return None;
             }
-            let built = PathBuf::from("/tmp/openepl-debug-linux-fixture");
+            let built = PathBuf::from("/tmp/kiln-debug-linux-fixture");
             let made = std::process::Command::new(&compiler)
                 .arg("build")
-                .arg(root.join("examples/hello.oir"))
+                .arg(root.join("examples/hello.kiln"))
                 .arg("-o")
                 .arg(&built)
                 .output()
@@ -1230,7 +1230,7 @@ mod tests {
         });
         if built.is_none() {
             eprintln!(
-                "skipped: target/release/openepl is not built, so there is \
+                "skipped: target/release/kiln is not built, so there is \
                  nothing to trace"
             );
         }
@@ -1243,7 +1243,7 @@ mod tests {
         let program = crate::load(&built).expect("the fixture carries debug information");
         let address = program
             .breakpoint_for(LINE)
-            .expect("hello.oir line 14 runs something")
+            .expect("hello.kiln line 14 runs something")
             .address;
         let target = LinuxTarget::launch(&built, &[]).expect("the fixture launches");
         Some((target, address))
@@ -1388,7 +1388,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         assert!(
-            printed.contains("OpenEPL — arithmetic demo"),
+            printed.contains("Kiln — arithmetic demo"),
             "the program's own output was lost: {printed:?}"
         );
         assert!(printed.contains("42"), "expected 6 * 7 in {printed:?}");
@@ -1450,7 +1450,7 @@ mod tests {
 
     #[test]
     fn a_program_that_cannot_be_run_fails_rather_than_hanging() {
-        let result = LinuxTarget::launch(Path::new("/nonexistent/openepl-not-a-program"), &[]);
+        let result = LinuxTarget::launch(Path::new("/nonexistent/kiln-not-a-program"), &[]);
         assert!(result.is_err(), "launching nothing reported success");
     }
 
@@ -1482,7 +1482,7 @@ mod tests {
         let frames = unwinder.walk(registers, &target).expect("a stack");
         assert!(
             frames.len() >= 3,
-            "expected oe_user_main, ECodeStart and main; got {} frame(s)",
+            "expected kn_user_main, ECodeStart and main; got {} frame(s)",
             frames.len()
         );
         assert_eq!(frames[0].registers.pc, address);

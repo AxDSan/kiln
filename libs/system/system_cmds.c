@@ -9,9 +9,9 @@
  * `process` library.  This library only answers questions about the process it
  * is already inside.
  *
- * "openepl_core.h" is included rather than the ABI header alone because the
- * program's arguments (oe_arg_total / oe_arg_at) and the "" text sentinel
- * (oe_empty_text) are runtime internals, not part of the third-party ABI.
+ * "kiln_core.h" is included rather than the ABI header alone because the
+ * program's arguments (kn_arg_total / kn_arg_at) and the "" text sentinel
+ * (kn_empty_text) are runtime internals, not part of the third-party ABI.
  */
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
@@ -21,14 +21,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include "openepl_core.h"
+#include "kiln_core.h"
 
 #ifdef _WIN32
 /* Windows has no password database, no /proc and no nanosleep, so the account,
  * the machine, the binary's own path and the sleep all go through Win32.
  *
  * Those four are asked for in their WIDE form and converted to UTF-8, because
- * OpenEPL text is UTF-8 and the ANSI entry points would silently mangle a user
+ * Kiln text is UTF-8 and the ANSI entry points would silently mangle a user
  * whose name is not in the machine's codepage.  The ENVIRONMENT is the one
  * thing that stays narrow: getenv and the environment block are C-library
  * surface, and reading half of it wide would mean two disagreeing views of the
@@ -55,9 +55,9 @@ extern char **environ;
 /* Every text result is runtime-owned, like every other text value in the
  * program, so a caller can hold a failed result without a special case. */
 static char *sys_dup_text(const char *s) {
-    if (!s) return oe_empty_text();
+    if (!s) return kn_empty_text();
     size_t n = strlen(s);
-    char *out = (char *)oe_malloc((long)n + 1);
+    char *out = (char *)kn_malloc((long)n + 1);
     if (!out) return NULL;
     memcpy(out, s, n + 1);
     return out;
@@ -67,10 +67,10 @@ static char *sys_dup_text(const char *s) {
 /* UTF-16 in, runtime-owned UTF-8 out; NULL when the conversion fails, which a
  * caller reports the same way it reports an out-of-memory result. */
 static char *sys_from_wide(const wchar_t *w) {
-    if (!w) return oe_empty_text();
+    if (!w) return kn_empty_text();
     int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
     if (n <= 0) return NULL;
-    char *out = (char *)oe_malloc(n);
+    char *out = (char *)kn_malloc(n);
     if (!out) return NULL;
     if (WideCharToMultiByte(CP_UTF8, 0, w, -1, out, n, NULL, NULL) <= 0) return NULL;
     return out;
@@ -78,27 +78,27 @@ static char *sys_from_wide(const wchar_t *w) {
 #endif
 
 /* Fail with `code`/`msg` and return the "" text sentinel. */
-static void sys_fail_text(OpenEPL_Slot *ret, int32_t code, const char *msg) {
-    oe_error_set(code, msg);
-    oe_ret_text(ret, oe_empty_text());
+static void sys_fail_text(Kiln_Slot *ret, int32_t code, const char *msg) {
+    kn_error_set(code, msg);
+    kn_ret_text(ret, kn_empty_text());
 }
 
-static void sys_fail_text_errno(OpenEPL_Slot *ret, int e, const char *what) {
-    oe_error_set_errno(e, what);
-    oe_ret_text(ret, oe_empty_text());
+static void sys_fail_text_errno(Kiln_Slot *ret, int e, const char *what) {
+    kn_error_set_errno(e, what);
+    kn_ret_text(ret, kn_empty_text());
 }
 
 #ifdef _WIN32
-/* A Win32 status is NOT an errno value, so it goes through oe_error_set rather
- * than oe_error_set_errno: the number a program reads back from
+/* A Win32 status is NOT an errno value, so it goes through kn_error_set rather
+ * than kn_error_set_errno: the number a program reads back from
  * last_error_code() is what GetLastError() said, and comparing it against an
  * errno constant would be meaningless. */
-static void sys_fail_win(OpenEPL_Slot *ret, const char *what) {
+static void sys_fail_win(Kiln_Slot *ret, const char *what) {
     DWORD code = GetLastError();
     char msg[128];
     snprintf(msg, sizeof msg, "%s: Windows error %lu", what, (unsigned long)code);
-    oe_error_set((int32_t)code, msg);
-    oe_ret_text(ret, oe_empty_text());
+    kn_error_set((int32_t)code, msg);
+    kn_ret_text(ret, kn_empty_text());
 }
 #endif
 
@@ -117,40 +117,40 @@ static int sys_bad_env_name(const char *name) {
  * back.  That makes "" ambiguous between unset and set-to-empty, which is
  * exactly why env_has ships beside it — the same pairing as file_at_end next to
  * file_read_line. */
-void system_env_get(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_env_get(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *name = oe_arg_text(argv, 0);
+    const char *name = kn_arg_text(argv, 0);
     if (sys_bad_env_name(name)) {
-        sys_fail_text(ret, OE_ERR_INVALID_ARG, "env_get: bad variable name");
+        sys_fail_text(ret, KN_ERR_INVALID_ARG, "env_get: bad variable name");
         return;
     }
     const char *v = getenv(name);
-    oe_error_clear();
-    oe_ret_text(ret, sys_dup_text(v));
+    kn_error_clear();
+    kn_ret_text(ret, sys_dup_text(v));
 }
 
 /* env_has(text name) -> bool.  false with code 0 means genuinely absent. */
-void system_env_has(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_env_has(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *name = oe_arg_text(argv, 0);
+    const char *name = kn_arg_text(argv, 0);
     if (sys_bad_env_name(name)) {
-        oe_error_set(OE_ERR_INVALID_ARG, "env_has: bad variable name");
-        oe_ret_bool(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "env_has: bad variable name");
+        kn_ret_bool(ret, 0);
         return;
     }
     const char *v = getenv(name);
-    oe_error_clear();
-    oe_ret_bool(ret, v != NULL);
+    kn_error_clear();
+    kn_ret_bool(ret, v != NULL);
 }
 
 /* env_set(text name, text value) -> bool.  Overwrites. */
-void system_env_set(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_env_set(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *name = oe_arg_text(argv, 0);
-    const char *value = oe_arg_text(argv, 1);
+    const char *name = kn_arg_text(argv, 0);
+    const char *value = kn_arg_text(argv, 1);
     if (sys_bad_env_name(name)) {
-        oe_error_set(OE_ERR_INVALID_ARG, "env_set: bad variable name");
-        oe_ret_bool(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "env_set: bad variable name");
+        kn_ret_bool(ret, 0);
         return;
     }
     if (!value) value = "";
@@ -163,22 +163,22 @@ void system_env_set(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     int e = errno;
 #endif
     if (rc != 0) {
-        oe_error_set_errno(e, "env_set");
-        oe_ret_bool(ret, 0);
+        kn_error_set_errno(e, "env_set");
+        kn_ret_bool(ret, 0);
         return;
     }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 /* env_unset(text name) -> bool.  Removing something already absent succeeds:
  * the post-condition asked for is "not set", and it holds. */
-void system_env_unset(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_env_unset(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    const char *name = oe_arg_text(argv, 0);
+    const char *name = kn_arg_text(argv, 0);
     if (sys_bad_env_name(name)) {
-        oe_error_set(OE_ERR_INVALID_ARG, "env_unset: bad variable name");
-        oe_ret_bool(ret, 0);
+        kn_error_set(KN_ERR_INVALID_ARG, "env_unset: bad variable name");
+        kn_ret_bool(ret, 0);
         return;
     }
 #ifdef _WIN32
@@ -191,12 +191,12 @@ void system_env_unset(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     int e = errno;
 #endif
     if (rc != 0) {
-        oe_error_set_errno(e, "env_unset");
-        oe_ret_bool(ret, 0);
+        kn_error_set_errno(e, "env_unset");
+        kn_ret_bool(ret, 0);
         return;
     }
-    oe_error_clear();
-    oe_ret_bool(ret, 1);
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
 }
 
 static int sys_env_total(void) {
@@ -208,37 +208,37 @@ static int sys_env_total(void) {
 
 /* env_count() -> int.  A collection is a count plus an indexed accessor; this
  * one cannot fail, so it never touches the error slot. */
-void system_env_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_env_count(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
-    oe_ret_int(ret, sys_env_total());
+    kn_ret_int(ret, sys_env_total());
 }
 
 /* env_name_at(int index) -> text : the NAME of the i-th variable, 0-based.
  * The value is then env_get(name) — the accessor deliberately does not return
  * "NAME=value", which a program would only have to take apart again. */
-void system_env_name_at(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_env_name_at(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    int i = oe_arg_int(argv, 0);
+    int i = kn_arg_int(argv, 0);
     if (i < 1 || i > sys_env_total()) {
-        sys_fail_text(ret, OE_ERR_INVALID_ARG, "env_name_at: index out of range");
+        sys_fail_text(ret, KN_ERR_INVALID_ARG, "env_name_at: index out of range");
         return;
     }
     const char *entry = environ[i - 1];
     const char *eq = strchr(entry, '=');
     size_t n = eq ? (size_t)(eq - entry) : strlen(entry);
-    char *out = (char *)oe_malloc((long)n + 1);
-    if (!out) { sys_fail_text(ret, OE_ERR_TABLE_FULL, "env_name_at: out of memory"); return; }
+    char *out = (char *)kn_malloc((long)n + 1);
+    if (!out) { sys_fail_text(ret, KN_ERR_TABLE_FULL, "env_name_at: out of memory"); return; }
     memcpy(out, entry, n);
     out[n] = '\0';
-    oe_error_clear();
-    oe_ret_text(ret, out);
+    kn_error_clear();
+    kn_ret_text(ret, out);
 }
 
 /* --- os_* ------------------------------------------------------------- */
 
 /* os_name() -> text : "linux", "macos", "windows", or "unknown".
  * Decided at compile time, so it cannot fail and never touches the slot. */
-void system_os_name(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_os_name(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
 #if defined(_WIN32)
     const char *s = "windows";
@@ -249,11 +249,11 @@ void system_os_name(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
 #else
     const char *s = "unknown";
 #endif
-    oe_ret_text(ret, sys_dup_text(s));
+    kn_ret_text(ret, sys_dup_text(s));
 }
 
 /* os_arch() -> text : the CPU this binary was built for. */
-void system_os_arch(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_os_arch(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
 #if defined(__x86_64__) || defined(_M_X64)
     const char *s = "x86_64";
@@ -268,11 +268,11 @@ void system_os_arch(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
 #else
     const char *s = "unknown";
 #endif
-    oe_ret_text(ret, sys_dup_text(s));
+    kn_ret_text(ret, sys_dup_text(s));
 }
 
 /* os_host_name() -> text.  "" on failure. */
-void system_os_host_name(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_os_host_name(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
 #ifdef _WIN32
     wchar_t w[256];
@@ -282,9 +282,9 @@ void system_os_host_name(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
         return;
     }
     char *out = sys_from_wide(w);
-    if (!out) { sys_fail_text(ret, OE_ERR_UNSUPPORTED, "os_host_name: out of memory"); return; }
-    oe_error_clear();
-    oe_ret_text(ret, out);
+    if (!out) { sys_fail_text(ret, KN_ERR_UNSUPPORTED, "os_host_name: out of memory"); return; }
+    kn_error_clear();
+    kn_ret_text(ret, out);
 #else
     char buf[256];
     buf[0] = '\0';
@@ -292,44 +292,44 @@ void system_os_host_name(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
     int e = errno;
     if (rc != 0) { sys_fail_text_errno(ret, e, "os_host_name"); return; }
     buf[sizeof buf - 1] = '\0';   /* truncation may leave it unterminated */
-    oe_error_clear();
-    oe_ret_text(ret, sys_dup_text(buf));
+    kn_error_clear();
+    kn_ret_text(ret, sys_dup_text(buf));
 #endif
 }
 
 /* The account's name and home come from the environment first, because that is
  * what a login shell set and what the user would expect a program to honour,
  * and from the password database only when it is missing. */
-void system_os_user_name(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_os_user_name(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
 #ifdef _WIN32
     const char *v = getenv("USERNAME");
-    if (v && *v) { oe_error_clear(); oe_ret_text(ret, sys_dup_text(v)); return; }
+    if (v && *v) { kn_error_clear(); kn_ret_text(ret, sys_dup_text(v)); return; }
     wchar_t w[256];
     DWORD n = (DWORD)(sizeof w / sizeof w[0]);
     if (!GetUserNameW(w, &n)) { sys_fail_win(ret, "os_user_name"); return; }
     char *out = sys_from_wide(w);
-    if (!out) { sys_fail_text(ret, OE_ERR_UNSUPPORTED, "os_user_name: out of memory"); return; }
-    oe_error_clear();
-    oe_ret_text(ret, out);
+    if (!out) { sys_fail_text(ret, KN_ERR_UNSUPPORTED, "os_user_name: out of memory"); return; }
+    kn_error_clear();
+    kn_ret_text(ret, out);
 #else
     const char *v = getenv("USER");
     if (!v || !*v) v = getenv("LOGNAME");
-    if (v && *v) { oe_error_clear(); oe_ret_text(ret, sys_dup_text(v)); return; }
+    if (v && *v) { kn_error_clear(); kn_ret_text(ret, sys_dup_text(v)); return; }
     errno = 0;
     struct passwd *pw = getpwuid(getuid());
     int e = errno;
     if (!pw || !pw->pw_name) {
         if (e) sys_fail_text_errno(ret, e, "os_user_name");
-        else   sys_fail_text(ret, OE_ERR_UNSUPPORTED, "os_user_name: no such user");
+        else   sys_fail_text(ret, KN_ERR_UNSUPPORTED, "os_user_name: no such user");
         return;
     }
-    oe_error_clear();
-    oe_ret_text(ret, sys_dup_text(pw->pw_name));
+    kn_error_clear();
+    kn_ret_text(ret, sys_dup_text(pw->pw_name));
 #endif
 }
 
-void system_os_home_dir(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_os_home_dir(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
     const char *v = getenv("HOME");
 #ifdef _WIN32
@@ -337,26 +337,26 @@ void system_os_home_dir(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
      * is what Windows itself sets, and there is no password database behind
      * either of them. */
     if (!v || !*v) v = getenv("USERPROFILE");
-    if (v && *v) { oe_error_clear(); oe_ret_text(ret, sys_dup_text(v)); return; }
-    sys_fail_text(ret, OE_ERR_UNSUPPORTED, "os_home_dir: no home directory");
+    if (v && *v) { kn_error_clear(); kn_ret_text(ret, sys_dup_text(v)); return; }
+    sys_fail_text(ret, KN_ERR_UNSUPPORTED, "os_home_dir: no home directory");
 #else
-    if (v && *v) { oe_error_clear(); oe_ret_text(ret, sys_dup_text(v)); return; }
+    if (v && *v) { kn_error_clear(); kn_ret_text(ret, sys_dup_text(v)); return; }
     errno = 0;
     struct passwd *pw = getpwuid(getuid());
     int e = errno;
     if (!pw || !pw->pw_dir || !*pw->pw_dir) {
         if (e) sys_fail_text_errno(ret, e, "os_home_dir");
-        else   sys_fail_text(ret, OE_ERR_UNSUPPORTED, "os_home_dir: no home directory");
+        else   sys_fail_text(ret, KN_ERR_UNSUPPORTED, "os_home_dir: no home directory");
         return;
     }
-    oe_error_clear();
-    oe_ret_text(ret, sys_dup_text(pw->pw_dir));
+    kn_error_clear();
+    kn_ret_text(ret, sys_dup_text(pw->pw_dir));
 #endif
 }
 
 /* os_temp_dir() -> text.  There is always an answer — the environment's, or the
  * platform default — so this cannot fail and never touches the slot. */
-void system_os_temp_dir(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_os_temp_dir(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
 #ifdef _WIN32
     /* GetTempPathW consults TMP, TEMP and USERPROFILE in turn and falls back to
@@ -365,16 +365,16 @@ void system_os_temp_dir(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
      * the answer joins like every other directory this library reports. */
     wchar_t w[MAX_PATH + 2];
     DWORD n = GetTempPathW((DWORD)(sizeof w / sizeof w[0]), w);
-    if (n == 0 || n >= sizeof w / sizeof w[0]) { oe_ret_text(ret, sys_dup_text("C:\\Windows\\Temp")); return; }
+    if (n == 0 || n >= sizeof w / sizeof w[0]) { kn_ret_text(ret, sys_dup_text("C:\\Windows\\Temp")); return; }
     while (n > 1 && (w[n - 1] == L'\\' || w[n - 1] == L'/')) w[--n] = L'\0';
     char *out = sys_from_wide(w);
-    oe_ret_text(ret, out ? out : sys_dup_text("C:\\Windows\\Temp"));
+    kn_ret_text(ret, out ? out : sys_dup_text("C:\\Windows\\Temp"));
 #else
     const char *v = getenv("TMPDIR");
     if (!v || !*v) v = getenv("TMP");
     if (!v || !*v) v = getenv("TEMP");
     if (!v || !*v) v = "/tmp";
-    oe_ret_text(ret, sys_dup_text(v));
+    kn_ret_text(ret, sys_dup_text(v));
 #endif
 }
 
@@ -384,27 +384,27 @@ void system_os_temp_dir(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
  * program name at index 0.  A library target links no main(), so nothing
  * captured the arguments and this reports 0 — honest, rather than reading a
  * pointer nobody set.  It cannot fail, so it never touches the slot. */
-void system_sys_arg_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_sys_arg_count(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
     /* The count of REAL arguments, so `sys_arg(1)` .. `sys_arg(sys_arg_count())`
      * is the whole range and the program name is not quietly one of them. */
-    int total = oe_arg_total();
-    oe_ret_int(ret, total > 0 ? total - 1 : 0);
+    int total = kn_arg_total();
+    kn_ret_int(ret, total > 0 ? total - 1 : 0);
 }
 
 /* sys_arg(int index) -> text.  Index 0 is the program name as invoked.
  * Out of range is a failure rather than a silent "", because "" is itself a
  * perfectly legal argument value. */
-void system_sys_arg(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_sys_arg(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    int i = oe_arg_int(argv, 0);
+    int i = kn_arg_int(argv, 0);
     /* sys_arg(1) is the first real argument.  argv[0] is the program name and
      * is NOT reachable here — sys_program_path() already reports it, and one
      * way to say a thing is enough. */
-    const char *v = i < 1 ? 0 : oe_arg_at(i);
-    if (!v) { sys_fail_text(ret, OE_ERR_INVALID_ARG, "sys_arg: index out of range"); return; }
-    oe_error_clear();
-    oe_ret_text(ret, sys_dup_text(v));
+    const char *v = i < 1 ? 0 : kn_arg_at(i);
+    if (!v) { sys_fail_text(ret, KN_ERR_INVALID_ARG, "sys_arg: index out of range"); return; }
+    kn_error_clear();
+    kn_ret_text(ret, sys_dup_text(v));
 }
 
 /* The running binary's own path, resolved from the OS rather than from argv[0],
@@ -437,25 +437,25 @@ static int sys_exe_path(char *buf, size_t cap, int *saved_errno) {
 #endif
 }
 
-void system_sys_program_path(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_sys_program_path(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
     char buf[4096];
     int e = 0;
     int rc = sys_exe_path(buf, sizeof buf, &e);
-    if (rc < 0) { sys_fail_text(ret, OE_ERR_UNSUPPORTED, "sys_program_path: unsupported platform"); return; }
+    if (rc < 0) { sys_fail_text(ret, KN_ERR_UNSUPPORTED, "sys_program_path: unsupported platform"); return; }
     if (rc == 0) { sys_fail_text_errno(ret, e, "sys_program_path"); return; }
-    oe_error_clear();
-    oe_ret_text(ret, sys_dup_text(buf));
+    kn_error_clear();
+    kn_ret_text(ret, sys_dup_text(buf));
 }
 
 /* sys_program_dir() -> text : the directory holding the binary, with no
  * trailing separator (except at the root, where "/" is the directory). */
-void system_sys_program_dir(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_sys_program_dir(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
     char buf[4096];
     int e = 0;
     int rc = sys_exe_path(buf, sizeof buf, &e);
-    if (rc < 0) { sys_fail_text(ret, OE_ERR_UNSUPPORTED, "sys_program_dir: unsupported platform"); return; }
+    if (rc < 0) { sys_fail_text(ret, KN_ERR_UNSUPPORTED, "sys_program_dir: unsupported platform"); return; }
     if (rc == 0) { sys_fail_text_errno(ret, e, "sys_program_dir"); return; }
     char *slash = strrchr(buf, '/');
 #ifdef _WIN32
@@ -464,40 +464,40 @@ void system_sys_program_dir(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv)
     char *back = strrchr(buf, '\\');
     if (!slash || (back && back > slash)) slash = back;
 #endif
-    if (!slash) { oe_error_clear(); oe_ret_text(ret, sys_dup_text(".")); return; }
+    if (!slash) { kn_error_clear(); kn_ret_text(ret, sys_dup_text(".")); return; }
     if (slash == buf) buf[1] = '\0'; else *slash = '\0';
-    oe_error_clear();
-    oe_ret_text(ret, sys_dup_text(buf));
+    kn_error_clear();
+    kn_ret_text(ret, sys_dup_text(buf));
 }
 
 /* sys_process_id() -> int.  Always available; never touches the slot. */
-void system_sys_process_id(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_sys_process_id(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
-    oe_ret_int(ret, (int32_t)getpid());
+    kn_ret_int(ret, (int32_t)getpid());
 }
 
 /* sys_tick_count() -> int64 : milliseconds from a monotonic clock, for timing.
  * The origin is arbitrary and only differences are meaningful — that is the
  * point: unlike now(), it cannot go backwards when the wall clock is adjusted.
  * -1 on failure. */
-void system_sys_tick_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_sys_tick_count(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)argv;
 #ifdef _WIN32
     /* GetTickCount64 already counts milliseconds and cannot fail, so the -1
      * this command documents is unreachable here. */
-    oe_error_clear();
-    oe_ret_int64(ret, (int64_t)GetTickCount64());
+    kn_error_clear();
+    kn_ret_int64(ret, (int64_t)GetTickCount64());
 #else
     struct timespec ts;
     int rc = clock_gettime(CLOCK_MONOTONIC, &ts);
     int e = errno;
     if (rc != 0) {
-        oe_error_set_errno(e, "sys_tick_count");
-        oe_ret_int64(ret, -1);
+        kn_error_set_errno(e, "sys_tick_count");
+        kn_ret_int64(ret, -1);
         return;
     }
-    oe_error_clear();
-    oe_ret_int64(ret, (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000));
+    kn_error_clear();
+    kn_ret_int64(ret, (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000));
 #endif
 }
 
@@ -505,9 +505,9 @@ void system_sys_tick_count(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) 
  * Signals are absorbed by resuming the remaining time, so this waits for the
  * duration asked for; it has no way to report failure and never touches the
  * error slot. */
-void system_sys_sleep_ms(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_sys_sleep_ms(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)ret;
-    int ms = oe_arg_int(argv, 0);
+    int ms = kn_arg_int(argv, 0);
     if (ms <= 0) return;
 #ifdef _WIN32
     Sleep((DWORD)ms);
@@ -523,9 +523,9 @@ void system_sys_sleep_ms(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
 /* sys_quit(int code) : void, and does not return.  Runtime teardown runs first,
  * exactly as it does on the normal path out of main(), so a program that quits
  * early still closes its handles and frees its data. */
-void system_sys_quit(OpenEPL_Slot *ret, int32_t argc, OpenEPL_Slot *argv) {
+void system_sys_quit(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc; (void)ret;
-    int code = oe_arg_int(argv, 0);
+    int code = kn_arg_int(argv, 0);
     E_DestroyRes();
     exit(code);
 }

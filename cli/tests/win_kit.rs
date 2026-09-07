@@ -3,7 +3,7 @@
 //!
 //! The five subsystem suites beside this one (`win_user32`, `win_gdi32`,
 //! `win_kernel32_proc`, `win_kernel32_mem`, `win_advapi32`) each prove one
-//! `.oed` file against a scratch kit holding only that file. This one proves
+//! `.kdecl` file against a scratch kit holding only that file. This one proves
 //! the opposite thing: that the five files merge into a single bundle with no
 //! name fighting another, that `use win` resolves it, and — the part that
 //! decides whether the kit is finished — that a real Windows program can be
@@ -30,7 +30,7 @@
 //! * Nothing appears on the screen of whoever is working on this machine. A
 //!   test must never steal a window or a focus.
 //! * A window is still *created* and its messages are still *delivered* — the
-//!   null driver is a driver. `window.oir` registers a class, creates a
+//!   null driver is a driver. `window.kiln` registers a class, creates a
 //!   window, pumps messages, and its WNDPROC is called back with WM_PAINT and
 //!   WM_DESTROY, all of which this suite checks. What is not checked, because
 //!   there is no framebuffer to read, is that the pixels TextOutA drew are the
@@ -77,30 +77,30 @@ fn wine_present() -> bool {
 /// executable, so the build output and anything it loads share one directory,
 /// and two tests must not share it.
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openepl_win_kit_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_win_kit_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create the scratch directory");
     dir
 }
 
-/// Build `examples/win/<name>.oir` for Windows into `dir`.
+/// Build `examples/win/<name>.kiln` for Windows into `dir`.
 ///
 /// The working directory is the repository, which is how `use win` finds
 /// `kits/win`: a kit is resolved from the directory the build runs in, not
 /// from the directory the source sits in.
 fn build_example(dir: &Path, name: &str) -> PathBuf {
-    let src = repo().join("examples/win").join(format!("{name}.oir"));
+    let src = repo().join("examples/win").join(format!("{name}.kiln"));
     assert!(src.is_file(), "missing example {}", src.display());
     let out = dir.join(name);
-    let done = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let done = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "--os", "windows", "-o", out.to_str().unwrap()])
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(
         done.status.success(),
-        "{name}.oir did not build for windows:\n{}",
+        "{name}.kiln did not build for windows:\n{}",
         String::from_utf8_lossy(&done.stderr)
     );
     let image = dir.join(format!("{name}.exe"));
@@ -170,7 +170,7 @@ fn assert_no_failures(name: &str, lines: &[String]) {
 /// The five examples all cross-build for Windows against the merged kit, and
 /// what comes out is a PE32+ image for x86-64.
 ///
-/// This is the collision check as much as the build check: five `.oed` files
+/// This is the collision check as much as the build check: five `.kdecl` files
 /// written by five hands merge into one namespace, and a name declared twice
 /// would stop every one of these before it reached the linker.
 #[test]
@@ -179,13 +179,13 @@ fn every_example_cross_builds_for_windows() {
         return;
     }
     let dir = scratch("build");
-    // Every `.oir` the directory holds, so an example added later is covered
+    // Every `.kiln` the directory holds, so an example added later is covered
     // without this test being edited to know about it.
     let mut names: Vec<String> = std::fs::read_dir(repo().join("examples/win"))
         .expect("read examples/win")
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter_map(|n| n.strip_suffix(".oir").map(str::to_string))
+        .filter_map(|n| n.strip_suffix(".kiln").map(str::to_string))
         .collect();
     names.sort();
     assert!(names.len() >= 5, "examples/win lost files: {names:?}");
@@ -199,7 +199,7 @@ fn every_example_cross_builds_for_windows() {
 /// and there is no way to ask for the GUI one.
 ///
 /// `--target gui` is refused for a module with no `form`, because the GUI
-/// target is OpenEPL's own UI stack rather than a subsystem switch — so a raw
+/// target is Kiln's own UI stack rather than a subsystem switch — so a raw
 /// Win32 program gets a console window beside its own window on a real
 /// Windows desktop. That is a gap rather than a bug, and it is pinned here so
 /// that closing it is a visible change rather than a silent one.
@@ -216,14 +216,14 @@ fn a_raw_win32_program_is_a_console_subsystem_image() {
     let subsystem = u16::from_le_bytes(bytes[pe + 0x5c..pe + 0x5e].try_into().unwrap());
     assert_eq!(subsystem, 3, "expected a console-subsystem image");
 
-    let refused = Command::new(env!("CARGO_BIN_EXE_openepl"))
-        .args(["build", repo().join("examples/win/window.oir").to_str().unwrap(),
+    let refused = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["build", repo().join("examples/win/window.kiln").to_str().unwrap(),
                "--os", "windows", "--target", "gui",
                "-o", dir.join("gui").to_str().unwrap()])
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(!refused.status.success(), "`--target gui` unexpectedly built a formless module");
     assert!(
         String::from_utf8_lossy(&refused.stderr).contains("declares no form"),
@@ -262,7 +262,7 @@ fn meminfo_reads_its_own_memory_under_wine() {
 }
 
 /// The window proof: a class registered, a window created, a message loop
-/// pumped, and an OpenEPL subroutine called back by Windows itself with
+/// pumped, and an Kiln subroutine called back by Windows itself with
 /// WM_PAINT and WM_DESTROY.
 ///
 /// `paint` and `destroy` are printed from *inside* the WNDPROC, so seeing them
@@ -314,13 +314,13 @@ fn registry_round_trips_under_wine() {
     let lines = run_under_wine(&dir, &image, "180");
     assert_no_failures("registry", &lines);
     assert!(
-        lines.iter().any(|l| l == "product OpenEPL"),
+        lines.iter().any(|l| l == "product Kiln"),
         "the REG_SZ did not come back:\n{}",
         lines.join("\n")
     );
 }
 
-/// The process proof: a thread whose ThreadProc is an OpenEPL subroutine
+/// The process proof: a thread whose ThreadProc is an Kiln subroutine
 /// Windows calls on a stack it made, and a child process started through the
 /// STARTUPINFOA / PROCESS_INFORMATION pair whose exit code comes back.
 #[test]
@@ -334,20 +334,20 @@ fn spawn_starts_a_thread_and_a_process_under_wine() {
     assert_no_failures("spawn", &lines);
 }
 
-/// `openepl commands --use win` lists the merged bundle, so Studio's
+/// `kiln commands --use win` lists the merged bundle, so Studio's
 /// completion, the language server and the generated reference all see one
 /// kit rather than five files.
 ///
-/// The names checked are one from each `.oed`, plus the record and constant
+/// The names checked are one from each `.kdecl`, plus the record and constant
 /// spellings a program is written against.
 #[test]
 fn commands_lists_the_merged_bundle() {
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["commands", "--use", "win"])
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl commands");
+        .expect("run kiln commands");
     assert!(
         out.status.success(),
         "commands --use win failed:\n{}",
@@ -395,13 +395,13 @@ fn commands_lists_the_merged_bundle() {
 #[test]
 fn the_win_kit_is_refused_for_linux() {
     let dir = scratch("gate");
-    let src = repo().join("examples/win/meminfo.oir");
-    let out = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let src = repo().join("examples/win/meminfo.kiln");
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "--os", "linux", "-o", dir.join("meminfo").to_str().unwrap()])
         .current_dir(repo())
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
-        .expect("run openepl build");
+        .expect("run kiln build");
     assert!(!out.status.success(), "a windows-only kit must not build for linux");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(

@@ -8,7 +8,7 @@
 //! fine in the source. The only honest check is the frame.
 //!
 //! So every assertion here is a pixel from a built binary's own dump
-//! (`OPENEPL_UI_DUMP`, headless via `OPENEPL_UI_EXIT_AFTER_FRAMES`), compared
+//! (`KILN_UI_DUMP`, headless via `KILN_UI_EXIT_AFTER_FRAMES`), compared
 //! with the token the specification pins for that surface. Points are chosen
 //! mid-edge and away from text and corners: a rounded corner is antialiased
 //! and a glyph is whatever the loaded face draws.
@@ -87,22 +87,22 @@ fn read_ppm(path: &Path) -> Frame {
 /// `tag` must be unique per test: tests run in parallel and two writing one
 /// path race each other.
 fn render(src: &str, tag: &str) -> (Frame, String) {
-    let dir = std::env::temp_dir().join(format!("openepl_style_{tag}"));
+    let dir = std::env::temp_dir().join(format!("kiln_style_{tag}"));
     std::fs::create_dir_all(&dir).expect("temp dir");
-    let source = dir.join("main.oir");
+    let source = dir.join("main.kiln");
     std::fs::write(&source, src).expect("write source");
     let bin = dir.join("prog");
-    let status = Command::new(env!("CARGO_BIN_EXE_openepl"))
+    let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", source.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .env("OPENEPL_RUNTIME_DIR", repo().join("runtime"))
+        .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
-        .expect("run openepl");
-    assert!(status.success(), "openepl build failed for {tag}");
+        .expect("run kiln");
+    assert!(status.success(), "kiln build failed for {tag}");
 
     let dump = dir.join("frame.ppm");
     let out = Command::new(&bin)
-        .env("OPENEPL_UI_EXIT_AFTER_FRAMES", "4")
-        .env("OPENEPL_UI_DUMP", &dump)
+        .env("KILN_UI_EXIT_AFTER_FRAMES", "4")
+        .env("KILN_UI_DUMP", &dump)
         .output()
         .expect("run built binary");
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();

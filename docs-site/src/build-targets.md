@@ -25,7 +25,7 @@ end
 …or override it for one build, without touching the source:
 
 ```sh
-openepl build greet.oir --target sharedlib -o libgreet.so
+kiln build greet.kiln --target sharedlib -o libgreet.so
 ```
 
 Left out entirely, the target is inferred: a module with a form is `gui`,
@@ -43,7 +43,7 @@ Every build is a debug build unless you ask otherwise. `--release` is the other
 profile, on `build` and on `run`:
 
 ```sh
-openepl build hello.oir --release -o hello
+kiln build hello.kiln --release -o hello
 ```
 
 It compiles at `-O2` and adds the hardening a shipped program wants: `_FORTIFY_SOURCE`,
@@ -91,7 +91,7 @@ end
 ```
 
 ```sh
-openepl build greet.oir -o libgreet.so     # writes libgreet.so and greet.h
+kiln build greet.kiln -o libgreet.so     # writes libgreet.so and greet.h
 ```
 
 ### The header
@@ -143,7 +143,7 @@ not exist.
 
 The types are the ones the exported wrappers actually take:
 
-| OpenEPL | C |
+| Kiln | C |
 | --- | --- |
 | `int` | `int32_t` |
 | `int64` | `int64_t` |
@@ -188,7 +188,7 @@ that installs a function-pointer hook the instant it loads.
 
 ### A consumer
 
-`openepl new shared-library` writes a `consumer.cpp` beside the source; this
+`kiln new shared-library` writes a `consumer.cpp` beside the source; this
 is it, for a module named `greet`:
 
 ```cpp
@@ -211,7 +211,7 @@ int main(void) {
 On Linux, with clang:
 
 ```sh
-openepl build greet.oir -o libgreet.so
+kiln build greet.kiln -o libgreet.so
 clang++ consumer.cpp -I. -L. -lgreet -Wl,-rpath,. -o consumer && ./consumer
 ```
 
@@ -222,7 +222,7 @@ it.
 A static library is the same, built as an archive and linked in:
 
 ```sh
-openepl build greet.oir --target staticlib -o libgreet.a    # and greet.h
+kiln build greet.kiln --target staticlib -o libgreet.a    # and greet.h
 clang++ consumer.cpp -I. libgreet.a -lm -o consumer
 ```
 
@@ -232,10 +232,10 @@ A program — windowed or console — or a library cross-builds for Windows
 x86-64 from Linux:
 
 ```sh
-openepl build hello.oir --os windows          # hello.exe
-openepl build form.oir --os windows           # form.exe, and the DLLs it needs beside it
-openepl build greet.oir --os windows --target sharedlib   # greet.dll
-openepl build greet.oir --os windows --target staticlib   # libgreet.a
+kiln build hello.kiln --os windows          # hello.exe
+kiln build form.kiln --os windows           # form.exe, and the DLLs it needs beside it
+kiln build greet.kiln --os windows --target sharedlib   # greet.dll
+kiln build greet.kiln --os windows --target staticlib   # libgreet.a
 ```
 
 A shared library built for Windows comes as three files: `greet.dll`,
@@ -244,7 +244,7 @@ through — the one the consumer's `#pragma comment(lib, "greet.lib")` names.
 The consumer above builds against them with either Windows toolchain:
 
 ```sh
-openepl build greet.oir --os windows -o greet.dll     # greet.dll, greet.lib, greet.h
+kiln build greet.kiln --os windows -o greet.dll     # greet.dll, greet.lib, greet.h
 cl /EHsc consumer.cpp greet.lib                        # MSVC, x64
 x86_64-w64-mingw32-g++ consumer.cpp -L. -lgreet -o consumer.exe   # MinGW
 ```
@@ -284,11 +284,11 @@ mingw packages provide. Those DLLs and everything they in turn import are
 copied beside the program, and the build lists them:
 
 ```
-openepl: copied beside it, because the program imports them: libwinpthread-1.dll
+kiln: copied beside it, because the program imports them: libwinpthread-1.dll
   libfreetype-6.dll SDL2_image.dll SDL2.dll SDL3.dll libwebpdemux-2.dll libwebp-7.dll
   libtiff-5.dll zlib1.dll libjpeg-62.dll libgcc_s_seh-1.dll libsharpyuv-0.dll
   libpng16-16.dll libbz2-1.dll
-openepl: wrote form.exe
+kiln: wrote form.exe
 ```
 
 Ship the directory, not the file: the program loads those by name from
@@ -326,7 +326,7 @@ discovered:
   nothing on Windows can read it. UI Automation through AccessKit's Windows
   adapter is the piece that is missing.
 - **Headless rendering is a Linux thing.** On Linux,
-  `OPENEPL_UI_EXIT_AFTER_FRAMES` and `OPENEPL_UI_DUMP` default to SDL's
+  `KILN_UI_EXIT_AFTER_FRAMES` and `KILN_UI_DUMP` default to SDL's
   offscreen driver, which draws through EGL; the Windows build of SDL has no
   EGL, so a Windows program does not switch drivers. The frame count and the
   dump are the same code on both platforms and should work through an
@@ -361,7 +361,7 @@ The limits, stated plainly:
 - **`https://` is off in a Windows build.** The vendored mbedTLS was built
   for Linux, so a cross build leaves it out and `net_http_get` says so at run
   time; `http://` works.
-- `openepl run --os windows` refuses: the machine you are on cannot run the
+- `kiln run --os windows` refuses: the machine you are on cannot run the
   result. Run it under `wine`, or on Windows.
 
 ## Naming

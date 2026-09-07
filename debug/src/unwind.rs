@@ -7,8 +7,8 @@
 //!
 //! It reads CFI — `.eh_frame` — rather than following the frame-pointer chain.
 //! A frame-pointer walk is right only when a frame pointer is live at the
-//! moment you stop, and in an OpenEPL program it is never live: clang omits
-//! the frame pointer, so `oe_user_main` opens with `sub $0x238, %rsp` and
+//! moment you stop, and in an Kiln program it is never live: clang omits
+//! the frame pointer, so `kn_user_main` opens with `sub $0x238, %rsp` and
 //! `ECodeStart` with `push %rax`, and neither ever writes `rbp`. Stopped
 //! anywhere in the user's own code, `rbp` therefore still holds *`main`'s*
 //! frame pointer, and following it yields `main`'s caller — dropping both
@@ -221,7 +221,7 @@ struct Rules {
 /// The unwind rules one module has for a static address, if it has any.
 ///
 /// Little-endian is assumed rather than read from the object: both targets
-/// OpenEPL builds for are x86-64, and a big-endian one would need a great deal
+/// Kiln builds for are x86-64, and a big-endian one would need a great deal
 /// more than this line changed.
 fn rules_in(module: &Module, pc: u64, context: &mut UnwindContext<usize>) -> Option<Rules> {
     let eh_frame: EhFrame<EndianSlice<'_, LittleEndian>> =
@@ -249,7 +249,7 @@ fn rules_in(module: &Module, pc: u64, context: &mut UnwindContext<usize>) -> Opt
 /// This frame's CFA, from the rule that describes it.
 ///
 /// Both registers a CFA is ever based on must work. `rbp` is the textbook
-/// case and `rsp` is the one every OpenEPL function actually uses, since clang
+/// case and `rsp` is the one every Kiln function actually uses, since clang
 /// omits the frame pointer: supporting only the first would produce a correct
 /// stack for hand-written C and a one-frame stack for the user's own program.
 ///
@@ -291,7 +291,7 @@ fn return_address(rule: &RegisterRule<usize>, cfa: u64, memory: &dyn Memory) -> 
 /// A rule of `SameValue`, and the `Undefined` that a register no rule mentions
 /// gets, both mean the current value carries through. That is not a guess: the
 /// register is callee-saved, so a function that never saved it never changed
-/// it — and it is the ordinary case here, because no OpenEPL function touches
+/// it — and it is the ordinary case here, because no Kiln function touches
 /// `rbp` at all.
 ///
 /// A rule this does not understand is `None`, which ends the walk. Carrying
@@ -513,7 +513,7 @@ mod tests {
 
     #[test]
     fn walks_over_a_stack_pointer_cfa() {
-        // `oe_user_main`'s own CFI, to the byte: `sub $0x238, %rsp` and
+        // `kn_user_main`'s own CFI, to the byte: `sub $0x238, %rsp` and
         // nothing else, so the CFA is the stack pointer for the whole
         // function and `rbp` is never mentioned.
         let cfi = Cfi::new(0x1000)
@@ -542,8 +542,8 @@ mod tests {
         assert_eq!(frames[1].registers.sp, 0x6240);
         assert_eq!(frames[1].cfa, 0x6250);
         // Neither function saves `rbp`, so the caller's value is the one still
-        // in the register. Losing it here would lose it for every OpenEPL
-        // frame, because no OpenEPL function saves it either.
+        // in the register. Losing it here would lose it for every Kiln
+        // frame, because no Kiln function saves it either.
         assert_eq!(frames[1].registers.bp, 0x9990);
     }
 
@@ -710,8 +710,8 @@ mod tests {
 
     #[test]
     fn cfi_recovers_the_frames_a_frame_pointer_walk_drops() {
-        // The three frames of a real OpenEPL program, with the CFI its own
-        // build emits: `oe_user_main` at 0x400550 opening `sub $0x238, %rsp`,
+        // The three frames of a real Kiln program, with the CFI its own
+        // build emits: `kn_user_main` at 0x400550 opening `sub $0x238, %rsp`,
         // `ECodeStart` at 0x400c30 opening `push %rax`, and `main` at 0x401660
         // with the only frame-pointer prologue in the stack.
         let cfi = Cfi::new(0x402808)
@@ -743,14 +743,14 @@ mod tests {
 
         // `main` holds a frame pointer of 0x8100, saving libc's 0x8300 below
         // it and its own return address above; `ECodeStart` and
-        // `oe_user_main` then push return addresses without touching `rbp`.
+        // `kn_user_main` then push return addresses without touching `rbp`.
         let stack = Stack::new(&[
             (0x8100, 0x8300),
             (0x8108, 0x7f0000001234),
             (0x80d8, 0x40168c),
             (0x80c8, 0x400c36),
         ]);
-        // Stopped at `oe_user_main`'s very first instruction, which is where
+        // Stopped at `kn_user_main`'s very first instruction, which is where
         // the frame-pointer case is at its worst and where a breakpoint on the
         // subroutine header lands.
         let top = Registers {

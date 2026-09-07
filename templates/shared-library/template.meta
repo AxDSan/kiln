@@ -1,4 +1,4 @@
 name: Shared Library
 desc: A .so/.dll/.dylib. Exports its subroutines for a host to call.
 target: sharedlib
-entry: main.oir
+entry: main.kiln
