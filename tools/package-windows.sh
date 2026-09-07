@@ -73,12 +73,11 @@ else
 fi
 
 # --- assemble -------------------------------------------------------------
-# A clean dist: every earlier version's tree and archives for THIS platform
-# go, so dist/ holds only what this build produced — no stale bundle a
-# release upload or a `ls dist` could pick up by mistake.
-rm -rf "$ROOT"/dist/kiln-*-windows-x86_64 "$ROOT"/dist/kiln-*-windows-x86_64.tar.gz \
-       "$ROOT"/dist/kiln-*-windows-x86_64.zip "$ROOT"/dist/kiln-*-windows-x86_64.*.sha256 \
-       "$ROOT"/dist/kiln-*-windows-x86_64.tar.gz.sha256 "$ROOT"/dist/kiln-*-windows-x86_64.zip.sha256
+# A clean dist: every earlier tree and archive for THIS platform goes. Matched
+# on the platform rather than the product name — see tools/package.sh for why
+# naming the product here is what left stale bundles behind at the rename.
+rm -rf "$ROOT"/dist/*-windows-x86_64 "$ROOT"/dist/*-windows-x86_64.tar.gz \
+       "$ROOT"/dist/*-windows-x86_64.zip "$ROOT"/dist/*-windows-x86_64.*.sha256
 mkdir -p "$OUT"/{bin,licenses}
 
 install -m755 "$STUDIO_DIR/kiln-studio.exe" "$OUT/bin/kiln-studio.exe"

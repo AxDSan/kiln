@@ -47,12 +47,18 @@ echo "==> studio"
 ./designer/build.sh >/dev/null
 
 # --- assemble -------------------------------------------------------------
-# A clean dist: every earlier version's tree and archives for THIS platform
-# go, so dist/ holds only what this build produced — no stale bundle a
-# release upload or a `ls dist` could pick up by mistake.
-rm -rf "$ROOT"/dist/kiln-*-linux-x86_64 "$ROOT"/dist/kiln-*-linux-x86_64.tar.gz \
-       "$ROOT"/dist/kiln-*-linux-x86_64.zip "$ROOT"/dist/kiln-*-linux-x86_64.*.sha256 \
-       "$ROOT"/dist/kiln-*-linux-x86_64.tar.gz.sha256 "$ROOT"/dist/kiln-*-linux-x86_64.zip.sha256
+# A clean dist: every earlier tree and archive for THIS platform goes, so
+# dist/ holds only what this build produced — no stale bundle a release upload
+# or a `ls dist` could pick up by mistake.
+#
+# The glob matches on the PLATFORM, not on the product name. Naming the product
+# here is what let the 1.0.0 rename leave `openepl-0.11.1-*` bundles sitting in
+# dist/ next to the new ones: the sweep renamed the pattern along with
+# everything else, and it quietly stopped matching what it was there to remove.
+# dist/ holds nothing but packaging output, so matching the suffix is safe and
+# survives the next rename too.
+rm -rf "$ROOT"/dist/*-linux-x86_64 "$ROOT"/dist/*-linux-x86_64.tar.gz \
+       "$ROOT"/dist/*-linux-x86_64.zip "$ROOT"/dist/*-linux-x86_64.*.sha256
 mkdir -p "$OUT"/{bin,licenses}
 
 install -m755 target/release/kiln "$OUT/bin/kiln"

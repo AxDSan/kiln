@@ -66,6 +66,11 @@ kiln_dotgrid.tga
 # Workflow scratch scripts, which are session artefacts and not part of the
 # project. `!/*.*` would otherwise re-include them for the same reason.
 /.wf-*.js
+# KDE writes this to remember a folder's icon. It is one user's desktop
+# preference and was tracked for eleven releases because the `.directory` rule
+# further up is overridden by `!/*.*` — git applies the LAST matching pattern,
+# so an ignore for a dotted root file has to be restated down here to bind.
+/.directory
 
 # Directory ignores, restated AFTER the root rule above so it cannot override
 # them. Git applies the last matching pattern, so order is load-bearing here.

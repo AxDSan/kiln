@@ -11,7 +11,8 @@ executables: no runtime to install, nothing to unpack.
 
 **[Documentation](https://axdsan.github.io/kiln/)** · [Quick start](#quick-start) ·
 [Build targets](#one-project-every-artifact) · [Editor support](#editor-support) ·
-[Building from source](#building-from-source) · [Status](#status)
+[Building from source](#building-from-source) · [Versioning](#versioning) ·
+[Status](#status)
 
 </div>
 
@@ -251,9 +252,27 @@ The component model carries an accessibility role and name for every control,
 and Studio publishes a live accessibility tree. This is part of the component
 model rather than something added later.
 
+## Versioning
+
+1.0.0 is where the name changed, and with it the binary, the file extensions
+and the C ABI — every project written against OpenEPL breaks. That is what the
+major number is for, and it is the whole reason this is 1.0.0 rather than
+0.12.0.
+
+From here the promise is ordinary semver, and it is about *your programs*:
+
+- **1.x will not break a program that compiles today.** New commands, new
+  components and new targets arrive in minor releases; a language or ABI change
+  that invalidates working source waits for 2.0.
+- **`Kiln_*` ABI structures grow at the end only**, and `KILN_ABI_VERSION` says
+  when they have. A library compiled against ABI 4 keeps loading.
+- **What is not yet built is not a promise.** The Status section below is the
+  honest list, and a limitation disappearing is a minor release, not a major.
+
 ## Status
 
-Kiln is young, and honest about it:
+Kiln is 1.0 and still narrow — the version says the interface has settled, not
+that the map is filled in:
 
 - **Linux x86-64, plus a Windows cross build.** Programs — windowed and
   console — and libraries cross-build for Windows x86-64 from Linux
