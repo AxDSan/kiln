@@ -301,7 +301,7 @@ there.
 
 ## Documentation
 
-Full documentation — installation, a tour of the language, the component
+Full documentation — installation, the language guide, the component
 model, the visual designer, and generated references for every command and
 component — is at
 **[axdsan.github.io/kiln](https://axdsan.github.io/kiln/)**.

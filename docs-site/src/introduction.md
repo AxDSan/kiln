@@ -69,10 +69,10 @@ and the whole toolchain is open source, cross-platform and inspectable.
 - [Installation](./installation.md) — download or build it
 - [Quick start](./quick-start.md) — a program in about a minute
 - [Your first GUI app](./first-gui-app.md) — draw a window and wire a button
-- [A tour of the language](./tour.md) — arrays, records, dictionaries,
-  subroutines and the error slot, in the order you meet them
+- [Language guide](./language.md) — the whole language, in the order you meet
+  it: values, choosing, repeating, subroutines and what happens when something
+  fails
 
 ## What is not here yet
 
-Kiln is young. [Limitations](./limitations.md) lists what does not exist
-yet, plainly — it is worth reading before you plan anything around it.
+[Limitations](./limitations.md) lists what does not exist yet, plainly — it is worth reading before you plan anything around it.

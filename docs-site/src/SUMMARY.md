@@ -10,9 +10,7 @@
 
 # The language
 
-- [A tour of the language](./tour.md)
 - [Language guide](./language.md)
-- [Shorthands and sugar](./sugar.md)
 - [Forms and events](./forms-and-events.md)
 - [Components](./components.md)
 - [Networking](./networking.md)
