@@ -1,0 +1,14 @@
+module p3
+use net
+tcpserver s
+  name = "s"
+  delimiter = ""
+  on receive: on_receive
+end
+sub main
+  s.port = 7312
+  s.active = true
+end
+sub on_receive(client: int, data: bytes)
+  call print_int(bytes_count(data))
+end

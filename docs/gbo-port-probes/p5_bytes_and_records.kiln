@@ -1,0 +1,20 @@
+module p5
+record session
+  account_id: int
+  name: text
+end
+var sessions: session{} = {}
+sub main
+  var b: bytes = bytes_new(32)
+  call bytes_set(b, 1, 65)
+  call bytes_set(b, 2, 66)
+  call bytes_set(b, 3, 67)
+  let t: text = text_from_bytes(b)
+  call print_int(length(t))
+  call print_int(bytes_count(b[2..4]))
+  call dict_set(sessions, "1", session(account_id: 7, name: "thox"))
+  let s: session = sessions["1"]
+  call print_text(s.name)
+  var b2: bytes = bytes_from_text("A\0B")
+  call print_int(bytes_count(b2))
+end

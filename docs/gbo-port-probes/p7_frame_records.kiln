@@ -1,0 +1,44 @@
+module p7
+record msg_head is c
+  size: word
+  kind: word
+end
+record login_request is c
+  account: byte[32]
+  password: byte[32]
+  unknown64: int
+  mac: byte[32]
+  unknown100: byte[32]
+  client_version: int
+end
+record response_game_server is c
+  game_server_id: byte
+  address: byte[32]
+  port: int
+  login_error: byte
+  token: byte[25]
+end
+record realm_record is c
+  length: word
+  kind: word
+  name: byte[36]
+  realm_id: byte
+  recommended: byte
+  flag2a: byte
+  pad2b: byte
+  flag2c: byte
+  flag2d: byte
+  last: byte
+  pad2f: byte
+end
+sub main
+  call print_int64(size of msg_head)
+  call print_int64(size of login_request)
+  call print_int64(size of response_game_server)
+  call print_int64(size of realm_record)
+  var r: response_game_server
+  r.port = 6001
+  let p: ptr = address of r
+  call print_int(ptr_read_byte(p, 36))
+  call print_int(ptr_read_byte(p, 37))
+end

@@ -1,0 +1,20 @@
+module p1
+use net
+use system
+
+tcpserver s
+  name = "s"
+  delimiter = ""
+  on receive: on_receive
+end
+
+sub main
+  s.port = 7311
+  s.active = true
+end
+
+sub on_receive(client: int, data: text)
+  call print_text("received length={length(data)}")
+  call tcpserver_send("s", client, "A\0B\0C")
+  call quit()
+end
