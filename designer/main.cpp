@@ -3917,6 +3917,35 @@ struct HelpListener : Rml::EventListener {
                 }
                 return;
             }
+            if (e->HasAttribute("oe-help-select")) {
+                const int n = e->GetAttribute<int>("oe-help-select", -1);
+                if (n >= 0 && n < (int)g.help_code.size()) {
+                    if (Rml::Element* blk = g.help->GetElementById("mdcode-" + std::to_string(n))) {
+                        // Swapped in place, so the page does not move. The
+                        // code goes in as an attribute value rather than as
+                        // markup: a sample is full of `<` and `&`, and one
+                        // that is escaped as RML and then read back as text
+                        // is a sample that no longer compiles.
+                        Rml::ElementPtr ta = g.help->CreateElement("textarea");
+                        ta->SetClass("mdsel", true);
+                        ta->SetId("mdsel-" + std::to_string(n));
+                        ta->SetAttribute("value", g.help_code[(size_t)n]);
+                        ta->SetAttribute("rows", 1 + (int)std::count(g.help_code[(size_t)n].begin(),
+                                                                     g.help_code[(size_t)n].end(),
+                                                                     '\n'));
+                        ta->SetAttribute("wrap", "nowrap");
+                        blk->SetInnerRML("");
+                        Rml::Element* live = blk->AppendChild(std::move(ta));
+                        if (live) live->Focus();
+                        set_status("select the code, then Ctrl+C");
+                        if (std::getenv("KILN_DESIGNER_SCRIPT")) {
+                            std::printf("helpselect: %d\n", n);
+                            std::fflush(stdout);
+                        }
+                    }
+                }
+                return;
+            }
             if (e->HasAttribute("oe-help-page")) {
                 open_help(e->GetAttribute<Rml::String>("oe-help-page", ""),
                           e->GetAttribute<Rml::String>("oe-help-anchor", ""), "");
@@ -3939,6 +3968,37 @@ struct HelpListener : Rml::EventListener {
     }
 } g_help_listener;
 
+/// A code block swapped to its selectable form is a real textarea, and a real
+/// textarea can be typed into. The handbook is not editable, so the keys that
+/// would change it are stopped in the capture phase — ahead of the widget's
+/// own listener, since a bubble-phase one runs after the edit. Navigation,
+/// select-all and copy go through, which is the whole point of the swap.
+/// Escape still closes the handbook, which it would not if the widget ate it.
+struct HelpKeyGate : Rml::EventListener {
+    void ProcessEvent(Rml::Event& ev) override {
+        Rml::Element* el = ev.GetTargetElement();
+        if (!el || el->GetId().rfind("mdsel-", 0) != 0) return;
+        if (ev.GetType() == "textinput") { ev.StopImmediatePropagation(); return; }
+        const int key = ev.GetParameter<int>("key_identifier", 0);
+        const bool ctrl = ev.GetParameter<bool>("ctrl_key", false);
+        switch (key) {
+        case Rml::Input::KI_LEFT: case Rml::Input::KI_RIGHT: case Rml::Input::KI_UP:
+        case Rml::Input::KI_DOWN: case Rml::Input::KI_HOME: case Rml::Input::KI_END:
+        case Rml::Input::KI_PRIOR: case Rml::Input::KI_NEXT:
+            return;
+        case Rml::Input::KI_ESCAPE:
+            close_help();
+            ev.StopImmediatePropagation();
+            return;
+        case Rml::Input::KI_A: case Rml::Input::KI_C:
+            if (ctrl) return;
+            break;
+        default: break;
+        }
+        ev.StopImmediatePropagation();
+    }
+} g_help_gate;
+
 /// Show `page`, scrolled to `anchor`, or the results for `query`.
 void open_help(const std::string& page, const std::string& anchor, const std::string& query) {
     const std::string dir = kiln::designer::help_page::docs_dir();
@@ -3959,6 +4019,7 @@ void open_help(const std::string& page, const std::string& anchor, const std::st
     g.help->AddEventListener("click", &g_help_listener);
     g.help->AddEventListener("keydown", &g_help_listener);
     g.help->AddEventListener("change", &g_help_listener);
+    for (const char* e : {"keydown", "textinput"}) g.help->AddEventListener(e, &g_help_gate, true);
 
     if (!anchor.empty()) {
         // Lay the document out first. `Show` only queues that for the
@@ -6933,6 +6994,20 @@ void run_script(const char* script) {
                 const size_t h = page.find('#');
                 if (h != std::string::npos) { anchor = page.substr(h + 1); page = page.substr(0, h); }
                 open_help(page.empty() ? g.help_page : page, anchor, "");
+            }
+            else if (verb == "helpselect") {
+                // Press a code block's `select` button, in the help document —
+                // `click:` looks in the main one and never sees it.
+                Rml::Element* hit = nullptr;
+                std::function<void(Rml::Element*)> walk = [&](Rml::Element* e) {
+                    if (!e || hit) return;
+                    if (e->GetAttribute<Rml::String>("oe-help-select", "") == arg) { hit = e; return; }
+                    for (int i = 0; i < e->GetNumChildren(); i++) walk(e->GetChild(i));
+                };
+                if (g.help) walk(g.help);
+                if (hit) press_element(hit, 0);
+                else std::printf("helpselect: %s NOT FOUND\n", arg.c_str());
+                std::fflush(stdout);
             }
             else if (verb == "helpsearch") {
                 open_help(g.help_page, "", arg);

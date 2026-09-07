@@ -55,7 +55,8 @@ inline std::string docs_dir() {
     const std::string dir = kiln::sys::exe_dir();
     if (!dir.empty()) {
         roots.push_back(dir + "/../docs/src");      // bundle: bin/ -> ../docs/src
-        roots.push_back(dir + "/../../docs-site/src"); // repo: designer/ -> ../docs-site/src
+        roots.push_back(dir + "/../docs-site/src");  // repo: designer/ -> ../docs-site/src
+        roots.push_back(dir + "/../../docs-site/src");
         roots.push_back(dir + "/docs/src");
     }
     roots.push_back("docs-site/src");
@@ -256,6 +257,12 @@ inline std::string markup(const std::string& family, const std::string& mono, in
     s << "#rail .pg:hover{background-color:" << CHROME << "}";
     s << "#rail .pg.on{background-color:" << ACCENT << ";color:" << ACCENT_TEXT
       << ";font-weight:bold}";
+    // The open page's own headings, indented under it by level.
+    s << "#rail .sub{font-size:11px;color:" << TEXT_MUTED << ";cursor:pointer;"
+         "padding:3px 10px 3px 0;white-space:nowrap;overflow:hidden}";
+    s << "#rail .sub.s2{padding-left:28px}";
+    s << "#rail .sub.s3{padding-left:40px}";
+    s << "#rail .sub:hover{background-color:" << CHROME << ";color:" << ACCENT << "}";
 
     // Width is the pane minus its own padding: RmlUi's box model is
     // content-box, so a full-width pane with padding hangs over the dialog's
@@ -289,11 +296,17 @@ inline std::string markup(const std::string& family, const std::string& mono, in
     s << ".mdpre{background-color:" << CHROME_ALT << ";border:1px " << BORDER_SOFT
       << ";border-radius:6px;padding:8px 12px 10px 12px;margin-bottom:13px}";
     s << ".mdcopyrow{text-align:right;margin-bottom:4px}";
+    s << ".mdcopy{margin-left:6px}";
     s << ".mdcopy{display:inline-block;font-size:10px;color:" << TEXT_MUTED
       << ";background-color:" << PANEL << ";border:1px " << BORDER_SOFT
       << ";border-radius:4px;padding:2px 7px 2px 7px;cursor:pointer}";
     s << ".mdcopy:hover{color:" << ACCENT << ";border:1px " << ACCENT << "}";
     s << ".mdcodeline{font-family:'" << mono << "';font-size:11px;line-height:1.45;white-space:nowrap}";
+    // The selectable form of a block: the same font and metrics, no chrome of
+    // its own, so swapping to it does not move the page under the reader.
+    s << ".mdsel{font-family:'" << mono << "';font-size:11px;line-height:1.45;color:" << TEXT
+      << ";background-color:transparent;border:0px;width:" << (content_w - 30) << "px}";
+    s << ".mdsel selection{background-color:" << ACCENT << ";color:" << ACCENT_TEXT << "}";
     s << ".mdrule{height:1px;background-color:" << BORDER_SOFT << ";margin:18px 0 18px 0}";
     s << ".mdli{margin-bottom:5px;font-size:12px;line-height:1.5}";
     s << ".mdbullet{color:" << ACCENT << ";margin-right:8px}";
@@ -320,12 +333,31 @@ inline std::string markup(const std::string& family, const std::string& mono, in
         s << "<div id='browser' oe-help='browser'>Open in browser</div>";
     s << "<div id='x' oe-help='close'>\xE2\x9C\x95</div></div>";
 
+    // The page is rendered before the rail rather than after it, because the
+    // rail lists this page's own headings underneath its entry and cannot do
+    // that without having read it.
+    const std::string src = query.empty() ? md::read_file(dir + "/" + page + ".md") : std::string();
+    const md::Doc doc = src.empty() ? md::Doc() : md::render(src, content_w, dir);
+
     // The rail.
     s << "<div id='rail'>";
     for (const Entry& e : toc(dir)) {
         if (e.section) { s << "<div class='sec'>" << escape_rml(e.title) << "</div>"; continue; }
-        s << "<div class='pg" << (e.page == page && query.empty() ? " on" : "")
-          << "' oe-help-page='" << escape_rml(e.page) << "'>" << escape_rml(e.title) << "</div>";
+        const bool here = e.page == page && query.empty();
+        s << "<div class='pg" << (here ? " on" : "") << "' oe-help-page='" << escape_rml(e.page)
+          << "'>" << escape_rml(e.title) << "</div>";
+        if (!here) continue;
+        // The open page's sections, so a long page can be navigated without
+        // scrolling it to find out what is in it. Only the page you are on:
+        // an outline of every page at once is the book, not a rail. `#` is
+        // the page title and is already the entry above, and anything below
+        // `###` is detail a rail should not carry.
+        for (const md::Heading& h : doc.headings) {
+            if (h.level < 2 || h.level > 3) continue;
+            s << "<div class='sub s" << h.level << "' oe-help-page='" << escape_rml(e.page)
+              << "' oe-help-anchor='" << escape_rml(h.slug) << "'>" << escape_rml(h.text)
+              << "</div>";
+        }
     }
     s << "</div>";
 
@@ -346,17 +378,13 @@ inline std::string markup(const std::string& family, const std::string& mono, in
             s << "<div class='where'>" << escape_rml(hit.title) << "</div>";
             s << "<div class='what'>" << escape_rml(hit.line) << "</div></div>";
         }
+    } else if (src.empty()) {
+        s << "<div class='mdh1'>Not found</div><div class='empty'>The handbook has no page "
+             "named " << escape_rml(page) << ".</div>";
     } else {
-        const std::string src = md::read_file(dir + "/" + page + ".md");
-        if (src.empty()) {
-            s << "<div class='mdh1'>Not found</div><div class='empty'>The handbook has no page "
-                 "named " << escape_rml(page) << ".</div>";
-        } else {
-            const md::Doc doc = md::render(src, content_w, dir);
-            s << doc.rml;
-            // The page's code blocks, so a copy button can find its own.
-            if (code) *code = doc.code;
-        }
+        s << doc.rml;
+        // The page's code blocks, so a copy button can find its own.
+        if (code) *code = doc.code;
     }
     s << "</div></div></body></rml>";
     return s.str();

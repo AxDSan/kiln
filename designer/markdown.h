@@ -39,11 +39,22 @@
 
 namespace kiln::designer::md {
 
+/// A heading, for building an outline of a page.
+struct Heading {
+    int level = 0;
+    std::string text;
+    std::string slug;
+};
+
 /// A rendered page: its title, its markup, and every anchor it defines.
 struct Doc {
     std::string title;
     std::string rml;
     std::vector<std::string> anchors;
+    /// The page's headings in order, which is what an outline is. Kept apart
+    /// from `anchors` because that also holds a table row's `cmd-` id, and a
+    /// list of every command in the reference is not an outline of it.
+    std::vector<Heading> headings;
     /// Every fenced block on the page, in order. The copy button carries its
     /// index rather than the code itself: an attribute holding a program would
     /// have to survive RML escaping intact, and an index cannot be mangled.
@@ -282,13 +293,23 @@ inline Doc render(const std::string& source, int width, const std::string& dir) 
                 raw += lines[i];
                 raw += "\n";
             }
-            // The button is in normal flow, in its own right-aligned row.
-            // Absolutely positioning it inside the block would be neater and
-            // wrong: RmlUi does not clip a positioned element against an
-            // ancestor's overflow, so it would paint over the header as the
-            // page scrolled.
-            o << "<div class='mdpre'><div class='mdcopyrow'><span class='mdcopy' oe-help-copy='"
-              << doc.code.size() << "'>copy</span></div>" << body.str() << "</div>";
+            // Both buttons are in normal flow, in their own right-aligned
+            // row. Absolutely positioning them inside the block would be
+            // neater and wrong: RmlUi does not clip a positioned element
+            // against an ancestor's overflow, so they would paint over the
+            // header as the page scrolled.
+            //
+            // `select` swaps the highlighted lines for a textarea holding the
+            // same code. RmlUi can only select text inside a text control, so
+            // a block that stays coloured is a block you cannot take half of;
+            // rather than give up the colour on every sample for a selection
+            // most readers never make, the swap is one click away and the
+            // block stays coloured until it is asked for.
+            o << "<div class='mdpre'><div class='mdcopyrow'>"
+              << "<span class='mdcopy' oe-help-select='" << doc.code.size() << "'>select</span>"
+              << "<span class='mdcopy' oe-help-copy='" << doc.code.size() << "'>copy</span>"
+              << "</div><div class='mdcodebody' id='mdcode-" << doc.code.size() << "'>"
+              << body.str() << "</div></div>";
             doc.code.push_back(raw);
             continue;
         }
@@ -344,6 +365,7 @@ inline Doc render(const std::string& source, int width, const std::string& dir) 
             const std::string text = line.substr(level == 0 ? 0 : level + (line[level] == ' ' ? 1 : 0));
             const std::string id = slug(plain(text));
             doc.anchors.push_back(id);
+            doc.headings.push_back({level, plain(text), id});
             if (doc.title.empty() && level == 1) doc.title = plain(text);
             o << "<div class='mdh" << (level > 4 ? 4 : level) << "' id='" << escape_rml(id) << "'>"
               << inlines(text) << "</div>";
