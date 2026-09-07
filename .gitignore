@@ -66,6 +66,12 @@ kiln_dotgrid.tga
 # Workflow scratch scripts, which are session artefacts and not part of the
 # project. `!/*.*` would otherwise re-include them for the same reason.
 /.wf-*.js
+# The CodeDB index. Named further up too, but that rule is overridden by
+# `!/*.*` for the same reason `.directory` was — it is a generated file with a
+# dot in its name, so the ignore only binds when restated below the root block.
+# It was tracked for eleven releases and churned in three commits as noise.
+/codedb.snapshot
+
 # KDE writes this to remember a folder's icon. It is one user's desktop
 # preference and was tracked for eleven releases because the `.directory` rule
 # further up is overridden by `!/*.*` — git applies the LAST matching pattern,
