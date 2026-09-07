@@ -14,6 +14,7 @@
 //!   kiln kits                        list resolved kits and where they came from
 //!   kiln kit add <path>              install a kit into ~/.kiln/kits
 //!   kiln project <file-or-dir>       dump a project file's resolved fields
+//!   kiln install                     copy this Kiln to a prefix, on your PATH
 //!   kiln version                     the toolchain and ABI versions
 //!
 //! `build`, `run`, `emit` and `inspect` take a `project.kproj`, or a directory
@@ -28,6 +29,7 @@ use std::process::{exit, Command};
 mod dap;
 mod debug;
 mod header;
+mod install;
 mod kit;
 mod libload;
 mod lsp;
@@ -121,6 +123,15 @@ fn run(args: &[String]) -> i32 {
             }
         },
         "project" => project::cmd_project(rest),
+        "install" => match find_repo_root() {
+            Some(root) => install::cmd_install(&root, rest),
+            None => {
+                eprintln!(
+                    "kiln: could not locate the Kiln tree to install — run this from a                      release bundle or a source checkout"
+                );
+                1
+            }
+        },
         "version" | "--version" | "-V" => {
             print!("{}", version_text());
             0
@@ -161,6 +172,8 @@ fn usage() {
          kiln project <file-or-dir>       dump a project file's resolved fields\n  \
          kiln project <file-or-dir> set <key>=<value>...\n  \
            the only writer of a project file: name, main, target, kits, version\n  \
+         kiln install [--prefix <dir>]    copy this Kiln to a prefix, on your PATH\n  \
+           [--user] [--editors] [--dry-run] [--force]   see `kiln install --help`\n  \
          kiln version                     print the toolchain and ABI versions\n\n\
          Wherever <in.kiln> is accepted, a project.kproj or its directory is too.\n"
     );

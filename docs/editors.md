@@ -106,6 +106,49 @@ npx @vscode/vsce package && code --install-extension kiln-*.vsix
 
 Set `kiln.serverPath` if `kiln` is not on your `PATH`.
 
+## Kate
+
+Kate needs two things: a syntax definition, and a language-server entry that
+keys on it.
+
+`kiln install --editors` writes the first and prints the second. By hand:
+
+```sh
+mkdir -p ~/.local/share/org.kde.syntax-highlighting/syntax
+cp editors/kate/kiln.xml ~/.local/share/org.kde.syntax-highlighting/syntax/
+```
+
+That is `editors/kate/kiln.xml`, and it does more than colour: it gives a
+`.kiln` document a highlighting mode named **Kiln**, which is what Kate's LSP
+client matches a server against. Without it there is no mode to key on and the
+server never starts.
+
+Then turn the LSP client on — **Settings → Configure Kate → Plugins → LSP
+Client** — and put this in **Settings → Configure Kate → LSP Client → User
+Server Settings**, merging it with whatever is already there rather than
+replacing the file:
+
+```json
+{
+    "servers": {
+        "kiln": {
+            "command": ["kiln", "lsp"],
+            "highlightingModeRegex": "^Kiln$",
+            "documentLanguageId": "kiln",
+            "rootIndicationFileNames": ["project.kproj"]
+        }
+    }
+}
+```
+
+Kate keeps its own allowlist of server command lines and will ask once, the
+first time it starts `kiln lsp`. Say yes. `kiln install --editors` deliberately
+does not write that answer for you — a tool that edited the allowlist would be
+answering a security question on your behalf.
+
+`kiln` has to be on your `PATH` for `command` to find it; give the full path
+instead if it is not, or run `kiln install` first.
+
 ## Helix
 
 In `languages.toml`:
@@ -132,6 +175,25 @@ indent = { tab-width = 2, unit = "  " }
   "lsp": { "kiln": { "binary": { "path": "kiln", "arguments": ["lsp"] } } }
 }
 ```
+
+## Putting `kiln` on your PATH
+
+Every configuration above runs `kiln lsp`, so the shell has to be able to find
+`kiln`. `kiln install` copies the tree it is run from to a prefix and links the
+binaries into `<prefix>/bin`:
+
+```sh
+kiln install                 # /usr/local, or ~/.local when that is not writable
+kiln install --user          # the same as --prefix ~/.local
+kiln install --prefix /opt   # anywhere
+kiln install --dry-run       # print what it would write, write nothing
+kiln install --editors       # and Kate's syntax definition
+```
+
+The tree is relocatable — `kiln` finds its runtime by walking up from its own
+executable — so `<prefix>/lib/kiln` is self-contained and `<prefix>/bin` holds
+symlinks into it. To uninstall, delete that directory and those links; there is
+no database to keep in step.
 
 ## Debugging the server
 

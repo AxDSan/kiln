@@ -286,6 +286,31 @@ C library reports `line: none`, because it is not your code.
 This reads a program; it does not run one. Stepping and breakpoints are being
 built on top of it.
 
+## Installing
+
+`kiln install` copies the tree it is run from — a release bundle, or a source
+checkout you have built — to a prefix, and links the binaries into
+`<prefix>/bin`:
+
+```sh
+kiln install                 # /usr/local, or ~/.local when that is not writable
+kiln install --user          # the same as --prefix ~/.local
+kiln install --prefix /opt   # anywhere
+kiln install --dry-run       # print what it would write, write nothing
+kiln install --force         # replace an existing <prefix>/lib/kiln
+kiln install --editors       # and Kate's syntax definition
+```
+
+The tree is relocatable by construction: `kiln` finds its runtime by walking
+up from its own executable, so `<prefix>/lib/kiln` is self-contained and
+`<prefix>/bin` holds symlinks into it. That is also why uninstalling is
+deleting that directory and those links — there is no database to keep in
+step, and no post-install step to forget.
+
+It refuses to install a tree into itself, and refuses to replace an existing
+`<prefix>/lib/kiln` without `--force`. A prefix it cannot write says so and
+names `--user` rather than failing with a permission error.
+
 ## Starting a project
 
 ```sh

@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE language SYSTEM "language.dtd">
+<!--
+    Kiln syntax highlighting for Kate, KWrite, KDevelop and anything else
+    built on KSyntaxHighlighting.
+
+    This file does two jobs. The obvious one is colour. The other is that it
+    gives a `.kiln` document a highlighting mode named "Kiln", which is what
+    Kate's LSP client keys its server entry on — without it there is no mode
+    for `highlightingModeRegex` to match and the language server never starts.
+    See docs/editors.md.
+
+    The keyword groups mirror editors/vscode/syntaxes/kiln.tmLanguage.json, so
+    the two editors agree about what is a keyword. Only the first list is a
+    hard keyword to the lexer (ir/src/lexer.rs); the rest are contextual, and
+    are coloured because a reader does not care about that distinction.
+-->
+<language
+    name="Kiln"
+    version="1"
+    kateversion="5.0"
+    section="Sources"
+    extensions="*.kiln"
+    mimetype="text/x-kiln"
+    indenter="normal"
+    author="The Kiln authors"
+    license="MIT OR BSD-3-Clause"
+    priority="5">
+
+  <highlighting>
+    <!-- Reserved by the lexer: these can never be a name. -->
+    <list name="keywords">
+      <item>module</item>
+      <item>sub</item>
+      <item>end</item>
+      <item>let</item>
+      <item>var</item>
+      <item>if</item>
+      <item>else</item>
+      <item>while</item>
+      <item>for</item>
+      <item>break</item>
+      <item>continue</item>
+      <item>and</item>
+      <item>or</item>
+      <item>not</item>
+      <item>bnot</item>
+      <item>call</item>
+      <item>use</item>
+      <item>form</item>
+      <item>on</item>
+      <item>return</item>
+    </list>
+
+    <!-- Contextual: a declaration or a shorthand introducer. -->
+    <list name="declarations">
+      <item>target</item>
+      <item>record</item>
+      <item>enum</item>
+      <item>const</item>
+      <item>dll</item>
+      <item>action</item>
+      <item>is</item>
+    </list>
+
+    <!-- Contextual: the shorthands, and the small words they read with. -->
+    <list name="sugar">
+      <item>match</item>
+      <item>when</item>
+      <item>repeat</item>
+      <item>times</item>
+      <item>assert</item>
+      <item>defer</item>
+      <item>some</item>
+      <item>where</item>
+      <item>increment</item>
+      <item>decrement</item>
+      <item>then</item>
+      <item>otherwise</item>
+      <item>check</item>
+      <item>as</item>
+      <item>in</item>
+      <item>to</item>
+      <item>step</item>
+      <item>at</item>
+      <item>each</item>
+      <item>of</item>
+      <item>from</item>
+      <item>through</item>
+      <item>address</item>
+      <item>size</item>
+    </list>
+
+    <!-- The bitwise operators are words, so they are highlighted as words.
+         Every one but `bnot` is a soft keyword — `var band: int` is legal —
+         but colouring a variable that shares the name is a smaller wrong than
+         leaving the operator uncoloured. -->
+    <list name="operators">
+      <item>band</item>
+      <item>bor</item>
+      <item>bxor</item>
+      <item>shl</item>
+      <item>shr</item>
+      <item>ushr</item>
+      <item>mod</item>
+    </list>
+
+    <list name="types">
+      <item>int</item>
+      <item>int64</item>
+      <item>double</item>
+      <item>bool</item>
+      <item>text</item>
+      <item>bytes</item>
+      <item>ptr</item>
+      <item>byte</item>
+      <item>word</item>
+    </list>
+
+    <list name="constants">
+      <item>true</item>
+      <item>false</item>
+      <item>none</item>
+    </list>
+
+    <contexts>
+      <context name="Normal" attribute="Normal Text" lineEndContext="#stay">
+        <!-- `##` above a declaration is that symbol's documentation, and is
+             not the same thing as a `#` note to a reader. The doc comment is
+             matched first, because `#` would otherwise swallow it. -->
+        <Detect2Chars char="#" char1="#" attribute="Documentation" context="DocComment"/>
+        <DetectChar char="#" attribute="Comment" context="Comment"/>
+
+        <!-- A block string, `"""..."""`, whose newlines are newlines. Before
+             the ordinary string, which would end at the second quote. -->
+        <StringDetect String="&quot;&quot;&quot;" attribute="String" context="BlockString"/>
+        <!-- A raw literal, r"...", whose backslashes are backslashes. -->
+        <Detect2Chars char="r" char1="&quot;" attribute="String" context="RawString"/>
+        <DetectChar char="&quot;" attribute="String" context="String"/>
+
+        <keyword String="keywords" attribute="Keyword" context="#stay"/>
+        <keyword String="declarations" attribute="Keyword" context="#stay"/>
+        <keyword String="sugar" attribute="Keyword" context="#stay"/>
+        <keyword String="operators" attribute="Operator" context="#stay"/>
+        <keyword String="types" attribute="Data Type" context="#stay"/>
+        <keyword String="constants" attribute="Constant" context="#stay"/>
+
+        <!-- Numbers: hex and binary before decimal, and `_` groups digits. -->
+        <RegExpr String="\b0[xX][0-9a-fA-F_]+\b" attribute="Number" context="#stay"/>
+        <RegExpr String="\b0[bB][01_]+\b" attribute="Number" context="#stay"/>
+        <RegExpr String="\b\d[0-9_]*(\.[0-9_]+)?\b" attribute="Number" context="#stay"/>
+
+        <!-- A name followed by `(` is being called, whether it is a command
+             or a subroutine — the two share one namespace, so they cannot be
+             told apart here and are not coloured differently. -->
+        <RegExpr String="\b[A-Za-z_][A-Za-z0-9_]*(?=\s*\()" attribute="Function" context="#stay"/>
+
+        <AnyChar String="+-*/%&lt;&gt;=&amp;|" attribute="Operator" context="#stay"/>
+      </context>
+
+      <context name="Comment" attribute="Comment" lineEndContext="#pop"/>
+      <context name="DocComment" attribute="Documentation" lineEndContext="#pop"/>
+
+      <context name="String" attribute="String" lineEndContext="#pop">
+        <!-- An escape, and an interpolation hole. `{{` is a literal brace and
+             must not open one. -->
+        <RegExpr String="\\[nrt0\\&quot;{]" attribute="String Char" context="#stay"/>
+        <Detect2Chars char="{" char1="{" attribute="String Char" context="#stay"/>
+        <Detect2Chars char="}" char1="}" attribute="String Char" context="#stay"/>
+        <DetectChar char="{" attribute="Interpolation" context="Interpolation"/>
+        <DetectChar char="&quot;" attribute="String" context="#pop"/>
+      </context>
+
+      <!-- Inside a `{hole}` the language is the language again, so a command
+           call in one is coloured as a call. Kept shallow deliberately: a
+           nested string inside a hole ends the hole, which is what the lexer
+           does too. -->
+      <context name="Interpolation" attribute="Interpolation" lineEndContext="#pop">
+        <DetectChar char="}" attribute="Interpolation" context="#pop"/>
+        <keyword String="keywords" attribute="Keyword" context="#stay"/>
+        <keyword String="constants" attribute="Constant" context="#stay"/>
+        <RegExpr String="\b\d[0-9_]*(\.[0-9_]+)?\b" attribute="Number" context="#stay"/>
+        <RegExpr String="\b[A-Za-z_][A-Za-z0-9_]*(?=\s*\()" attribute="Function" context="#stay"/>
+      </context>
+
+      <context name="BlockString" attribute="String" lineEndContext="#stay">
+        <StringDetect String="&quot;&quot;&quot;" attribute="String" context="#pop"/>
+      </context>
+
+      <!-- Raw: no escapes at all, which is the whole point of it. -->
+      <context name="RawString" attribute="String" lineEndContext="#pop">
+        <DetectChar char="&quot;" attribute="String" context="#pop"/>
+      </context>
+    </contexts>
+
+    <itemDatas>
+      <itemData name="Normal Text"   defStyleNum="dsNormal"/>
+      <itemData name="Keyword"       defStyleNum="dsKeyword"/>
+      <itemData name="Data Type"     defStyleNum="dsDataType"/>
+      <itemData name="Constant"      defStyleNum="dsConstant"/>
+      <itemData name="Number"        defStyleNum="dsDecVal"/>
+      <itemData name="String"        defStyleNum="dsString"/>
+      <itemData name="String Char"   defStyleNum="dsSpecialChar"/>
+      <itemData name="Interpolation" defStyleNum="dsSpecialString"/>
+      <itemData name="Comment"       defStyleNum="dsComment"/>
+      <itemData name="Documentation" defStyleNum="dsDocumentation"/>
+      <itemData name="Function"      defStyleNum="dsFunction"/>
+      <itemData name="Operator"      defStyleNum="dsOperator"/>
+    </itemDatas>
+  </highlighting>
+
+  <general>
+    <comments>
+      <comment name="singleLine" start="#" position="afterwhitespace"/>
+    </comments>
+    <keywords casesensitive="1"/>
+  </general>
+</language>

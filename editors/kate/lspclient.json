@@ -1,0 +1,11 @@
+{
+    "servers": {
+        "kiln": {
+            "command": ["kiln", "lsp"],
+            "url": "https://github.com/AxDSan/kiln",
+            "highlightingModeRegex": "^Kiln$",
+            "documentLanguageId": "kiln",
+            "rootIndicationFileNames": ["project.kproj"]
+        }
+    }
+}
