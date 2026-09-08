@@ -30,7 +30,13 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang pkg-config
+          # sqlite3 and a MySQL client so `db`'s optional group is actually on
+          # and its documented samples are actually compiled. Without them the
+          # samples still pass — the library degrades to a stub — but they pass
+          # without testing anything, which is how a MySQL-only break reached
+          # the runner unnoticed. libmariadb-dev replaces the image's
+          # libmysqlclient-dev; that is the client the port this exists for uses.
+          sudo apt-get install -y clang pkg-config libsqlite3-dev libmariadb-dev
 
       - uses: dtolnay/rust-toolchain@stable
 

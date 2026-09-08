@@ -38,7 +38,12 @@
 #include "kiln_core.h"
 
 #ifdef KILN_DB
-#include <mysql/mysql.h>
+/* <mysql.h>, not <mysql/mysql.h>: the client's headers live in
+ * /usr/include/mysql on Fedora and MySQL, and /usr/include/mariadb on Debian's
+ * MariaDB. pkg-config puts whichever one it is on the include path, so the
+ * unqualified name is the one that resolves everywhere and the qualified one
+ * is the name that happened to work here. */
+#include <mysql.h>
 #include <sqlite3.h>
 
 /* The type of MYSQL_BIND::is_null, whatever this client library calls it.

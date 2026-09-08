@@ -884,20 +884,52 @@ impl Manifest {
     /// The fold happens here rather than at the link so that every consumer of
     /// a `Manifest` — the introspection `.so`, the program link, an archive —
     /// sees one library configuration and cannot disagree about it.
+    /// Is every one of these packages installed, as pkg-config understands it?
+    ///
+    /// A header path is a weaker question than it looks. `/usr/include/mysql/
+    /// mysql.h` being present says a header is present; it does not say a
+    /// library is, and it does not say which one — a machine can carry MySQL's
+    /// headers and MariaDB's library, or headers and no library at all. That
+    /// is not hypothetical: GitHub's runner image ships libmysqlclient's
+    /// headers, so probing for them turned `db`'s optional group on and then
+    /// linked `-lmariadb` against a machine that had never heard of it.
+    ///
+    /// pkg-config answers the question actually being asked — is this
+    /// installed, and what do I compile and link with — in one place, and the
+    /// flags come from the same source as the answer.
+    fn pkg_config_all_present(packages: &[String]) -> bool {
+        if packages.is_empty() {
+            return false;
+        }
+        Command::new("pkg-config")
+            .arg("--exists")
+            .args(packages)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
     fn take_optional(&mut self, text: &str, repo_root: &Path) {
         self.optional_requires = json_array(text, "optional_requires")
             .iter()
             .map(|p| repo_root.join(p))
             .collect();
-        // An empty list is not "nothing is missing, so enable it": a library
-        // with no optional dependency declared has no optional configuration to
-        // fold, and a feature macro defined for a dependency nobody named would
-        // compile code against headers that are not there.
-        self.optional_enabled =
-            !self.optional_requires.is_empty() && self.optional_requires.iter().all(|p| p.exists());
+        let optional_pkgs = json_array(text, "optional_pkg_config");
+
+        // An empty declaration is not "nothing is missing, so enable it": a
+        // library with no optional dependency declared has no optional
+        // configuration to fold, and a feature macro defined for a dependency
+        // nobody named would compile code against headers that are not there.
+        // A manifest may name paths, packages, or both; whatever it names has
+        // to be there.
+        let named = !self.optional_requires.is_empty() || !optional_pkgs.is_empty();
+        self.optional_enabled = named
+            && self.optional_requires.iter().all(|p| p.exists())
+            && (optional_pkgs.is_empty() || Self::pkg_config_all_present(&optional_pkgs));
         if !self.optional_enabled {
             return;
         }
+        self.pkg_config.extend(optional_pkgs);
 
         self.include_dirs.extend(
             json_array(text, "optional_include_dirs")
