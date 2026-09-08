@@ -40,6 +40,14 @@
 #ifdef KILN_DB
 #include <mysql/mysql.h>
 #include <sqlite3.h>
+
+/* The type of MYSQL_BIND::is_null, whatever this client library calls it.
+ *
+ * MariaDB spells it `my_bool`; MySQL 8.0 deleted that typedef and made the
+ * field a plain `bool`. Naming either one directly builds against one client
+ * and fails against the other — which is exactly how this was green on a
+ * MariaDB machine and red on CI. Asking the struct cannot be wrong. */
+typedef __typeof__(((MYSQL_BIND *)0)->is_null[0]) DbIsNull;
 #endif
 
 /* --- what a handle points at --------------------------------------------- */
@@ -197,7 +205,7 @@ static int db_bind_sqlite(sqlite3_stmt *st, void *params, void *nulls) {
 
 /* MySQL's prepared-statement binds want an array of MYSQL_BIND alive for the
  * whole execute, so the caller owns it and this only fills it in. */
-static int db_bind_mysql(MYSQL_BIND *b, unsigned long *lens, my_bool *isnull, void *params,
+static int db_bind_mysql(MYSQL_BIND *b, unsigned long *lens, DbIsNull *isnull, void *params,
                          void *nulls) {
     const int32_t n = db_ary_len(params);
     for (int32_t i = 0; i < n; i++) {
@@ -340,7 +348,7 @@ static int32_t db_exec_impl(int32_t h, const char *sql, void *params, void *null
     const int32_t n = db_ary_len(params);
     MYSQL_BIND *b = n ? (MYSQL_BIND *)calloc((size_t)n, sizeof *b) : NULL;
     unsigned long *lens = n ? (unsigned long *)calloc((size_t)n, sizeof *lens) : NULL;
-    my_bool *isnull = n ? (my_bool *)calloc((size_t)n, sizeof *isnull) : NULL;
+    DbIsNull *isnull = n ? (DbIsNull *)calloc((size_t)n, sizeof *isnull) : NULL;
     if (n && (!b || !lens || !isnull)) {
         free(b); free(lens); free(isnull);
         mysql_stmt_close(st);
