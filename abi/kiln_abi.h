@@ -163,6 +163,39 @@ static inline void  kn_mfree(void *p)               { kn_notify(KN_NRS_MFREE, p,
 static inline void *kn_mrealloc(void *p, long size) { return kn_notify(KN_NRS_MREALLOC, p, (void *)(size_t)size); }
 static inline void  kn_runtime_error(const char *m) { kn_notify(KN_NRS_RUNTIME_ERR, (void *)m, 0); }
 
+/* --- The collector ----------------------------------------------------
+ * Memory handed out by kn_malloc is reclaimed automatically: the runtime
+ * traces what the program can still reach and frees the rest.  Tracing is
+ * conservative — it reads the machine stack, the registers and the program's
+ * module variables as fields of possible addresses — so ordinary code, and
+ * ordinary library code, needs none of this.
+ *
+ * The one case that does: a library that stores a value from kn_malloc
+ * somewhere the runtime cannot see — inside its own malloc'd bookkeeping, or a
+ * file-scope variable — and then calls something that allocates.  No
+ * first-party library does that (they keep bookkeeping in plain malloc and
+ * copy through kn_malloc only what crosses back to the program), but a library
+ * that must can say so:
+ *
+ *     static char *g_kept;
+ *     kn_gc_root((void **)&g_kept);      // once, at first use
+ *     ...
+ *     kn_gc_unroot((void **)&g_kept);    // if the storage goes away
+ *
+ * The address is registered, not the value, so the library may overwrite it
+ * freely.  Answers 0 if the root could not be recorded, in which case the
+ * library should not hold the value.
+ *
+ * kn_gc_collect forces a collection and answers the bytes reclaimed;
+ * kn_gc_live_bytes answers what the program is holding.  Both are what the
+ * `collect_garbage` and `memory_in_use` core commands call.  Both answer 0 in
+ * a library target, which has no main and therefore no stack to trace: there,
+ * memory is released when the host unloads the library, as it was before. */
+int32_t kn_gc_root(void **slot);
+void    kn_gc_unroot(void **slot);
+int64_t kn_gc_collect(void);
+int64_t kn_gc_live_bytes(void);
+
 /* --- Error slot -------------------------------------------------------
  * A language with no out-parameters and no exceptions still has to report why
  * something failed.  A fallible command returns a sentinel (0 for a handle, -1

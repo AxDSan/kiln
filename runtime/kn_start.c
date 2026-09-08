@@ -49,6 +49,13 @@ int main(int argc, char **argv) {
      * exist.  A library target excludes this file, so `arg_count()` there
      * reports 0 rather than reading a pointer nobody set. */
     kn_set_args(argc, argv);
+    /* Where the stack begins, for the collector to trace up to.  Recorded from
+     * `main` because that is the only frame guaranteed to be below every other
+     * one, and setting it is what switches collection on: a library target
+     * excludes this file, has no stack it can vouch for, and so keeps the old
+     * free-everything-at-exit behaviour. */
+    int stack_bottom;
+    kn_gc_set_stack_base(&stack_bottom);
     E_Init();
     int rc = ECodeStart();
     E_DestroyRes();

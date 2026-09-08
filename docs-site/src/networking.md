@@ -442,8 +442,10 @@ needs to be reachable over https.
 
 ## Memory, over a long run
 
-Every text a command returns is owned by the runtime and released when the
-program exits, not when the value goes out of scope. That is fine for a program
-that runs and stops, and it is worth knowing for a server that runs for weeks:
-its memory grows with the number of requests it has answered. Restart it, or
-put it behind something that will.
+Every text a command returns is owned by the runtime, and the runtime reclaims
+it once the program can no longer reach it — so a server's memory settles at
+what it is actually holding rather than growing with the number of requests it
+has answered. What it holds is what it stores: a module variable that
+accumulates a request's text per connection grows because the program is
+keeping it, and no collector can tell that apart from data still wanted. See
+[Memory](./memory.md).

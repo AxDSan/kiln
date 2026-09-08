@@ -482,6 +482,12 @@ impl Registry {
             cmd("last_error_code", "kn_last_error_code", &[], Some(Int));
             cmd("last_error_text", "kn_last_error_text", &[], Some(Text));
 
+            // --- Memory ------------------------------------------------------
+            // The runtime reclaims unreachable memory as a program allocates;
+            // these are for watching it and for saying when a good moment is.
+            cmd("memory_in_use", "kn_memory_in_use", &[], Some(Int64));
+            cmd("collect_garbage", "kn_collect_garbage", &[], Some(Int64));
+
             // --- Integer math ------------------------------------------------
             cmd("abs_int", "kn_abs_int", &[Int], Some(Int));
             cmd("min_int", "kn_min_int", &[Int, Int], Some(Int));

@@ -76,6 +76,21 @@ static const Kiln_CommandDesc CORE_COMMANDS[] = {
     /* errors — zero arity is what makes an out-parameter expressible */
     CMD("last_error_code", kn_last_error_code, KN_SDT_INT,  0, NULL),
     CMD("last_error_text", kn_last_error_text, KN_SDT_TEXT, 0, NULL),
+    /* memory — the runtime reclaims on its own; these are for looking and
+       for saying "now is a good moment" */
+    DCMD("memory_in_use", kn_memory_in_use, KN_SDT_INT64, 0, NULL,
+         "How many bytes of program data the runtime is currently holding.",
+         "let before: int64 = memory_in_use()\n"
+         "for i = 1 to 10000\n"
+         "  let s: text = \"row {i}\"\n"
+         "end\n"
+         "call print_text(\"held {memory_in_use() - before} more bytes\")"),
+    DCMD("collect_garbage", kn_collect_garbage, KN_SDT_INT64, 0, NULL,
+         "Reclaim unreachable memory now, and answer how many bytes came back.",
+         "for i = 1 to 100000\n"
+         "  let s: text = \"scratch {i}\"\n"
+         "end\n"
+         "call print_text(\"reclaimed {collect_garbage()} bytes\")"),
     /* integer math */
     CMD("abs_int", kn_abs_int, KN_SDT_INT, 1, P_I),
     CMD("min_int", kn_min_int, KN_SDT_INT, 2, P_II),

@@ -15,6 +15,7 @@
 - [Components](./components.md)
 - [Networking](./networking.md)
 - [Databases](./databases.md)
+- [Memory](./memory.md)
 - [Build targets](./build-targets.md)
 - [Kits](./kits.md)
 - [Interop](./interop.md)

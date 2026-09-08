@@ -438,6 +438,19 @@ pub fn lower_module_with(
     lo.vars.clear();
     lo.allocas.clear();
         lo.locals = 0;
+    // The collector's roots, handed over before the first module variable is
+    // written: a `var` initialiser can allocate, and an allocation can collect.
+    {
+        let roots = lo.gc_root_symbols();
+        if !roots.is_empty() {
+            writeln!(
+                lo.body,
+                "  call void @kn_gc_set_roots(ptr @kn_gc_roots, i32 {})",
+                roots.len()
+            )
+            .unwrap();
+        }
+    }
     // Module variables are initialised before anything else can observe them.
     for g in m.globals() {
         let v = lo.eval_hinted(&g.value, Some(g.ty))?;
@@ -1082,6 +1095,23 @@ impl Lowerer<'_> {
         )
         .unwrap();
         p
+    }
+
+    /// The module variables the collector needs to know about: the
+    /// pointer-typed ones, sorted so the table and the call agree and so the
+    /// generated IR is stable between builds. A text or an array held only in
+    /// a module variable is reachable from nowhere else — no stack frame holds
+    /// it between the subroutines that touch it — so without this table the
+    /// first collection would free it.
+    fn gc_root_symbols(&self) -> Vec<String> {
+        let mut names: Vec<&String> = self
+            .globals
+            .iter()
+            .filter(|(_, ty)| ty.is_pointer())
+            .map(|(n, _)| n)
+            .collect();
+        names.sort();
+        names.iter().map(|n| global_symbol(n)).collect()
     }
 
     fn store_global(&mut self, name: &str, v: &Val) {
@@ -4131,6 +4161,25 @@ impl Lowerer<'_> {
         }
         if !self.globals.is_empty() {
             out.push('\n');
+        }
+
+        // The collector's root table: the addresses of the pointer-typed
+        // module variables. Only in an executable — a library target has no
+        // `main`, so nothing there records where the stack starts and the
+        // collector stays off.
+        let roots = self.gc_root_symbols();
+        if entry && !roots.is_empty() {
+            let items: Vec<String> = roots.iter().map(|r| format!("ptr @{r}")).collect();
+            writeln!(
+                out,
+                "@kn_gc_roots = internal global [{} x ptr] [{}]\n",
+                roots.len(),
+                items.join(", ")
+            )
+            .unwrap();
+        }
+        if entry {
+            writeln!(out, "declare void @kn_gc_set_roots(ptr, i32)\n").unwrap();
         }
 
         // One address cache per foreign function called. `null` means "not yet

@@ -54,11 +54,13 @@ and links without it. Console programs and libraries are unaffected.
 call fails rather than downgrading. The `httpserver` component never terminates
 TLS — put a reverse proxy in front of it. See [Networking](./networking.md).
 
-**Memory is reclaimed at exit.** Every value the runtime allocates — a text
-result, an array, a record, a dictionary — lives until the program ends, and is
-freed then. A program that runs and stops never notices; a window that runs all
-day, or a server that answers requests for weeks, grows with the work it has
-done. Restart it, or put it behind something that will.
+**A collection pauses the program, and the pause grows with the heap.** Memory
+is reclaimed automatically (see [Memory](./memory.md)), but the collector runs
+all at once rather than a little at a time: a program holding tens of megabytes
+stops for tens of milliseconds when it collects. A server does not notice; a
+game drawing at 60 Hz can, and its recourse today is `collect_garbage()` at a
+moment it chooses. Generational and incremental collection are the fix and are
+not written yet.
 
 **The debugger is Linux-only, and stops at the statement.** Breakpoints,
 stepping, the call stack, variables and hover all work — but the engine is

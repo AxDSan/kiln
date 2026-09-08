@@ -27,7 +27,7 @@ Say none of these. Each one is a claim the product does not make and does not
 want to defend:
 
 - **A systems language.** No manual memory management, no borrow checker, no
-  freestanding or kernel target. Programs are garbage-free by arena, not by
+  freestanding or kernel target. Memory is reclaimed by a collector, not by
   ownership. Anyone arriving expecting Zig or Rust has been mis-sold.
 - **A general-purpose scripting language.** There is no REPL and the language
   is deliberately small. It exists to make GUI programs.

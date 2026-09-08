@@ -64,6 +64,14 @@ void *E_MAlloc(long size);
 void  E_MFree(void *p);
 void *E_MRealloc(void *p, long size);
 
+/* The collector (kn_gc.c).  `main` records where the stack begins and the
+ * generated module hands over the addresses of its pointer-typed variables;
+ * between them those are the roots a trace starts from.  A build with no main
+ * — a shared or static library target — sets neither, and the collector stays
+ * off there rather than trace a stack it cannot vouch for. */
+void kn_gc_set_stack_base(void *base);
+void kn_gc_set_roots(void **globals, int32_t count);
+
 /* Every core command (Kiln_CommandFn).  Referenced by core_libinfo.c. */
 #define KN_CMD(n) void n(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv)
 
@@ -73,6 +81,8 @@ KN_CMD(kn_read_line); KN_CMD(kn_input_ended); KN_CMD(kn_ask);
 KN_CMD(kn_assert_failed);
 /* errors */
 KN_CMD(kn_last_error_code); KN_CMD(kn_last_error_text);
+/* memory */
+KN_CMD(kn_memory_in_use); KN_CMD(kn_collect_garbage);
 /* integer math */
 KN_CMD(kn_abs_int); KN_CMD(kn_min_int); KN_CMD(kn_max_int); KN_CMD(kn_mod_int); KN_CMD(kn_pow_int);
 /* float math */

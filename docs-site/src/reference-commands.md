@@ -46,6 +46,7 @@ read. The [Language guide](./language.md#when-a-command-fails) has the rules.
 | `bytes_set` | bytes, int, int | — |
 | `bytes_slice` | bytes, int, int | bytes |
 | `ceil` | double | double |
+| [`collect_garbage`](#collect_garbage) | — | int64 |
 | `concat` | text, text | text |
 | `contains` | array, element | bool |
 | `cos` | double | double |
@@ -81,6 +82,7 @@ read. The [Language guide](./language.md#when-a-command-fails) has the rules.
 | `mem_alloc` | int64 | ptr |
 | `mem_copy` | ptr, ptr, int64 | — |
 | `mem_free` | ptr | — |
+| [`memory_in_use`](#memory_in_use) | — | int64 |
 | `mem_zero` | ptr, int64 | — |
 | `min_double` | double, double | double |
 | `min_int` | int, int | int |
@@ -192,6 +194,41 @@ sub main
   p.x = 7
   let raw: bytes = bytes_from_ptr(address of p, 8)
   call print_int(bytes_at(raw, 1))
+end
+```
+
+### `collect_garbage`
+
+`collect_garbage() -> int64`
+
+Reclaim unreachable memory now, and answer how many bytes came back..
+
+```kiln
+module example
+
+sub main
+  for i = 1 to 100000
+    let s: text = "scratch {i}"
+  end
+  call print_text("reclaimed {collect_garbage()} bytes")
+end
+```
+
+### `memory_in_use`
+
+`memory_in_use() -> int64`
+
+How many bytes of program data the runtime is currently holding..
+
+```kiln
+module example
+
+sub main
+  let before: int64 = memory_in_use()
+  for i = 1 to 10000
+    let s: text = "row {i}"
+  end
+  call print_text("held {memory_in_use() - before} more bytes")
 end
 ```
 
