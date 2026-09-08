@@ -68,7 +68,10 @@ a:hover { text-decoration: underline; }
   padding: 84px 0 96px;
   text-align: center;
 }
-.hero img.wordmark { width: min(460px, 78vw); display: block; margin: 0 auto 26px; }
+/* The hero mark is portrait — the K over the word — so its height is what
+   has to be bounded, not its width, or it pushes the headline off a laptop
+   screen. Width follows to keep the aspect. */
+.hero img.wordmark { height: min(280px, 34vh); width: auto; display: block; margin: 0 auto 22px; }
 .hero h1 {
   font-size: clamp(26px, 4.6vw, 40px);
   line-height: 1.22; margin: 0 0 18px; font-weight: 650; letter-spacing: -0.02em;
@@ -195,7 +198,7 @@ footer .right { margin-left: auto; display: flex; gap: 20px; }
 
 <header class="hero">
   <div class="wrap">
-    <img class="wordmark" src="assets/kiln-wordmark.png" alt="Kiln">
+    <img class="wordmark" src="assets/kiln-hero-mark.png" alt="Kiln">
     <h1>Draw an app. Wire an event.<br>Ship a native binary.</h1>
     <p class="sub">
       An open implementation of <strong>Easy Programming Language</strong> (易语言) —

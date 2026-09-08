@@ -66,10 +66,19 @@ the compiler, not a philosophy of work.
 | `assets/kiln-wordmark.png` | The wordmark: amber-to-red gradient, rounded geometric sans, a hairline crack through `l` and `n` |
 | `assets/kiln-icon.png` | The K as fired clay with a molten core, 256×256 |
 | `assets/kiln-icon-64.png` | The same at 64×64, which is where it stops being legible |
+| `assets/kiln-hero.png` | The photographic mark — cracked ceramic with the fire inside it — over the word and a tagline. The README's header and the handbook's, where there is room for it and the background is light |
+| `assets/kiln-hero-mark.png` | The same mark cropped to the K alone, 600×600. The hero's baked-in word is dark type: on a dark page it reads as a rendering fault, so the landing page takes this and lets its own type say the name |
+| `assets/kiln-mark-black.png` | The flat black K. What a *built app* ships as its icon, and what Studio wears — an app made with Kiln should not wear Kiln's fire |
 
 Scale to fit, never to fill — the wordmark's aspect is fixed and stretching it
 is the one thing a mark cannot survive. Both keep their transparency, so they
 sit on light and dark equally.
+
+Which mark where, because there are now five: the **hero** introduces the
+product to someone who has not met it (README, handbook, landing page); the
+**icon** is the product's own small identity (favicons, Studio's window); the
+**black mark** belongs to what users build with it, not to Kiln itself; the
+**wordmark** is for a wide strip beside text, like the handbook's sidebar.
 
 The icon is detailed where the wordmark is flat. That is deliberate: the icon
 is seen alone at small sizes and needs the texture to stay recognisable, and

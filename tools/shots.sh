@@ -84,9 +84,19 @@ else
     cat "$WORK/welcome.log" >&2
 fi
 
-# The handbook keeps its own copies: mdBook only serves what is under its src/.
-for n in designer editor welcome; do
-    [ -f "docs-site/src/assets/screenshot-$n.png" ] && \
-        cp "assets/screenshot-$n.png" "docs-site/src/assets/screenshot-$n.png"
+# Three copies of every screenshot exist, because mdBook serves only what is
+# under its src/ and the landing page is a separate static site with its own
+# assets/.  They must be copied, not linked — and the copy must not be
+# conditional on the destination already existing, which is how the landing
+# page came to be showing OpenEPL Studio months after the rename: a guard meant
+# to skip missing directories silently skipped the whole landing set.
+for n in designer editor welcome settings; do
+    src="assets/screenshot-$n.png"
+    [ -f "$src" ] || continue
+    for dest in docs-site/src/assets docs-site/landing/assets; do
+        [ -d "$dest" ] || continue
+        cp "$src" "$dest/screenshot-$n.png"
+        echo "  $dest/screenshot-$n.png"
+    done
 done
 echo "==> done"
