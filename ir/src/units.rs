@@ -73,8 +73,9 @@ pub fn unit_path(dir: &Path, name: &str) -> Option<PathBuf> {
         .lines()
         .map(str::trim)
         .find(|l| !l.is_empty() && !l.starts_with('#'))?;
-    let mut words = header.split_whitespace();
-    if words.next() == Some("unit") && words.next() == Some(name) {
+    // `unit` alone, not `unit <name>`: a header that names the wrong unit is
+    // the resolver's error to report, with the file and both names.
+    if header.split_whitespace().next() == Some("unit") {
         Some(p)
     } else {
         None
@@ -283,6 +284,15 @@ mod tests {
         let e = resolve_units(prog, &d, ParseOptions::default()).unwrap_err();
         assert!(e.msg.contains("a unit has no `main`"), "{e}");
         assert_eq!(e.line, 2);
+    }
+
+    #[test]
+    fn a_unit_whose_header_names_another_unit_is_refused() {
+        let d = scratch("misnamed");
+        std::fs::write(d.join("maths.kiln"), "unit math\nsub f()\nend\n").unwrap();
+        let prog = parse("module app\nuse maths\nsub main\nend\n").unwrap();
+        let e = resolve_units(prog, &d, ParseOptions::default()).unwrap_err();
+        assert!(e.msg.contains("declares `unit math`"), "{e}");
     }
 
     #[test]

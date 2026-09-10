@@ -125,7 +125,9 @@ what `--release` is for.
   says which unit file it means; the editor, when the *program* is the open
   file, counts the unit's errors and points at the file rather than misplacing
   a squiggle. Completion and go-to-definition see the open file only, not the
-  units it uses.
+  units it uses. Debug information names the program's file for every
+  subroutine, so a breakpoint set in a unit file does not resolve — set it by
+  subroutine name instead.
 - A form or component property value must be a literal. A component's
   properties can be set again from code, but the form's own cannot — the form
   is not a component — so a window title cannot be computed or translated at
