@@ -103,12 +103,44 @@ closes what it opened. Both are runtime handles: a stale one is rejected rather
 than reused, a connection handle passed where a result handle goes is refused
 by kind, and `0` is never valid.
 
+## Transactions
+
+`db_begin` starts one; every statement on that handle until `db_commit` or
+`db_rollback` is part of it. A second `db_begin` before either is refused
+rather than flattened, and a commit or rollback with no transaction open is
+refused too — both are bugs in the program, and the library says so instead of
+guessing.
+
+```
+call db_begin(h)
+call db_exec(h, "update bags set slot = ? where id = ?", ["7", "41"])
+call db_exec(h, "update bags set slot = ? where id = ?", ["3", "42"])
+if db_commit(h)
+  call print_text("swapped")
+end
+```
+
+`db_last_insert_id(h)` answers the id the last INSERT on that connection
+produced — the AUTO_INCREMENT value on MySQL, the rowid on SQLite — and 0 when
+there has been none. Like MySQL's own `LAST_INSERT_ID()`, a statement that
+inserts nothing leaves it as it was.
+
+## Typed reads
+
+`db_text`, `db_int` and `db_int64` are joined by `db_double` for a FLOAT,
+DOUBLE or DECIMAL column and `db_bool` for a BOOLEAN or TINYINT(1) — `1`,
+`true` and any non-zero number read as true, NULL as false. `db_column_name`
+answers a column's name or alias, for a program reading a row whose SELECT it
+did not write.
+
 ## What is not here
 
-No transactions, no bulk insert, no `LAST_INSERT_ID()`, no connection pool, and
-one connection per handle. The surface is the one a login path needs — a
-SELECT, an UPDATE, a DELETE and an INSERT, each with bound parameters — and it
-grows when something real needs more, not before.
+No bulk insert, no connection pool, one connection per handle, and every
+command is synchronous: a query inside a server's event handler holds every
+other client until it answers. The surface is the one a login path and a game
+server's data layer need — SELECT, UPDATE, DELETE and INSERT with bound
+parameters, and transactions around them — and it grows when something real
+needs more, not before.
 
 For MySQL, a query's rows are fetched into memory at once rather than streamed.
 That is the right trade for the statements this exists to run; a `select *` over

@@ -267,19 +267,67 @@ end
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
+| [`db_begin`](#db_begin) | int | bool |
+| [`db_bool`](#db_bool) | int, int | bool |
 | [`db_close`](#db_close) | int | bool |
+| [`db_column_name`](#db_column_name) | int, int | text |
 | [`db_columns`](#db_columns) | int | int |
+| [`db_commit`](#db_commit) | int | bool |
+| [`db_double`](#db_double) | int, int | double |
 | [`db_exec`](#db_exec) | int, text, text[] | int |
 | [`db_exec_n`](#db_exec_n) | int, text, text[], bool[] | int |
 | [`db_int64`](#db_int64) | int, int | int64 |
 | [`db_int`](#db_int) | int, int | int |
 | [`db_is_null`](#db_is_null) | int, int | bool |
+| [`db_last_insert_id`](#db_last_insert_id) | int | int64 |
 | [`db_next`](#db_next) | int | bool |
 | [`db_open`](#db_open) | text | int |
 | [`db_query`](#db_query) | int, text, text[] | int |
 | [`db_query_n`](#db_query_n) | int, text, text[], bool[] | int |
 | [`db_result_close`](#db_result_close) | int | bool |
+| [`db_rollback`](#db_rollback) | int | bool |
 | [`db_text`](#db_text) | int, int | text |
+
+### `db_begin`
+
+`db_begin(int) -> bool`
+
+Start a transaction; every statement until db_commit or db_rollback is part of it.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (n int)", [])
+  call db_begin(h)
+  call db_exec(h, "insert into t values (?)", ["1"])
+  call db_commit(h)
+  call print_text("committed")
+end
+```
+
+### `db_bool`
+
+`db_bool(int, int) -> bool`
+
+The current row's column as a bool: 1, true or any non-zero number; false for NULL.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (banned int)", [])
+  call db_exec(h, "insert into t values (?)", ["1"])
+  let rows: int = db_query(h, "select banned from t", [])
+  if db_next(rows)
+    call print_text("banned: {db_bool(rows, 1)}")
+  end
+end
+```
 
 ### `db_close`
 
@@ -299,6 +347,24 @@ sub main
 end
 ```
 
+### `db_column_name`
+
+`db_column_name(int, int) -> text`
+
+The name of a result column, counting from 1.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (a int, b int)", [])
+  let rows: int = db_query(h, "select a, b as total from t", [])
+  call print_text(db_column_name(rows, 2))
+end
+```
+
 ### `db_columns`
 
 `db_columns(int) -> int`
@@ -314,6 +380,48 @@ sub main
   call db_exec(h, "create table t (a int, b int)", [])
   let rows: int = db_query(h, "select a, b from t", [])
   call print_int(db_columns(rows))
+end
+```
+
+### `db_commit`
+
+`db_commit(int) -> bool`
+
+Make the transaction's changes permanent.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (n int)", [])
+  call db_begin(h)
+  call db_exec(h, "insert into t values (?)", ["1"])
+  if db_commit(h)
+    call print_text("kept")
+  end
+end
+```
+
+### `db_double`
+
+`db_double(int, int) -> double`
+
+The current row's column as a double; 0.0 for NULL.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (x real)", [])
+  call db_exec(h, "insert into t values (?)", ["2.5"])
+  let rows: int = db_query(h, "select x from t", [])
+  if db_next(rows)
+    call print_double(db_double(rows, 1))
+  end
 end
 ```
 
@@ -415,6 +523,24 @@ sub main
 end
 ```
 
+### `db_last_insert_id`
+
+`db_last_insert_id(int) -> int64`
+
+The id the last INSERT on this connection produced; 0 when there has been none.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (id integer primary key, name text)", [])
+  call db_exec(h, "insert into t (name) values (?)", ["Ada"])
+  call print_int64(db_last_insert_id(h))
+end
+```
+
 ### `db_next`
 
 `db_next(int) -> bool`
@@ -513,6 +639,29 @@ sub main
   let rows: int = db_query(h, "select n from t", [])
   if db_result_close(rows)
     call print_text("closed")
+  end
+end
+```
+
+### `db_rollback`
+
+`db_rollback(int) -> bool`
+
+Undo everything since db_begin.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (n int)", [])
+  call db_begin(h)
+  call db_exec(h, "insert into t values (?)", ["1"])
+  call db_rollback(h)
+  let rows: int = db_query(h, "select count(*) from t", [])
+  if db_next(rows)
+    call print_int(db_int(rows, 1))
   end
 end
 ```

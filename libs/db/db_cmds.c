@@ -65,6 +65,9 @@ typedef struct {
     sqlite3 *lite;
     MYSQL   *my;
 #endif
+    int in_tx;               /* between db_begin and its commit or rollback  */
+    int64_t last_insert;     /* MySQL: the last statement's AUTO_INCREMENT id;
+                                SQLite asks the connection at read time      */
 } DbConn;
 
 /* A result set is walked one row at a time, and the two backends disagree
@@ -372,6 +375,11 @@ static int32_t db_exec_impl(int32_t h, const char *sql, void *params, void *null
         kn_error_set(KN_ERR_INVALID_ARG, msg);
     } else {
         changed = (int32_t)mysql_stmt_affected_rows(st);
+        /* MySQL's own LAST_INSERT_ID() keeps its value across statements that
+         * insert nothing, and so does this: a non-zero id is the only thing
+         * that overwrites the last one. */
+        const my_ulonglong id = mysql_stmt_insert_id(st);
+        if (id != 0) c->last_insert = (int64_t)id;
         kn_error_clear();
     }
     free(b); free(lens); free(isnull);
@@ -672,6 +680,185 @@ void db_columns(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     if (!r) { kn_ret_int(ret, -1); return; }
     kn_error_clear();
     kn_ret_int(ret, r->columns);
+#endif
+}
+
+#ifdef KILN_DB
+static int db_tx_fail(DbConn *c, const char *what) {
+    char msg[512];
+    if (c->backend == DB_SQLITE) {
+        snprintf(msg, sizeof msg, "sqlite: %s: %s", what, sqlite3_errmsg(c->lite));
+    } else {
+        snprintf(msg, sizeof msg, "mysql: %s: %s", what, mysql_error(c->my));
+    }
+    kn_error_set(KN_ERR_INVALID_ARG, msg);
+    return 0;
+}
+#endif
+
+/* db_begin(h) -> bool: start a transaction. Nested begins are refused rather
+ * than silently flattened — a program that begins twice and commits once has
+ * a bug, and SQLite would say so while MySQL would not. */
+void db_begin(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_bool(ret, 0);
+#else
+    DbConn *c = (DbConn *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_DB);
+    if (!c) { kn_ret_bool(ret, 0); return; }
+    if (c->in_tx) {
+        kn_error_set(KN_ERR_INVALID_ARG, "already in a transaction — commit or roll back first");
+        kn_ret_bool(ret, 0);
+        return;
+    }
+    int ok;
+    if (c->backend == DB_SQLITE) {
+        ok = sqlite3_exec(c->lite, "BEGIN", NULL, NULL, NULL) == SQLITE_OK;
+    } else {
+        /* Autocommit off is the transaction: every prepared statement that
+         * follows joins it, and commit/rollback end it and turn autocommit
+         * back on, so a connection outside a transaction behaves as before. */
+        ok = mysql_autocommit(c->my, 0) == 0;
+    }
+    if (!ok) { db_tx_fail(c, "begin"); kn_ret_bool(ret, 0); return; }
+    c->in_tx = 1;
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
+#endif
+}
+
+#ifdef KILN_DB
+static void db_tx_end(Kiln_Slot *ret, Kiln_Slot *argv, int commit) {
+    DbConn *c = (DbConn *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_DB);
+    if (!c) { kn_ret_bool(ret, 0); return; }
+    if (!c->in_tx) {
+        kn_error_set(KN_ERR_INVALID_ARG, "not in a transaction — db_begin starts one");
+        kn_ret_bool(ret, 0);
+        return;
+    }
+    int ok;
+    if (c->backend == DB_SQLITE) {
+        ok = sqlite3_exec(c->lite, commit ? "COMMIT" : "ROLLBACK", NULL, NULL, NULL) == SQLITE_OK;
+    } else {
+        ok = (commit ? mysql_commit(c->my) : mysql_rollback(c->my)) == 0;
+        mysql_autocommit(c->my, 1);
+    }
+    /* Either way the transaction is over: a failed COMMIT has rolled back on
+     * both backends, and leaving the flag set would refuse the next begin. */
+    c->in_tx = 0;
+    if (!ok) { db_tx_fail(c, commit ? "commit" : "rollback"); kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
+}
+#endif
+
+/* db_commit(h) -> bool */
+void db_commit(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_bool(ret, 0);
+#else
+    db_tx_end(ret, argv, 1);
+#endif
+}
+
+/* db_rollback(h) -> bool */
+void db_rollback(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_bool(ret, 0);
+#else
+    db_tx_end(ret, argv, 0);
+#endif
+}
+
+/* db_last_insert_id(h) -> int64: the AUTO_INCREMENT / rowid the last INSERT
+ * on this connection produced; 0 when there has been none. */
+void db_last_insert_id(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_int64(ret, 0);
+#else
+    DbConn *c = (DbConn *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_DB);
+    if (!c) { kn_ret_int64(ret, 0); return; }
+    kn_error_clear();
+    if (c->backend == DB_SQLITE) {
+        kn_ret_int64(ret, (int64_t)sqlite3_last_insert_rowid(c->lite));
+        return;
+    }
+    kn_ret_int64(ret, c->last_insert);
+#endif
+}
+
+/* db_double(r, column) -> double: 0.0 for NULL, 0.0 with a code set for a bad
+ * column. Both backends hand a FLOAT/DOUBLE/DECIMAL back as its decimal text,
+ * and strtod is the inverse of that. */
+void db_double(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_double(ret, 0.0);
+#else
+    DbRows *r = (DbRows *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_DB_ROWS);
+    if (!r) { kn_ret_double(ret, 0.0); return; }
+    int bad = 0;
+    const char *v = db_cell(r, kn_arg_int(argv, 1), NULL, &bad);
+    if (bad) { db_bad_column(); kn_ret_double(ret, 0.0); return; }
+    kn_error_clear();
+    kn_ret_double(ret, v ? strtod(v, NULL) : 0.0);
+#endif
+}
+
+/* db_bool(r, column) -> bool: false for NULL. A BOOLEAN/TINYINT(1) arrives as
+ * "0" or "1"; SQLite has no bool and stores what it was given, so "true" and
+ * any non-zero number also read as true. */
+void db_bool(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_bool(ret, 0);
+#else
+    DbRows *r = (DbRows *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_DB_ROWS);
+    if (!r) { kn_ret_bool(ret, 0); return; }
+    int bad = 0;
+    const char *v = db_cell(r, kn_arg_int(argv, 1), NULL, &bad);
+    if (bad) { db_bad_column(); kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    if (!v) { kn_ret_bool(ret, 0); return; }
+    if ((v[0] == 't' || v[0] == 'T') && (v[1] == 'r' || v[1] == 'R')) { kn_ret_bool(ret, 1); return; }
+    kn_ret_bool(ret, strtod(v, NULL) != 0.0);
+#endif
+}
+
+/* db_column_name(r, column) -> text: the name (or alias) of a result column,
+ * so a program can read a row it did not write the SELECT for. */
+void db_column_name(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_text(ret, kn_empty_text());
+#else
+    DbRows *r = (DbRows *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_DB_ROWS);
+    if (!r) { kn_ret_text(ret, kn_empty_text()); return; }
+    const int32_t col = kn_arg_int(argv, 1);
+    if (col < 1 || col > r->columns) {
+        kn_error_set(KN_ERR_OUT_OF_RANGE, "no such column — columns count from 1");
+        kn_ret_text(ret, kn_empty_text());
+        return;
+    }
+    const char *name;
+    if (r->backend == DB_SQLITE) {
+        name = sqlite3_column_name(r->lite, col - 1);
+    } else {
+        MYSQL_FIELD *f = mysql_fetch_field_direct(r->my, (unsigned)(col - 1));
+        name = f ? f->name : NULL;
+    }
+    kn_error_clear();
+    kn_ret_text(ret, db_text(name));
 #endif
 }
 

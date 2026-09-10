@@ -15,6 +15,13 @@ void db_int64(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 void db_is_null(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 void db_columns(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 void db_result_close(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
+void db_begin(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
+void db_commit(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
+void db_rollback(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
+void db_last_insert_id(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
+void db_double(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
+void db_bool(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
+void db_column_name(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
 
 static const int32_t P_T[]    = { KN_SDT_TEXT };
 static const int32_t P_I[]    = { KN_SDT_INT };
@@ -139,13 +146,77 @@ static const Kiln_CommandDesc DB_COMMANDS[] = {
       "if db_result_close(rows)\n"
       "  call print_text(\"closed\")\n"
       "end" },
+    { "db_begin", "db_begin", KN_SDT_BOOL, 1, P_I,
+      "Start a transaction; every statement until db_commit or db_rollback is part of it",
+      "let h: int = db_open(\"sqlite::memory:\")\n"
+      "call db_exec(h, \"create table t (n int)\", [])\n"
+      "call db_begin(h)\n"
+      "call db_exec(h, \"insert into t values (?)\", [\"1\"])\n"
+      "call db_commit(h)\n"
+      "call print_text(\"committed\")" },
+
+    { "db_commit", "db_commit", KN_SDT_BOOL, 1, P_I,
+      "Make the transaction's changes permanent",
+      "let h: int = db_open(\"sqlite::memory:\")\n"
+      "call db_exec(h, \"create table t (n int)\", [])\n"
+      "call db_begin(h)\n"
+      "call db_exec(h, \"insert into t values (?)\", [\"1\"])\n"
+      "if db_commit(h)\n"
+      "  call print_text(\"kept\")\n"
+      "end" },
+
+    { "db_rollback", "db_rollback", KN_SDT_BOOL, 1, P_I,
+      "Undo everything since db_begin",
+      "let h: int = db_open(\"sqlite::memory:\")\n"
+      "call db_exec(h, \"create table t (n int)\", [])\n"
+      "call db_begin(h)\n"
+      "call db_exec(h, \"insert into t values (?)\", [\"1\"])\n"
+      "call db_rollback(h)\n"
+      "let rows: int = db_query(h, \"select count(*) from t\", [])\n"
+      "if db_next(rows)\n"
+      "  call print_int(db_int(rows, 1))\n"
+      "end" },
+
+    { "db_last_insert_id", "db_last_insert_id", KN_SDT_INT64, 1, P_I,
+      "The id the last INSERT on this connection produced; 0 when there has been none",
+      "let h: int = db_open(\"sqlite::memory:\")\n"
+      "call db_exec(h, \"create table t (id integer primary key, name text)\", [])\n"
+      "call db_exec(h, \"insert into t (name) values (?)\", [\"Ada\"])\n"
+      "call print_int64(db_last_insert_id(h))" },
+
+    { "db_double", "db_double", KN_SDT_DOUBLE, 2, P_II,
+      "The current row's column as a double; 0.0 for NULL",
+      "let h: int = db_open(\"sqlite::memory:\")\n"
+      "call db_exec(h, \"create table t (x real)\", [])\n"
+      "call db_exec(h, \"insert into t values (?)\", [\"2.5\"])\n"
+      "let rows: int = db_query(h, \"select x from t\", [])\n"
+      "if db_next(rows)\n"
+      "  call print_double(db_double(rows, 1))\n"
+      "end" },
+
+    { "db_bool", "db_bool", KN_SDT_BOOL, 2, P_II,
+      "The current row's column as a bool: 1, true or any non-zero number; false for NULL",
+      "let h: int = db_open(\"sqlite::memory:\")\n"
+      "call db_exec(h, \"create table t (banned int)\", [])\n"
+      "call db_exec(h, \"insert into t values (?)\", [\"1\"])\n"
+      "let rows: int = db_query(h, \"select banned from t\", [])\n"
+      "if db_next(rows)\n"
+      "  call print_text(\"banned: {db_bool(rows, 1)}\")\n"
+      "end" },
+
+    { "db_column_name", "db_column_name", KN_SDT_TEXT, 2, P_II,
+      "The name of a result column, counting from 1",
+      "let h: int = db_open(\"sqlite::memory:\")\n"
+      "call db_exec(h, \"create table t (a int, b int)\", [])\n"
+      "let rows: int = db_query(h, \"select a, b as total from t\", [])\n"
+      "call print_text(db_column_name(rows, 2))" },
 };
 
 static const Kiln_LibInfo DB_INFO = {
     KILN_ABI_VERSION,
     "db",
     "kiln-db-0000-0000-0000-000000000009",
-    0, 1, 0,
+    0, 2, 0,
     (int32_t)(sizeof(DB_COMMANDS) / sizeof(DB_COMMANDS[0])),
     DB_COMMANDS,
 };

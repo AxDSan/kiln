@@ -125,6 +125,62 @@ end
     assert!(out.contains("null_one null=true text=''"), "{out}");
 }
 
+/// What the game-server port needs beyond the login slice, in the shapes it
+/// needs them: a transaction that undoes an INSERT, the id that INSERT
+/// produced, and a double, a bool and a column name read back typed. The
+/// MySQL half of each is `docs/gbo-port-probes/p9_transactions_typed.kiln`.
+#[test]
+fn transactions_insert_ids_and_typed_reads() {
+    let out = run(
+        r#"module dbtx
+target console
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table t (id integer primary key, name text, ratio real, banned int)", [])
+
+  call db_begin(h)
+  call db_exec(h, "insert into t (name, ratio, banned) values (?, ?, ?)", ["Ada", "0.75", "1"])
+  call print_text("in tx id={db_last_insert_id(h)}")
+  if db_begin(h)
+    call print_text("nested begin accepted")
+  else
+    call print_text("nested begin refused")
+  end
+  call db_rollback(h)
+  var rows: int = db_query(h, "select count(*) from t", [])
+  if db_next(rows)
+    call print_text("after rollback count={db_int(rows, 1)}")
+  end
+  call db_result_close(rows)
+
+  call db_begin(h)
+  call db_exec(h, "insert into t (name, ratio, banned) values (?, ?, ?)", ["Ada", "0.75", "1"])
+  let id: int64 = db_last_insert_id(h)
+  call db_commit(h)
+  rows = db_query(h, "select name, ratio, banned as flag from t where id = ?", [int64_to_text(id)])
+  if db_next(rows)
+    call print_text("name={db_text(rows, 1)} ratio={db_double(rows, 2)} banned={db_bool(rows, 3)} col={db_column_name(rows, 3)}")
+  end
+  call db_result_close(rows)
+  if db_commit(h)
+    call print_text("stray commit accepted")
+  else
+    call print_text("stray commit refused")
+  end
+  call db_close(h)
+end
+"#,
+        "tx",
+    );
+    assert!(out.contains("in tx id=1"), "{out}");
+    assert!(out.contains("nested begin refused"), "{out}");
+    assert!(out.contains("after rollback count=0"), "{out}");
+    assert!(out.contains("name=Ada ratio=0.75 banned=true col=flag"), "{out}");
+    assert!(out.contains("stray commit refused"), "{out}");
+}
+
 /// The reason the surface has no `db_exec(h, sql)` without a parameter list:
 /// a value that looks like SQL must stay a value. This is the classic payload,
 /// and it must match nothing.

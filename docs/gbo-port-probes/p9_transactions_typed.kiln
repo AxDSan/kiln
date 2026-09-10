@@ -1,0 +1,59 @@
+# Probe 9 — what the game server port needs from `db` beyond the login slice:
+# a transaction that rolls back, the AUTO_INCREMENT id of an INSERT, and a
+# double, a bool and a column name read back typed. Runs against the gbo up
+# MariaDB (root/godswar on 13306) by default; set GODSWAR_DB_DSN for another.
+module p9
+target console
+use db
+use system
+
+sub main
+  var dsn: text = env_get("GODSWAR_DB_DSN")
+  if dsn = ""
+    dsn = "mysql://root:godswar@127.0.0.1:13306/godswar"
+  end
+  let h: int = db_open(dsn)
+  if h = 0
+    call print_text("open failed: {last_error_text()}")
+    return
+  end
+  call db_exec(h, "drop table if exists kiln_probe9", [])
+  call db_exec(h, "create table kiln_probe9 (id integer primary key auto_increment, name varchar(32), ratio double, banned tinyint(1))", [])
+
+  # 1. an INSERT inside a transaction, its id, then a rollback
+  call db_begin(h)
+  call db_exec(h, "insert into kiln_probe9 (name, ratio, banned) values (?, ?, ?)", ["Ada", "0.75", "1"])
+  let first: int64 = db_last_insert_id(h)
+  call print_text("insert id inside tx: {first}")
+  if db_begin(h)
+    call print_text("FAIL: nested begin accepted")
+  else
+    call print_text("nested begin refused: {last_error_text()}")
+  end
+  call db_rollback(h)
+  var rows: int = db_query(h, "select count(*) from kiln_probe9", [])
+  if db_next(rows)
+    call print_text("rows after rollback: {db_int(rows, 1)}")
+  end
+  call db_result_close(rows)
+
+  # 2. the same INSERT committed, and the typed reads
+  call db_begin(h)
+  call db_exec(h, "insert into kiln_probe9 (name, ratio, banned) values (?, ?, ?)", ["Ada", "0.75", "1"])
+  let second: int64 = db_last_insert_id(h)
+  call db_commit(h)
+  rows = db_query(h, "select name, ratio, banned as flag from kiln_probe9 where id = ?", [int64_to_text(second)])
+  if db_next(rows)
+    call print_text("name={db_text(rows, 1)} ratio={db_double(rows, 2)} banned={db_bool(rows, 3)} col3={db_column_name(rows, 3)}")
+  else
+    call print_text("FAIL: committed row not found (id {second})")
+  end
+  call db_result_close(rows)
+  if db_commit(h)
+    call print_text("FAIL: commit outside tx accepted")
+  else
+    call print_text("commit outside tx refused: {last_error_text()}")
+  end
+  call db_exec(h, "drop table kiln_probe9", [])
+  call db_close(h)
+end
