@@ -16,6 +16,70 @@ line are given so it can be rechecked rather than believed.
 
 ---
 
+## Measured against the live realm — 2026-09-09: the game server's gate
+
+The login port was proven over the wire against SQLite on 09-07. On 09-09 it was run for the first
+time against the real thing: `gbo up`'s MariaDB on 13306 with the .NET GameServer on 7002 behind
+it, the .NET login server stopped, the Kiln one on 6001, driven by
+`godswar/tools/kiln-login-probe.py`. **Login, both refusals, the realm list and the 0x2711 handoff
+match byte-for-byte; the ticket row lands in `handoff_tickets`; the .NET GameServer redeems it and
+answers the roster.** The MySQL path was never the open question — Item 2 proved it on 09-07 — but
+"never run live" was, and it is closed.
+
+Two gates for the *game server* port were then closed the same day, and one is named and left
+open on purpose.
+
+### Item 4 — `libs/db` beyond the login slice — **done, 2026-09-09**
+
+Counted over the .NET `GodsBattle.Core/Data` repositories, which is what the game server would
+port: 14 `GetFloat`, 5 `GetBoolean`, 11 `GetByte`, 3 `GetDateTime`, 2 `GetName`, transactions in
+seven of nine repositories, and `LAST_INSERT_ID()` where a character or item is created. None of
+that existed in `db`. Added, in `libs/db/db_cmds.c`:
+
+| command | note |
+|---|---|
+| `db_begin` / `db_commit` / `db_rollback` | MySQL: `mysql_autocommit(0)` on begin, so the existing prepared `db_exec` joins the transaction unchanged; SQLite: `BEGIN`/`COMMIT`/`ROLLBACK`. A nested begin and a stray commit are refused, not flattened. |
+| `db_last_insert_id` | `mysql_stmt_insert_id` captured inside `db_exec_impl` before the statement closes, kept across statements that insert nothing (MySQL's own `LAST_INSERT_ID()` semantics); `sqlite3_last_insert_rowid` at read time. |
+| `db_double`, `db_bool` | `strtod` over the decimal text both backends already return; bool is `1`, `true` or any non-zero. `GetByte` collapses into `db_int`; DateTime stays text (3 sites, parsed in the program). |
+| `db_column_name` | for the two repositories that read a row by column name. |
+
+**Done-when met:** `docs/gbo-port-probes/p9_transactions_typed.kiln` against the live MariaDB —
+an INSERT's id inside a transaction, the row gone after rollback, the typed reads after a commit,
+nested begin and stray commit refused — and the same on SQLite in `cli/tests/db.rs`. Not done, and
+not needed by the count: typed *parameters* (no `byte[]` in the data layer), and converting the
+MySQL query path from escape-and-substitute to `mysql_stmt_*` result binds — it is injection-safe
+and charset-aware; it is hygiene, not a gate.
+
+### Item 5 — a program in more than one file — **done, 2026-09-09**
+
+The login server was 547 lines in one module because a whole program *was* one file, and a game
+server is thirty of those. Kiln now has **units**: a file whose header is `unit <name>` holds
+subroutines, records, constants, `dll` declarations and module variables and nothing that runs;
+`use <name>` from a program (or another unit) resolves to `<name>.kiln` beside it — only when its
+header says `unit`, so `examples/hello.kiln` beside `hellolib.kiln` does not capture `use hello`.
+Resolution is a merge (`ir/src/units.rs`): items appended, the unit's libraries added, one
+namespace, a name in two files refused naming both. Validation, lowering and the header writer see
+one module. The build prefixes a unit's diagnostics with the unit file; the language server checks
+an open unit as a unit. Recorded in `docs-site/src/language.md` and `limitations.md`.
+
+**Done-when met:** `godswar/src/GodsBattle.LoginServer.Kiln` is now a 253-line program and six
+units (`cipher`, `string_shift`, `protocol`, `accounts`, `settings`, `logging`); `shift_test.kiln`
+uses the shared unit instead of a copy; the probe above produces the same bytes after the split.
+
+### Item 6 — every `db_*` call is synchronous inside the event loop — **open, deliberately**
+
+The one thing a game server port will hit that the login server did not. `.NET`'s GameServer
+`await`s every query; a Kiln handler that calls `db_query` holds the `tcpserver` pump — every
+other client's frames — until MariaDB answers. On loopback that is a millisecond and invisible,
+which is exactly how the 0x2711 timing bug survived every local run. Not built now, because the
+right shape (a worker thread with a completion event, or a connection pool with `db_query_async`
+answering a handle the pump polls) should be chosen against a measured stall, not a guessed one.
+**Done-when:** a probe that holds one client's query for a second while a second client's login
+completes unhindered. Until then, the game server port's first handler that touches the database
+should be written as if this were solved, and the number measured.
+
+---
+
 ## Measured against Kiln 1.0.1 — 2026-09-07
 
 The page below was written on 2026-09-06 from reading. This section is what a day of probing the
