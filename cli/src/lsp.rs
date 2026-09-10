@@ -58,8 +58,8 @@ use lsp_types::{
 };
 
 use kiln_ir::registry::ComponentDesc;
-use kiln_ir::validate::{param_list, validate_with, Hints};
-use kiln_ir::{parse, Registry, Signature, Span};
+use kiln_ir::validate::{param_list, validate_unit, validate_with, Hints};
+use kiln_ir::{parse, resolve_units, ParseOptions, Registry, Signature, Span};
 
 use crate::kit;
 use crate::libload;
@@ -648,16 +648,34 @@ impl Server {
         let Some(src) = self.docs.get(uri).cloned() else {
             return;
         };
-        send_diagnostics(conn, uri, self.diagnose(&src));
+        let dir = uri_to_path(uri).and_then(|p| p.parent().map(Path::to_path_buf));
+        send_diagnostics(conn, uri, self.diagnose(&src, dir.as_deref()));
     }
 
     /// Compile far enough to collect diagnostics, and no further.
-    fn diagnose(&mut self, src: &str) -> Vec<Diagnostic> {
-        let module = match parse(src) {
+    ///
+    /// `dir` is where the file lives, so its `use` names can resolve to unit
+    /// files beside it; `None` (an untitled buffer) means every `use` is a
+    /// library. A unit is checked as a unit — its own `use`s merged, no entry
+    /// point demanded — and a program has its units merged before it is
+    /// checked, exactly as `kiln build` sees it. The one thing not shown here
+    /// is an error *inside* a unit while the program is the open file: the
+    /// validator's line numbers are the unit's, and they would land on the
+    /// wrong text. Those are counted, and the count points at the unit.
+    fn diagnose(&mut self, src: &str, dir: Option<&Path>) -> Vec<Diagnostic> {
+        let parsed = match parse(src) {
             Ok(m) => m,
             // A parse error stops everything downstream — while you are typing,
             // this is the common case, so it must be positioned well.
             Err(e) => return vec![diag(src, Span::line(e.line), e.msg)],
+        };
+        let is_unit = parsed.is_unit;
+        let (module, origins) = match dir {
+            Some(d) => match resolve_units(parsed, d, ParseOptions::default()) {
+                Ok(r) => (r.module, r.origins),
+                Err(e) => return vec![diag(src, Span::line(1), e.to_string())],
+            },
+            None => (parsed, Default::default()),
         };
 
         let registry = match self.registry_for(&module.uses) {
@@ -669,7 +687,8 @@ impl Server {
             }
         };
 
-        let mut errs = match validate_with(&module, &registry, &Hints::default()) {
+        let check = |m, r, h: &Hints| if is_unit { validate_unit(m, r, h) } else { validate_with(m, r, h) };
+        let mut errs = match check(&module, &registry, &Hints::default()) {
             Ok(()) => return Vec::new(),
             Err(errs) => errs,
         };
@@ -679,15 +698,35 @@ impl Server {
             let hints = Hints {
                 elsewhere: self.elsewhere().clone(),
             };
-            if let Err(better) = validate_with(&module, &registry, &hints) {
+            if let Err(better) = check(&module, &registry, &hints) {
                 errs = better;
             }
         }
-        errs.into_iter()
-            // `msg`, not `to_string()`: Display prefixes "line N:", which
-            // the editor already shows via the range.
-            .map(|e| diag(src, e.span(), e.msg))
-            .collect()
+        // Which file an error is in: the subroutine the validator says it is
+        // inside, looked up among what the units declared.
+        let unit_of = |msg: &str| -> Option<PathBuf> {
+            let name = msg.strip_prefix("in `")?.split_once('`')?.0;
+            origins.get(name).cloned()
+        };
+        let mut here = Vec::new();
+        let mut elsewhere: std::collections::BTreeMap<PathBuf, usize> = Default::default();
+        for e in errs {
+            match unit_of(&e.msg) {
+                Some(file) => *elsewhere.entry(file).or_insert(0) += 1,
+                // `msg`, not `to_string()`: Display prefixes "line N:", which
+                // the editor already shows via the range.
+                None => here.push(diag(src, e.span(), e.msg)),
+            }
+        }
+        for (file, n) in elsewhere {
+            let name = file.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+            here.push(diag(
+                src,
+                Span::line(1),
+                format!("unit {name} has {n} error(s) — open it to see them"),
+            ));
+        }
+        here
     }
 
     /// Every command of every library the workspace can see, and which

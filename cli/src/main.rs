@@ -42,7 +42,7 @@ use std::collections::HashMap;
 use kiln_backend::{lower_module_with, DebugFormat};
 use kiln_ir::registry::Registry;
 use kiln_ir::validate::{validate_with, Hints};
-use kiln_ir::{parse_with, Module, ParseOptions, Target};
+use kiln_ir::{parse_with, resolve_units, Module, ParseOptions, Target};
 
 fn main() {
     // Die quietly when a reader goes away, the way every other command-line
@@ -580,6 +580,13 @@ fn cmd_inspect(rest: &[String]) -> i32 {
     println!("module: {}", module.name);
     for u in &module.uses {
         println!("use: {u}");
+        // A `use` that names a file beside the program is a unit, and the
+        // designer's list of subroutines should not pretend otherwise.
+        if let Some(dir) = input.parent() {
+            if let Some(p) = kiln_ir::units::unit_path(dir, u) {
+                println!("unit: {u} {}", p.display());
+            }
+        }
     }
     for sub in module.subs() {
         // `sub:` stays the bare name — the designer reads the rest of the line
@@ -852,6 +859,64 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
 
 /// Parse, introspect libraries, validate, and lower to LLVM IR.
 /// Returns the `.ll` text and the implementation sources to static-link.
+/// Parse a program and merge the units it `use`s — see `kiln_ir::units`.
+///
+/// Every reader of a program that goes on to validate or lower it comes
+/// through here, so `build`, `run`, `emit` and the language server agree on
+/// what a program *is*. A unit's own error is reported with the unit's file
+/// and line, since the program's line numbers would point at the wrong text.
+fn parse_program(
+    src: &str,
+    input: &Path,
+    opts: ParseOptions,
+) -> Result<kiln_ir::Resolved, String> {
+    let module = parse_with(src, opts).map_err(|e| e.to_string())?;
+    if module.is_unit {
+        return Err(format!(
+            "{} is a unit, not a program — build the program that says `use {}`",
+            input.display(),
+            module.name
+        ));
+    }
+    let dir = input
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    resolve_units(module, &dir, opts).map_err(|e| e.to_string())
+}
+
+/// Say which unit file a diagnostic belongs to, when it names something a
+/// unit declared. The validator reports positions in one merged module; the
+/// name it mentions is what maps a line back to the file it is in.
+fn annotate_origins(
+    errs: Vec<kiln_ir::validate::ValidateError>,
+    origins: &std::collections::HashMap<String, PathBuf>,
+) -> Vec<kiln_ir::validate::ValidateError> {
+    if origins.is_empty() {
+        return errs;
+    }
+    errs.into_iter()
+        .map(|mut e| {
+            // "in `twice`: ..." is the validator's own anchor: the subroutine
+            // the position is inside. Only that name says which file the line
+            // number belongs to — a record or constant the message mentions
+            // may well live in a unit while the error is in the program.
+            let inside = e
+                .msg
+                .strip_prefix("in `")
+                .and_then(|rest| rest.split_once('`'))
+                .map(|(name, _)| name.to_string());
+            if let Some(n) = inside {
+                if let Some(file) = origins.get(&n) {
+                    e.msg = format!("in unit {}: {}", file.display(), e.msg);
+                }
+            }
+            e
+        })
+        .collect()
+}
+
 fn compile(
     input: &Path,
     target_override: Option<Target>,
@@ -878,7 +943,9 @@ fn compile_with(
     // build: a release build has to refuse every mistake a debug build refuses,
     // and an assert whose condition is nonsense is one of them. Only what is
     // *lowered* differs — see the second parse below.
-    let mut module = parse_with(&src, ParseOptions::default()).map_err(|e| e.to_string())?;
+    let resolved = parse_program(&src, input, ParseOptions::default())?;
+    let origins = resolved.origins;
+    let mut module = resolved.module;
     // An explicit --target wins over the module's declaration: the same source
     // should be buildable as a program or a library without editing it.
     if let Some(t) = target_override {
@@ -922,6 +989,7 @@ fn compile_with(
     }
 
     if let Err(errs) = validate_hinted(&module, &plan.registry, &repo_root) {
+        let errs = annotate_origins(errs, &origins);
         let joined = errs
             .iter()
             .map(|e| format!("  - {e}"))
@@ -941,8 +1009,7 @@ fn compile_with(
     // rejected. Every other reader of a file — `inspect`, the language server,
     // the designer — never gets here: they read the program as written.
     if release {
-        let mut stripped =
-            parse_with(&src, ParseOptions { asserts: false }).map_err(|e| e.to_string())?;
+        let mut stripped = parse_program(&src, input, ParseOptions { asserts: false })?.module;
         if let Some(t) = target_override {
             stripped.target = Some(t);
         }

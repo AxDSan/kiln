@@ -382,6 +382,7 @@ pub fn read_decls(dir: &Path, name: &str) -> Result<Option<Module>, String> {
         target: None,
         uses: Vec::new(),
         items: Vec::new(),
+        is_unit: false,
     };
     // Every declared name, and the file that declared it. `dll`, `record` and
     // `const` share one namespace here because the registry gives them one:

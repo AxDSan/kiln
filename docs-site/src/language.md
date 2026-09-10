@@ -53,6 +53,46 @@ else is a console one. See [Build targets](./build-targets.md).
 component types are not defined. `timer` needs no library — it is part of the
 core runtime, and a console program can declare one.
 
+### Units: one program, several files
+
+A program is still one module. What a **unit** adds is a way to assemble it
+from more than one file. A file that starts `unit <name>` holds subroutines,
+records, constants, `dll` declarations and module variables — and nothing that
+runs: no `main`, no form, no `target`. The program pulls it in with the same
+`use` it uses for a library, and `<name>.kiln` beside the program is what
+resolves.
+
+```text
+# maths.kiln
+unit maths
+use system
+
+const TWO = 2
+
+sub twice(n: int): int
+  return n * TWO
+end
+```
+
+```text
+# app.kiln
+module app
+use maths
+
+sub main
+  call print_int(twice(21))     # 42; `use system` came in with the unit
+end
+```
+
+`use maths` finds `maths.kiln` beside `app.kiln` because its header says
+`unit`; a name with no such file beside it is a library, exactly as before. A
+unit may `use` other units and libraries, and whatever it uses reaches the
+program. Everything a unit declares is visible to the program by its plain
+name — there is no prefix — so one name declared in two files is an error that
+names both, rather than a guess about which one you meant. `kiln build` and
+`kiln run` take the program, never the unit; `kiln inspect` lists each
+resolved unit beside its `use:` line.
+
 ## Values that change, and values that do not
 
 `let` binds a value that stays put. `var` binds one you intend to reassign.

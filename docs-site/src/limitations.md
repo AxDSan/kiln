@@ -120,6 +120,12 @@ what `--release` is for.
   counts with `int`, not `int64`. A range whose bounds are `int64` is a
   compile error; count with an `int` and widen inside the loop.
 - One form per module.
+- A unit's names are merged into the program's without a prefix, and a
+  diagnostic inside one is positioned by the unit's line number. The build
+  says which unit file it means; the editor, when the *program* is the open
+  file, counts the unit's errors and points at the file rather than misplacing
+  a squiggle. Completion and go-to-definition see the open file only, not the
+  units it uses.
 - A form or component property value must be a literal. A component's
   properties can be set again from code, but the form's own cannot — the form
   is not a component — so a window title cannot be computed or translated at

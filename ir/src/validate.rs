@@ -96,6 +96,13 @@ pub fn validate_decls(m: &Module, reg: &Registry) -> Result<(), Vec<ValidateErro
     validate_impl(m, reg, &Hints::default(), true)
 }
 
+/// Validate a unit on its own, with the units it `use`s already merged in:
+/// everything a program gets except the entry-point rule, which is the
+/// program's to meet. This is what an editor runs on an open `unit` file.
+pub fn validate_unit(m: &Module, reg: &Registry, hints: &Hints) -> Result<(), Vec<ValidateError>> {
+    validate_impl(m, reg, hints, true)
+}
+
 fn validate_impl(
     m: &Module,
     reg: &Registry,

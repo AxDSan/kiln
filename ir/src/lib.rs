@@ -19,11 +19,13 @@ pub mod desugar;
 pub mod registry;
 pub mod sema;
 pub mod validate;
+pub mod units;
 
 pub use desugar::expand_defer;
 pub use parser::{parse, parse_with, ParseError, ParseOptions};
 pub use registry::Registry;
 pub use validate::{validate, ValidateError};
+pub use units::{resolve_units, Resolved, UnitError};
 
 /// A name that lives for the rest of the process, so a type can carry one.
 ///
@@ -1560,6 +1562,10 @@ pub struct Module {
     /// its implementations.
     pub uses: Vec<String>,
     pub items: Vec<Item>,
+    /// `unit <name>` rather than `module <name>`: a file of subroutines,
+    /// records and constants that a program (or another unit) pulls in with
+    /// `use <name>`. A unit has no entry point and no form; see `units.rs`.
+    pub is_unit: bool,
 }
 
 impl Module {

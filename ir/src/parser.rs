@@ -568,8 +568,17 @@ impl Parser {
 
     fn module(&mut self) -> Result<Module, ParseError> {
         self.skip_newlines();
-        self.expect(&Tok::Module, "`module`")?;
-        let name = self.ident("module name")?;
+        // `unit <name>` is the other header. It is a SOFT keyword, matched only
+        // here: a program is `module`, a file meant to be `use`d by one is
+        // `unit`, and the word is free everywhere else.
+        let is_unit = if matches!(self.peek(), Tok::Ident(w) if w == "unit") {
+            self.bump();
+            true
+        } else {
+            self.expect(&Tok::Module, "`module` or `unit`")?;
+            false
+        };
+        let name = self.ident(if is_unit { "unit name" } else { "module name" })?;
         self.expect(&Tok::Newline, "newline after module name")?;
 
         // Optional `target <kind>` and `use <lib>` declarations precede the
@@ -585,6 +594,13 @@ impl Parser {
             self.skip_newlines();
             if matches!(self.peek(), Tok::Ident(w) if w == "target") {
                 let line = self.line();
+                if is_unit {
+                    return Err(ParseError {
+                        line,
+                        msg: "a unit has no `target` — the program that uses it decides what is built"
+                            .into(),
+                    });
+                }
                 self.bump();
                 let kind = self.ident("target kind")?;
                 match Target::parse(&kind) {
@@ -670,7 +686,7 @@ impl Parser {
                 }
             }
         }
-        Ok(Module { name, target, uses, items })
+        Ok(Module { name, target, uses, items, is_unit })
     }
 
     /// ```text
