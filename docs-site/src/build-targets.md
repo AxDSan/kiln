@@ -238,6 +238,20 @@ kiln build greet.kiln --os windows --target sharedlib   # greet.dll
 kiln build greet.kiln --os windows --target staticlib   # libgreet.a
 ```
 
+`--arch x86` builds the same console programs and libraries as a PE32 i386
+image, which is what a 2000s Win32 client is. It needs the 32-bit mingw
+toolchain (`mingw32-gcc` on Fedora, `gcc-mingw-w64-i686` on Debian):
+
+```sh
+kiln build hello.kiln --os windows --arch x86              # hello.exe, i386
+kiln build hook.kiln  --os windows --arch x86 --target sharedlib   # hook.dll
+```
+
+The language is unchanged. A c-record's pointer-sized fields are four bytes,
+and a `system` declaration is `stdcall` — which is what a Win32 call is on
+32-bit, and what keeps the stack balanced. `--target gui` is refused on x86
+(the UI stack is x86-64 only).
+
 A shared library built for Windows comes as three files: `greet.dll`,
 `greet.h`, and the import library `greet.lib` that a Windows link goes
 through — the one the consumer's `#pragma comment(lib, "greet.lib")` names.

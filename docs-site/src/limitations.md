@@ -7,9 +7,15 @@ you to ignore the page.
 
 ## Platforms
 
-**Linux on x86-64, plus a cross build for Windows.** Programs — windowed
-and console — and libraries cross-build for Windows x86-64 from Linux with
-`--os windows` (see [Build targets](./build-targets.md)). A console program
+**Linux on x86-64, plus a cross build for Windows — 64-bit and 32-bit.**
+Console programs and libraries cross-build for Windows x64 (`--os windows`)
+and for 32-bit Windows (`--os windows --arch x86`) from Linux (see
+[Build targets](./build-targets.md)). A 32-bit *windowed* program is not
+built yet: the vendored UI stack (RmlUi, SDL2, FreeType) is x86-64 only, and
+`--arch x86` with `--target gui` is refused by name rather than attempted.
+The same is true of the `win` kit on x86 — it works (the pointer-width
+typedefs follow the target), but a windowed program cannot link the UI.
+A 64-bit windowed program cross-builds as before: A console program
 is tested under wine and runs; a windowed one is tested under wine as far as
 a machine without a display allows — it loads with its DLLs and reaches the
 UI library — and its drawn window has not been checked under wine or on a

@@ -98,7 +98,8 @@ sub wndproc(hwnd: ptr, msg: int, wparam: int64, lparam: int64): int64 system
 end
 ```
 
-`WPARAM`, `LPARAM` and `LRESULT` are pointer-width, so they are `int64`; the
+`WPARAM`, `LPARAM` and `LRESULT` are pointer-width, so the kit spells them
+`intptr` — 64-bit on a 64-bit target, 32-bit on `--arch x86`; the
 message is a `UINT`, so it is an `int`; the `HWND` is a `ptr`. `address of
 wndproc` is the function pointer the class stores, and Windows calls it — not
 Kiln.
@@ -161,7 +162,7 @@ it the same way everywhere.
 | `HWND`, `HANDLE`, `HDC`, `HKEY`, `HMODULE`, any pointer | `ptr` | all pointer-width |
 | `DWORD`, `UINT`, `LONG`, `int`, `ATOM` | `int` | 32 bits |
 | `BOOL` | `bool` | a C `int`; any non-zero is true |
-| `WPARAM`, `LPARAM`, `LRESULT`, `SIZE_T`, `ULONG_PTR` | `int64` | pointer-width payloads |
+| `WPARAM`, `LPARAM`, `LRESULT`, `SIZE_T`, `ULONG_PTR` | `intptr` | pointer-width: `int64` on x64, `int` on x86 |
 | `LPCSTR` the API always wants | `text` | crosses as the `char *` it is |
 | `LPCSTR`/`LPSTR` that is routinely `NULL`, or an out buffer | `ptr` | a `text` has no `NULL` |
 | a struct the callee fills | the c-record itself | the pointer is taken for you |

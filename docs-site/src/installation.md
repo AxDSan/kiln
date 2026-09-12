@@ -21,6 +21,7 @@ the folder wherever you like.
 | Building any program | `clang`, `ar` |
 | Windowed programs and the IDE | `pkg-config`, SDL2, SDL2_image, FreeType, OpenGL |
 | Building for Windows (`--os windows`) | the mingw-w64 cross compiler — `mingw64-gcc` on Fedora, `gcc-mingw-w64-x86-64` on Debian and Ubuntu |
+| Building for 32-bit Windows (`--arch x86`) | its 32-bit twin — `mingw32-gcc` on Fedora, `gcc-mingw-w64-i686` on Debian and Ubuntu |
 
 The runtime ships as source and is compiled into each program you build. That
 is what lets the linker drop every command your program never calls.
