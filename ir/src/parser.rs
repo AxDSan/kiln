@@ -4377,7 +4377,7 @@ mod tests {
         assert_eq!(rec.fields[0], ("a".to_string(), Ty::Byte));
         assert_eq!(rec.fields[1], ("b".to_string(), Ty::Int));
         let (offsets, size, align) =
-            rec.c_layout(&crate::Registry::new()).expect("a C layout");
+            rec.c_layout(&crate::Registry::new(), crate::TargetInfo::X86_64_LINUX).expect("a C layout");
         assert_eq!(offsets, vec![0, 4], "b is aligned to offset 4");
         assert_eq!(size, 8, "the struct is padded to its widest member");
         assert_eq!(align, 4, "the struct is as aligned as its widest member");
@@ -4416,7 +4416,9 @@ mod tests {
             reg.insert_record(r.clone());
         }
         let blob = m.records().nth(1).unwrap();
-        let (offsets, size, align) = blob.c_layout(&reg).expect("a C layout");
+        let (offsets, size, align) = blob
+            .c_layout(&reg, crate::TargetInfo::X86_64_LINUX)
+            .expect("a C layout");
         // n@0, pt@4 (a Point is 4-aligned), rgb@12, then two bytes of tail
         // padding to the struct's 4-byte alignment.
         assert_eq!(offsets, vec![0, 4, 12]);

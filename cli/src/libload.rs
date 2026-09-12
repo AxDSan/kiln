@@ -167,7 +167,7 @@ pub struct BuildConfig {
 
 /// Resolve `core` + each `use`d library under `repo_root`.
 pub fn load(repo_root: &Path, uses: &[String]) -> Result<LibPlan, String> {
-    load_with(repo_root, uses, true, false)
+    load_with(repo_root, uses, true, false, crate::Arch::host())
 }
 
 /// Resolve for a program that will be linked for ANOTHER operating system.
@@ -181,8 +181,12 @@ pub fn load(repo_root: &Path, uses: &[String]) -> Result<LibPlan, String> {
 /// And the link itself: a library whose `lib.json` carries `windows_*` keys
 /// has a Windows build of its dependencies, and those keys replace the Linux
 /// ones (`Manifest::take_windows`).
-pub fn load_cross(repo_root: &Path, uses: &[String]) -> Result<LibPlan, String> {
-    load_with(repo_root, uses, true, true)
+pub fn load_cross(
+    repo_root: &Path,
+    uses: &[String],
+    arch: crate::Arch,
+) -> Result<LibPlan, String> {
+    load_with(repo_root, uses, true, true, arch)
 }
 
 /// Introspect libraries without requiring what only a *link* needs.
@@ -192,8 +196,12 @@ pub fn load_cross(repo_root: &Path, uses: &[String]) -> Result<LibPlan, String> 
 /// its vendored dependencies. Asking what commands exist should not require the
 /// ability to build a window — which is also what lets the documentation be
 /// generated on a machine that has never fetched the UI stack.
-pub fn load_metadata(repo_root: &Path, uses: &[String]) -> Result<LibPlan, String> {
-    load_with(repo_root, uses, false, false)
+pub fn load_metadata(
+    repo_root: &Path,
+    uses: &[String],
+    arch: crate::Arch,
+) -> Result<LibPlan, String> {
+    load_with(repo_root, uses, false, false, arch)
 }
 
 fn load_with(
@@ -201,6 +209,7 @@ fn load_with(
     uses: &[String],
     require_impl: bool,
     cross: bool,
+    arch: crate::Arch,
 ) -> Result<LibPlan, String> {
     let mut registry = Registry::new();
     let mut impl_sources = Vec::new();
@@ -244,7 +253,7 @@ fn load_with(
         // A kit's declaration bundle: pure `dll`, `record` and `const` lines the
         // parser reads, merged into the registry as if the program had typed
         // them. A kit may ship one, C-implemented commands, or both.
-        let decls = read_decls(dir, name)?;
+        let decls = read_decls(dir, name, arch)?;
 
         // A kit must carry SOMETHING the compiler can see: a metadata TU with
         // commands, or a declaration bundle. Neither, and there is nothing to
@@ -360,7 +369,39 @@ fn load_with(
 /// and registered as a unit, so a record declared in one file and used by a
 /// `dll` in another resolves exactly as it would within one file. Two files
 /// declaring the same name is a kit-authoring fault, reported with both.
-pub fn read_decls(dir: &Path, name: &str) -> Result<Option<Module>, String> {
+/// Rewrite the `.kdecl` pointer-width token `intptr` to the target's concrete
+/// integer type: `int64` on a 64-bit target, `int` on a 32-bit one.
+///
+/// Whole identifiers only, so a longer name containing `intptr` is untouched.
+/// The token is a declaration-bundle spelling, not a language type: a `.kiln`
+/// program writes `int` or `int64` as it always did, and `intptr` in a program
+/// is the unknown type it looks like.
+fn expand_pointer_types(body: &str, arch: crate::Arch) -> String {
+    let ptr_ty = if arch == crate::Arch::X86 { "int" } else { "int64" };
+    let bytes = body.as_bytes();
+    let mut out = String::with_capacity(body.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c.is_ascii_alphabetic() || c == b'_' {
+            let start = i;
+            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            if &body[start..i] == "intptr" {
+                out.push_str(ptr_ty);
+            } else {
+                out.push_str(&body[start..i]);
+            }
+        } else {
+            out.push(c as char);
+            i += 1;
+        }
+    }
+    out
+}
+
+pub fn read_decls(dir: &Path, name: &str, arch: crate::Arch) -> Result<Option<Module>, String> {
     let mut files: Vec<PathBuf> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -392,6 +433,12 @@ pub fn read_decls(dir: &Path, name: &str) -> Result<Option<Module>, String> {
     for path in &files {
         let body = std::fs::read_to_string(path)
             .map_err(|e| format!("read {}: {e}", path.display()))?;
+        // `intptr` is the one spelling a bundle has for the pointer-sized
+        // integer typedefs Win32 is built from (`WPARAM`, `SIZE_T`,
+        // `ULONG_PTR`). It is expanded to the target's real integer type here,
+        // before the parser sees it, so the type checker has nothing new to
+        // know about and a 64-bit bundle reads exactly as it always did.
+        let body = expand_pointer_types(&body, arch);
         // The header is one prepended line, so a parse error's line number is
         // one past the `.kdecl`'s own — subtract it back before reporting.
         let src = format!("module {name}\n{body}");
@@ -994,7 +1041,7 @@ fn absolutise(repo_root: &Path, arg: &str) -> String {
 
 /// Run `pkg-config <mode> <packages...>` and return the flags.
 pub fn pkg_config_flags(packages: &[String], mode: &str) -> Result<Vec<String>, String> {
-    pkg_config_flags_for(packages, mode, false)
+    pkg_config_flags_for(packages, mode, false, crate::Arch::host())
 }
 
 /// The mingw-w64 sysroot's answer, for a Windows build.
@@ -1005,40 +1052,49 @@ pub fn pkg_config_flags(packages: &[String], mode: &str) -> Result<Vec<String>, 
 /// (`x86_64-w64-mingw32-pkg-config`, Fedora and Debian both), or — where only
 /// the sysroot is there — from `pkg-config` itself pointed at the sysroot's
 /// `.pc` files, which is all the wrapper does.
-pub fn pkg_config_flags_cross(packages: &[String], mode: &str) -> Result<Vec<String>, String> {
-    pkg_config_flags_for(packages, mode, true)
+pub fn pkg_config_flags_cross(
+    packages: &[String],
+    mode: &str,
+    arch: crate::Arch,
+) -> Result<Vec<String>, String> {
+    pkg_config_flags_for(packages, mode, true, arch)
 }
 
 /// Where the mingw-w64 sysroot keeps its `.pc` files, on the layouts the
 /// distributions use: `<gcc -print-sysroot>/mingw/lib/pkgconfig` on Fedora,
 /// `/usr/x86_64-w64-mingw32/lib/pkgconfig` on Debian and Ubuntu.
-fn mingw_pkgconfig_dirs() -> Vec<PathBuf> {
+fn mingw_pkgconfig_dirs(arch: crate::Arch) -> Vec<PathBuf> {
+    let tc = crate::mingw(arch);
     let mut dirs = Vec::new();
-    if let Ok(out) = Command::new("x86_64-w64-mingw32-gcc")
-        .arg("-print-sysroot")
-        .output()
-    {
+    if let Ok(out) = Command::new(tc.gcc).arg("-print-sysroot").output() {
         let root = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if !root.is_empty() && root != "/" {
             dirs.push(PathBuf::from(&root).join("mingw/lib/pkgconfig"));
             dirs.push(PathBuf::from(&root).join("lib/pkgconfig"));
         }
     }
-    dirs.push(PathBuf::from("/usr/x86_64-w64-mingw32/sys-root/mingw/lib/pkgconfig"));
-    dirs.push(PathBuf::from("/usr/x86_64-w64-mingw32/lib/pkgconfig"));
+    dirs.push(PathBuf::from(format!("{}/sys-root/mingw/lib/pkgconfig", tc.sysroot)));
+    dirs.push(PathBuf::from(format!("{}/lib/pkgconfig", tc.sysroot)));
     dirs.retain(|d| d.is_dir());
     dirs
 }
 
-fn pkg_config_flags_for(packages: &[String], mode: &str, cross: bool) -> Result<Vec<String>, String> {
+fn pkg_config_flags_for(
+    packages: &[String],
+    mode: &str,
+    cross: bool,
+    arch: crate::Arch,
+) -> Result<Vec<String>, String> {
     if packages.is_empty() {
         return Ok(Vec::new());
     }
+    let tc = crate::mingw(arch);
+    let wrapper = format!("{}-pkg-config", tc.triple);
     let mut cmd = if cross {
         // The wrapper first; failing to start it is the one error that means
         // "use the sysroot directly", so it is told apart from a package the
         // wrapper could not find.
-        let mut c = Command::new("x86_64-w64-mingw32-pkg-config");
+        let mut c = Command::new(&wrapper);
         c.arg(mode).args(packages);
         match c.output() {
             Ok(out) if out.status.success() => {
@@ -1049,19 +1105,19 @@ fn pkg_config_flags_for(packages: &[String], mode: &str, cross: bool) -> Result<
             }
             Ok(out) => {
                 return Err(format!(
-                    "x86_64-w64-mingw32-pkg-config {mode} {} failed: {} (the mingw-w64 build \
-                     of a library this program uses is not installed)",
+                    "{wrapper} {mode} {} failed: {} (the mingw-w64 build of a library this \
+                     program uses is not installed)",
                     packages.join(" "),
                     String::from_utf8_lossy(&out.stderr).trim()
                 ));
             }
             Err(_) => {}
         }
-        let dirs = mingw_pkgconfig_dirs();
+        let dirs = mingw_pkgconfig_dirs(arch);
         if dirs.is_empty() {
             return Err(format!(
-                "no mingw-w64 pkg-config for {} — neither x86_64-w64-mingw32-pkg-config nor a \
-                 sysroot with lib/pkgconfig is on this machine",
+                "no mingw-w64 pkg-config for {} — neither {wrapper} nor a sysroot with \
+                 lib/pkgconfig is on this machine",
                 packages.join(" ")
             ));
         }

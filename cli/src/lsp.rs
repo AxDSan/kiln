@@ -767,7 +767,7 @@ impl Server {
             // Resolving differently from the compiler is the worst failure this
             // server has — the editor would underline code that builds.
             Some(root) => kit::overlay_root(root, uses)
-                .and_then(|staged| libload::load_metadata(&staged, uses))
+                .and_then(|staged| libload::load_metadata(&staged, uses, crate::Arch::host()))
                 .map(|p| p.registry),
         };
         self.registries.insert(key, result.clone());

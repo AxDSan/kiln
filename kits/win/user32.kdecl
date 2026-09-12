@@ -11,7 +11,9 @@
 #   - A handle (HWND, HINSTANCE, HMENU, HDC, HICON, HCURSOR, HBRUSH, HHOOK,
 #     HGLOBAL, LPVOID, and any struct pointer that may be NULL) is `ptr`.
 #     `ptr_null()` is the NULL a C caller writes.
-#   - WPARAM, LPARAM and LRESULT are integer payloads, so they are `int64`.
+#   - WPARAM, LPARAM and LRESULT are pointer-width payloads, so they are
+#     `intptr`: 64-bit on a 64-bit target, 32-bit on x86. A handle that travels
+#     *in* one is `ptr_to_int(h)` at the call site, and `ptr_from_int(v)` back.
 #     A handle that travels *in* a WPARAM/LPARAM is `ptr_to_int(h)` at the
 #     call site, and `ptr_from_int(v)` coming back.
 #   - DWORD, UINT, BOOL, int and ATOM are `int`. An ATOM and a SHORT return
@@ -64,8 +66,8 @@
 record MSG is c
   hwnd: ptr
   message: int
-  wparam: int64
-  lparam: int64
+  wparam: intptr
+  lparam: intptr
   time: int
   pt: POINT
 end
@@ -73,7 +75,7 @@ end
 # WNDCLASSEXA — 80 bytes. `cb_size` must be set to `size of WNDCLASSEXA`
 # before RegisterClassExA, which is how the API versions the struct.
 # `wnd_proc` is `address of` a sub shaped like a WNDPROC:
-#   sub wndproc(hwnd: ptr, msg: int, wparam: int64, lparam: int64): int64 system
+#   sub wndproc(hwnd: ptr, msg: int, wparam: intptr, lparam: intptr): intptr system
 # `background` is conventionally
 # `ptr_from_int(int_to_int64(COLOR_WINDOW + 1))`.
 record WNDCLASSEXA is c
@@ -160,7 +162,7 @@ record KBDLLHOOKSTRUCT is c
   scan_code: int
   flags: int
   time: int
-  extra_info: int64
+  extra_info: intptr
 end
 
 # MSLLHOOKSTRUCT — 32 bytes: pt@0, mouse_data@8, flags@12, time@16,
@@ -170,13 +172,13 @@ record MSLLHOOKSTRUCT is c
   mouse_data: int
   flags: int
   time: int
-  extra_info: int64
+  extra_info: intptr
 end
 
 # CWPSTRUCT — 32 bytes, the LPARAM of a WH_CALLWNDPROC hook.
 record CWPSTRUCT is c
-  lparam: int64
-  wparam: int64
+  lparam: intptr
+  wparam: intptr
   message: int
   hwnd: ptr
 end
@@ -187,7 +189,7 @@ record MOUSEINPUT is c
   mouse_data: int
   flags: int
   time: int
-  extra_info: int64
+  extra_info: intptr
 end
 
 record KEYBDINPUT is c
@@ -195,7 +197,7 @@ record KEYBDINPUT is c
   scan: word
   flags: int
   time: int
-  extra_info: int64
+  extra_info: intptr
 end
 
 # INPUT with the KEYBDINPUT arm of its union selected. `union_tail` is the
@@ -229,11 +231,11 @@ dll RegisterClassExA(wc: WNDCLASSEXA): int from "user32" system
 dll RegisterClassA(wc: WNDCLASSA): int from "user32" system
 dll UnregisterClassA(class_name: text, instance: ptr): bool from "user32" system
 dll GetClassNameA(hwnd: ptr, buffer: ptr, max_count: int): int from "user32" system
-dll GetClassLongPtrA(hwnd: ptr, index: int): int64 from "user32" system
-dll SetClassLongPtrA(hwnd: ptr, index: int, value: int64): int64 from "user32" system
+dll GetClassLongPtrA(hwnd: ptr, index: int): intptr from "user32" system
+dll SetClassLongPtrA(hwnd: ptr, index: int, value: intptr): intptr from "user32" system
 
-dll DefWindowProcA(hwnd: ptr, msg: int, wparam: int64, lparam: int64): int64 from "user32" system
-dll CallWindowProcA(prev_proc: ptr, hwnd: ptr, msg: int, wparam: int64, lparam: int64): int64 from "user32" system
+dll DefWindowProcA(hwnd: ptr, msg: int, wparam: intptr, lparam: intptr): intptr from "user32" system
+dll CallWindowProcA(prev_proc: ptr, hwnd: ptr, msg: int, wparam: intptr, lparam: intptr): intptr from "user32" system
 
 dll ShowWindow(hwnd: ptr, cmd: int): bool from "user32" system
 dll ShowWindowAsync(hwnd: ptr, cmd: int): bool from "user32" system
@@ -266,8 +268,8 @@ dll GetWindowTextLengthA(hwnd: ptr): int from "user32" system
 # The pointer-width window words. On x64 these are real user32 exports, not
 # the macros they are in a 32-bit build. GWLP_USERDATA is where a program
 # stashes its own state for a WNDPROC to find.
-dll GetWindowLongPtrA(hwnd: ptr, index: int): int64 from "user32" system
-dll SetWindowLongPtrA(hwnd: ptr, index: int, value: int64): int64 from "user32" system
+dll GetWindowLongPtrA(hwnd: ptr, index: int): intptr from "user32" system
+dll SetWindowLongPtrA(hwnd: ptr, index: int, value: intptr): intptr from "user32" system
 dll GetWindowLongA(hwnd: ptr, index: int): int from "user32" system
 dll SetWindowLongA(hwnd: ptr, index: int, value: int): int from "user32" system
 
@@ -291,9 +293,9 @@ dll SetFocus(hwnd: ptr): ptr from "user32" system
 
 # The callback is `address of` a sub shaped
 #   sub each(hwnd: ptr, param: int64): bool system
-dll EnumWindows(callback: ptr, param: int64): bool from "user32" system
-dll EnumChildWindows(parent: ptr, callback: ptr, param: int64): bool from "user32" system
-dll EnumThreadWindows(thread_id: int, callback: ptr, param: int64): bool from "user32" system
+dll EnumWindows(callback: ptr, param: intptr): bool from "user32" system
+dll EnumChildWindows(parent: ptr, callback: ptr, param: intptr): bool from "user32" system
+dll EnumThreadWindows(thread_id: int, callback: ptr, param: intptr): bool from "user32" system
 dll GetWindowThreadProcessId(hwnd: ptr, process_id: ptr): int from "user32" system
 
 dll ScreenToClient(hwnd: ptr, point: POINT): bool from "user32" system
@@ -308,16 +310,16 @@ dll SetCursorPos(x: int, y: int): bool from "user32" system
 dll GetMessageA(msg: MSG, hwnd: ptr, filter_min: int, filter_max: int): int from "user32" system
 dll PeekMessageA(msg: MSG, hwnd: ptr, filter_min: int, filter_max: int, remove_flag: int): bool from "user32" system
 dll TranslateMessage(msg: MSG): bool from "user32" system
-dll DispatchMessageA(msg: MSG): int64 from "user32" system
+dll DispatchMessageA(msg: MSG): intptr from "user32" system
 dll WaitMessage(): bool from "user32" system
 dll PostQuitMessage(exit_code: int) from "user32" system
 
-dll SendMessageA(hwnd: ptr, msg: int, wparam: int64, lparam: int64): int64 from "user32" system
-dll SendMessageTimeoutA(hwnd: ptr, msg: int, wparam: int64, lparam: int64, flags: int, timeout: int, result: ptr): int64 from "user32" system
-dll SendNotifyMessageA(hwnd: ptr, msg: int, wparam: int64, lparam: int64): bool from "user32" system
-dll PostMessageA(hwnd: ptr, msg: int, wparam: int64, lparam: int64): bool from "user32" system
-dll PostThreadMessageA(thread_id: int, msg: int, wparam: int64, lparam: int64): bool from "user32" system
-dll ReplyMessage(result: int64): bool from "user32" system
+dll SendMessageA(hwnd: ptr, msg: int, wparam: intptr, lparam: intptr): intptr from "user32" system
+dll SendMessageTimeoutA(hwnd: ptr, msg: int, wparam: intptr, lparam: intptr, flags: int, timeout: int, result: ptr): intptr from "user32" system
+dll SendNotifyMessageA(hwnd: ptr, msg: int, wparam: intptr, lparam: intptr): bool from "user32" system
+dll PostMessageA(hwnd: ptr, msg: int, wparam: intptr, lparam: intptr): bool from "user32" system
+dll PostThreadMessageA(thread_id: int, msg: int, wparam: intptr, lparam: intptr): bool from "user32" system
+dll ReplyMessage(result: intptr): bool from "user32" system
 dll InSendMessage(): bool from "user32" system
 
 dll GetMessagePos(): int from "user32" system
@@ -326,8 +328,8 @@ dll RegisterWindowMessageA(name: text): int from "user32" system
 
 # SetTimer's id and result are UINT_PTR. With a NULL hwnd the return is the
 # timer id to pass back to KillTimer; with a window it is the id given.
-dll SetTimer(hwnd: ptr, id: int64, elapse_ms: int, callback: ptr): int64 from "user32" system
-dll KillTimer(hwnd: ptr, id: int64): bool from "user32" system
+dll SetTimer(hwnd: ptr, id: intptr, elapse_ms: int, callback: ptr): intptr from "user32" system
+dll KillTimer(hwnd: ptr, id: intptr): bool from "user32" system
 
 # ------------------------------------------------------------ dialogs & misc
 
@@ -360,7 +362,7 @@ dll SetDlgItemTextA(dialog: ptr, item_id: int, title: text): bool from "user32" 
 dll GetDlgItemTextA(dialog: ptr, item_id: int, buffer: ptr, max_count: int): int from "user32" system
 dll SetDlgItemInt(dialog: ptr, item_id: int, value: int, signed_flag: bool): bool from "user32" system
 dll GetDlgItemInt(dialog: ptr, item_id: int, translated: ptr, signed_flag: bool): int from "user32" system
-dll EndDialog(dialog: ptr, result: int64): bool from "user32" system
+dll EndDialog(dialog: ptr, result: intptr): bool from "user32" system
 
 # --------------------------------------------------------------------- input
 
@@ -376,12 +378,12 @@ dll VkKeyScanA(character: int): int from "user32" system
 dll GetKeyNameTextA(lparam: int, buffer: ptr, size: int): int from "user32" system
 
 # The hook procedure is `address of` a sub shaped
-#   sub hook(code: int, wparam: int64, lparam: int64): int64 system
+#   sub hook(code: int, wparam: intptr, lparam: intptr): intptr system
 # which returns CallNextHookEx(...) for anything it does not handle. A
 # WH_KEYBOARD_LL or WH_MOUSE_LL hook is global: `hmod` may be NULL and
 # `thread_id` 0, and the thread that installs it must pump messages.
 dll SetWindowsHookExA(hook_id: int, hook_proc: ptr, hmod: ptr, thread_id: int): ptr from "user32" system
-dll CallNextHookEx(hook: ptr, code: int, wparam: int64, lparam: int64): int64 from "user32" system
+dll CallNextHookEx(hook: ptr, code: int, wparam: intptr, lparam: intptr): intptr from "user32" system
 dll UnhookWindowsHookEx(hook: ptr): bool from "user32" system
 
 dll RegisterHotKey(hwnd: ptr, hotkey_id: int, modifiers: int, key: int): bool from "user32" system
@@ -392,8 +394,8 @@ dll UnregisterHotKey(hwnd: ptr, hotkey_id: int): bool from "user32" system
 dll SendInput(count: int, inputs: ptr, size: int): int from "user32" system
 # The legacy pair. Their first arguments are BYTEs in C; an `int` argument
 # arrives in the same register and the callee reads its low byte.
-dll keybd_event(vk: int, scan: int, flags: int, extra_info: int64) from "user32" system
-dll mouse_event(flags: int, dx: int, dy: int, data: int, extra_info: int64) from "user32" system
+dll keybd_event(vk: int, scan: int, flags: int, extra_info: intptr) from "user32" system
+dll mouse_event(flags: int, dx: int, dy: int, data: int, extra_info: intptr) from "user32" system
 
 dll SetCapture(hwnd: ptr): ptr from "user32" system
 dll ReleaseCapture(): bool from "user32" system
@@ -447,11 +449,11 @@ dll InflateRect(rect: RECT, dx: int, dy: int): bool from "user32" system
 dll CreateMenu(): ptr from "user32" system
 dll CreatePopupMenu(): ptr from "user32" system
 dll DestroyMenu(menu: ptr): bool from "user32" system
-dll AppendMenuA(menu: ptr, flags: int, item_id: int64, item: text): bool from "user32" system
+dll AppendMenuA(menu: ptr, flags: int, item_id: intptr, item: text): bool from "user32" system
 dll AppendSubMenuA(menu: ptr, flags: int, submenu: ptr, item: text): bool from "user32" as "AppendMenuA" system
-dll InsertMenuA(menu: ptr, position: int, flags: int, item_id: int64, item: text): bool from "user32" system
+dll InsertMenuA(menu: ptr, position: int, flags: int, item_id: intptr, item: text): bool from "user32" system
 dll DeleteMenu(menu: ptr, position: int, flags: int): bool from "user32" system
-dll ModifyMenuA(menu: ptr, position: int, flags: int, item_id: int64, item: text): bool from "user32" system
+dll ModifyMenuA(menu: ptr, position: int, flags: int, item_id: intptr, item: text): bool from "user32" system
 dll EnableMenuItem(menu: ptr, item_id: int, enable: int): int from "user32" system
 dll CheckMenuItem(menu: ptr, item_id: int, check: int): int from "user32" system
 dll GetMenu(hwnd: ptr): ptr from "user32" system

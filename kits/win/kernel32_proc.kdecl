@@ -7,7 +7,8 @@
 #
 #   HANDLE, HMODULE, HINSTANCE, LPVOID, any pointer   ->  ptr
 #   DWORD, UINT, BOOL, LONG, int                      ->  int   (BOOL -> bool)
-#   SIZE_T, ULONG_PTR, __int64                        ->  int64 (or ptr, where
+#   SIZE_T, ULONG_PTR                                 ->  intptr (or ptr, where
+#   __int64, LONGLONG                                 ->  int64
 #                                                              it holds an id)
 #   LPSTR / LPCSTR that a program always supplies     ->  text
 #   LPSTR / LPCSTR that is routinely NULL             ->  ptr
@@ -147,8 +148,8 @@ dll SetEnvironmentVariableA(name: text, value: text): bool from "kernel32" as "S
 # `startAddress` is a LPTHREAD_START_ROUTINE: `address of` a sub declared
 # `sub worker(parameter: ptr): int system`. `threadId` is a 4-byte out-buffer,
 # or `ptr_null()` when the id is not wanted.
-dll CreateThread(threadAttrs: ptr, stackSize: int64, startAddress: ptr, parameter: ptr, creationFlags: int, threadId: ptr): ptr from "kernel32" as "CreateThread" system
-dll CreateRemoteThread(process: ptr, threadAttrs: ptr, stackSize: int64, startAddress: ptr, parameter: ptr, creationFlags: int, threadId: ptr): ptr from "kernel32" as "CreateRemoteThread" system
+dll CreateThread(threadAttrs: ptr, stackSize: intptr, startAddress: ptr, parameter: ptr, creationFlags: int, threadId: ptr): ptr from "kernel32" as "CreateThread" system
+dll CreateRemoteThread(process: ptr, threadAttrs: ptr, stackSize: intptr, startAddress: ptr, parameter: ptr, creationFlags: int, threadId: ptr): ptr from "kernel32" as "CreateRemoteThread" system
 dll OpenThread(desiredAccess: int, inheritHandle: bool, threadId: int): ptr from "kernel32" as "OpenThread" system
 dll GetCurrentThread(): ptr from "kernel32" as "GetCurrentThread" system
 dll GetCurrentThreadId(): int from "kernel32" as "GetCurrentThreadId" system

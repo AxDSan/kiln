@@ -222,7 +222,7 @@ pub fn cmd_list(repo_root: &Path) -> i32 {
         // program gets from `use` can never disagree. A bundle that will not
         // parse is simply not listed here; the build is where that error is
         // worth stopping for.
-        if let Ok(Some(decls)) = crate::libload::read_decls(&k.dir, &k.name) {
+        if let Ok(Some(decls)) = crate::libload::read_decls(&k.dir, &k.name, crate::Arch::host()) {
             for d in decls.dlls() {
                 println!("dll: {} {} {}", k.name, d.name, d.library);
             }

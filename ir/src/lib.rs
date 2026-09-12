@@ -307,7 +307,7 @@ impl Ty {
     /// target Kiln emits (x86-64 SysV and Windows x64 agree for scalars).
     /// `None` for a type that has no by-value C layout — the aggregates and the
     /// signature-only tags — so the caller can reject it with a real message.
-    pub fn c_size_align(self) -> Option<(i64, i64)> {
+    pub fn c_size_align(self, target: TargetInfo) -> Option<(i64, i64)> {
         Some(match self {
             Ty::Byte => (1, 1),
             // A `WORD`/`uint16_t` member: two bytes, aligned to two.
@@ -319,11 +319,23 @@ impl Ty {
             // C's `int`-sized truth, so a c-record `bool` lines up with a `BOOL`
             // / `int` field a C API declares.
             Ty::Bool => (4, 4),
+            // `long long` and `double` are eight bytes aligned to eight on
+            // every target we emit, 32-bit Windows included: the MS ABI keeps
+            // their natural alignment where the i386 System V ABI would not.
             Ty::Int64 | Ty::Double => (8, 8),
-            // A `char*` and a raw pointer are both one 8-byte machine word.
-            Ty::Text | Ty::Ptr => (8, 8),
+            // A `char*` and a raw pointer are one machine word — eight bytes on
+            // a 64-bit target, four on a 32-bit one. This is the single number
+            // that makes a c-record's layout follow the target.
+            Ty::Text | Ty::Ptr => (target.ptr_size, target.ptr_align),
             _ => return None,
         })
+    }
+
+    /// Whether this type has a by-value C layout at all. The set does not
+    /// depend on the target — only the pointer width inside it does — so this
+    /// is the predicate to reach for when the size itself is not wanted.
+    pub fn has_c_layout(self) -> bool {
+        self.c_size_align(TargetInfo::X86_64_LINUX).is_some()
     }
 
     /// Whether arithmetic operators (`+ - * /`) apply.
@@ -1250,14 +1262,51 @@ pub enum Item {
     Const(ConstDef),
 }
 
+/// The machine a build is for, as far as layout and calls are concerned: the
+/// pointer width, and whether this is Windows (the MS C ABI, and `stdcall` for
+/// `system` on 32 bits).
+///
+/// It is deliberately two facts and not a full target description. Everything
+/// the compiler needs to change per architecture flows from these: a c-record's
+/// pointer-sized fields, the alignment of the storage it walks, and which
+/// calling convention `stdcall`/`system` resolve to. The LLVM side learns the
+/// rest from the `--target` triple the CLI passes to clang.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TargetInfo {
+    /// `sizeof(void *)` in bytes: 8 or 4.
+    pub ptr_size: i64,
+    /// `_Alignof(void *)`: the same number on every target we emit.
+    pub ptr_align: i64,
+    /// Windows, where the C ABI is the MS one and `system` is `stdcall` on x86.
+    pub windows: bool,
+}
+
+impl TargetInfo {
+    pub const X86_64_LINUX: TargetInfo = TargetInfo { ptr_size: 8, ptr_align: 8, windows: false };
+    pub const X86_64_WINDOWS: TargetInfo = TargetInfo { ptr_size: 8, ptr_align: 8, windows: true };
+    pub const X86_LINUX: TargetInfo = TargetInfo { ptr_size: 4, ptr_align: 4, windows: false };
+    pub const X86_WINDOWS: TargetInfo = TargetInfo { ptr_size: 4, ptr_align: 4, windows: true };
+
+    /// A 32-bit target, where `stdcall` and `cdecl` actually differ.
+    pub fn is_32bit(self) -> bool {
+        self.ptr_size == 4
+    }
+}
+
+impl Default for TargetInfo {
+    fn default() -> Self {
+        TargetInfo::X86_64_LINUX
+    }
+}
+
 /// The C calling convention a foreign call — or a sub whose address is handed to
-/// C — is made with. It is a documentation-and-forward-compat marker only:
-/// every target Kiln emits today is 64-bit (x86-64 Linux, x64 Windows, 64-bit
-/// macOS), and each of those has a *single* C convention, so `cdecl`, `stdcall`
-/// and `system` all name the same one and the backend emits identical code for
-/// each. The marker is carried so a future 32-bit backend — where the three
-/// diverge and a mismatched `stdcall`/`cdecl` corrupts the stack — has the fact
-/// the source stated.
+/// C — is made with.
+///
+/// On the 64-bit targets Kiln has always emitted — x86-64 Linux, x64 Windows —
+/// there is a *single* C convention, so `cdecl`, `stdcall` and `system` all name
+/// the same one and the marker decides nothing. On 32-bit Windows the three
+/// diverge, and a `stdcall` function called as `cdecl` corrupts the stack: there
+/// the backend reads the marker and names the LLVM convention explicitly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallConv {
     /// `cdecl`: the caller cleans the stack. The one convention on every 64-bit
@@ -1290,6 +1339,31 @@ impl CallConv {
             CallConv::Cdecl => "cdecl",
             CallConv::Stdcall => "stdcall",
             CallConv::System => "system",
+        }
+    }
+
+    /// The LLVM textual calling convention for this marker on `target`, or
+    /// `None` when the target's default already means it (which is every
+    /// 64-bit target, and `cdecl` everywhere).
+    ///
+    /// `ccc` is the C convention, which is `cdecl` on x86: naming it is the
+    /// same as naming nothing, so `Cdecl` answers `None`. `system` follows the
+    /// platform — `stdcall` on 32-bit Windows, `cdecl` everywhere else — which
+    /// is exactly why the source uses it for Win32 declarations.
+    pub fn llvm_cc(self, target: TargetInfo) -> Option<&'static str> {
+        if !target.is_32bit() {
+            return None;
+        }
+        match self {
+            CallConv::Cdecl => None,
+            CallConv::Stdcall => Some("x86_stdcallcc"),
+            CallConv::System => {
+                if target.windows {
+                    Some("x86_stdcallcc")
+                } else {
+                    None
+                }
+            }
         }
     }
 }
@@ -1395,8 +1469,8 @@ impl RecordDef {
     /// This is the single source of truth for `size of`, for a field GEP, and
     /// for the padding the tests check against clang — there is no second
     /// place layout could be computed and disagree.
-    pub fn c_layout(&self, reg: &Registry) -> Option<(Vec<i64>, i64, i64)> {
-        self.c_layout_at(reg, 0)
+    pub fn c_layout(&self, reg: &Registry, target: TargetInfo) -> Option<(Vec<i64>, i64, i64)> {
+        self.c_layout_at(reg, target, 0)
     }
 
     /// `c_layout` with the nesting depth it has already descended. A c-record
@@ -1404,7 +1478,7 @@ impl RecordDef {
     /// only ever sees one module's records at a time — a kit bundle is checked
     /// against "the registry so far" — so the layout walk carries its own
     /// bound and answers `None` rather than overflowing the stack.
-    fn c_layout_at(&self, reg: &Registry, depth: u32) -> Option<(Vec<i64>, i64, i64)> {
+    fn c_layout_at(&self, reg: &Registry, target: TargetInfo, depth: u32) -> Option<(Vec<i64>, i64, i64)> {
         if depth > 32 {
             return None;
         }
@@ -1412,7 +1486,7 @@ impl RecordDef {
         let mut cursor: i64 = 0;
         let mut max_align: i64 = 1;
         for (_, fty) in &self.fields {
-            let (size, align) = c_field_size_align_at(*fty, reg, depth + 1)?;
+            let (size, align) = c_field_size_align_at(*fty, reg, target, depth + 1)?;
             // Round the cursor up to this field's alignment before placing it —
             // the padding a C compiler inserts is exactly this rounding.
             cursor = (cursor + align - 1) / align * align;
@@ -1435,27 +1509,27 @@ impl RecordDef {
 /// `None` when the type has no C layout at all, or when the nested record is
 /// unknown, is a heap record, or nests too deep — every one of which the
 /// validator reports with a real message first.
-pub fn c_field_size_align(ty: Ty, reg: &Registry) -> Option<(i64, i64)> {
-    c_field_size_align_at(ty, reg, 0)
+pub fn c_field_size_align(ty: Ty, reg: &Registry, target: TargetInfo) -> Option<(i64, i64)> {
+    c_field_size_align_at(ty, reg, target, 0)
 }
 
-fn c_field_size_align_at(ty: Ty, reg: &Registry, depth: u32) -> Option<(i64, i64)> {
+fn c_field_size_align_at(ty: Ty, reg: &Registry, target: TargetInfo, depth: u32) -> Option<(i64, i64)> {
     match ty {
         Ty::Record(name) => {
             let def = reg.record(name)?;
             if !def.is_c {
                 return None;
             }
-            let (_, size, align) = def.c_layout_at(reg, depth)?;
+            let (_, size, align) = def.c_layout_at(reg, target, depth)?;
             Some((size, align))
         }
         // An inline array strides by its element's size and is aligned like one
         // element — exactly C's `T a[N]`.
         Ty::CArray(a) => {
-            let (esize, ealign) = c_field_size_align_at(a.elem, reg, depth)?;
+            let (esize, ealign) = c_field_size_align_at(a.elem, reg, target, depth)?;
             Some((esize * a.count as i64, ealign))
         }
-        other => other.c_size_align(),
+        other => other.c_size_align(target),
     }
 }
 

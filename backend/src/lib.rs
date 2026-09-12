@@ -88,7 +88,8 @@ impl std::fmt::Display for Body {
 use kiln_ir::sema::resolve_ret;
 use kiln_ir::registry::{ComponentKind, DllSig};
 use kiln_ir::{
-    BinOp, BitOp, CmpOp, Component, Elem, Expr, LogicalOp, Module, Registry, Signature, Ty,
+    BinOp, BitOp, CallConv, CmpOp, Component, Elem, Expr, LogicalOp, Module, Registry, Signature,
+    TargetInfo, Ty,
 };
 
 /// Accessibility role for a form root (`KN_ROLE_WINDOW`, abi/kiln_abi.h).
@@ -232,6 +233,24 @@ pub fn lower_module_with(
     source: Option<&str>,
     debug_format: DebugFormat,
 ) -> Result<String, LowerError> {
+    lower_module_for(m, reg, source, debug_format, TargetInfo::X86_64_LINUX)
+}
+
+/// Lower for a specific machine.
+///
+/// The IR text is architecture-independent by construction: opaque `ptr`, a
+/// fixed 16-byte slot, and `ptrtoint`/`inttoptr` through `i64`. Only two things
+/// vary, and `machine` carries both — a c-record's pointer-sized fields, and
+/// which LLVM calling convention `stdcall`/`system` name on a 32-bit target.
+/// Everything else about the machine (endianness, the rest of the ABI) clang
+/// learns from the `--target` triple the caller passes it.
+pub fn lower_module_for(
+    m: &Module,
+    reg: &Registry,
+    source: Option<&str>,
+    debug_format: DebugFormat,
+    machine: TargetInfo,
+) -> Result<String, LowerError> {
     // User subroutines are callable names too. The validator has already proven
     // none of them collides with a library command, so registering them here
     // cannot change what any existing call means.
@@ -272,8 +291,10 @@ pub fn lower_module_with(
                 p,
                 concat!("Kiln ", env!("CARGO_PKG_VERSION")),
                 debug_format == DebugFormat::Records,
+                machine,
             )
         }),
+        machine,
         scope: None,
         stmt_line: 0,
         vars: HashMap::new(),
@@ -298,6 +319,7 @@ pub fn lower_module_with(
         needs_dll_get: false,
         needs_dll_text: false,
         exit_code: None,
+        sub_convs: m.subs().map(|s| (s.name.clone(), s.conv)).collect(),
     };
     for g in m.globals() {
         lo.globals.insert(g.name.clone(), g.ty);
@@ -381,8 +403,9 @@ pub fn lower_module_with(
             Some(n) => format!(" #0 !dbg !{n}"),
             None => String::new(),
         };
+        let cc = lo.cc_prefix(sub.conv);
         functions.push_str(&format!(
-            "define {ret_ty} @{symbol}({}){dbg} {{\nentry:\n{}{}}}\n\n",
+            "define {cc}{ret_ty} @{symbol}({}){dbg} {{\nentry:\n{}{}}}\n\n",
             param_decls(&sub.params, "p"),
             lo.prologue(prologue_loc),
             lo.body,
@@ -397,13 +420,17 @@ pub fn lower_module_with(
             let decls = param_decls(&sub.params, "a");
             let args = param_args(&sub.params, "a");
             let inner = user_symbol(&sub.name);
+            // The wrapper is the exported symbol a host calls; it carries the
+            // sub's own convention, so a consumer reaches a `system` sub the way
+            // the source said it would be reached.
+            let cc = lo.cc_prefix(sub.conv);
             functions.push_str(&match sub.ret {
                 None => format!(
-                    "define void @{}({decls}) {{\nentry:\n  call void @{inner}({args})\n  ret void\n}}\n\n",
+                    "define {cc}void @{}({decls}) {{\nentry:\n  call {cc}void @{inner}({args})\n  ret void\n}}\n\n",
                     sub.name
                 ),
                 Some(t) => format!(
-                    "define {t2} @{}({decls}) {{\nentry:\n  %r = call {t2} @{inner}({args})\n  ret {t2} %r\n}}\n\n",
+                    "define {cc}{t2} @{}({decls}) {{\nentry:\n  %r = call {cc}{t2} @{inner}({args})\n  ret {t2} %r\n}}\n\n",
                     sub.name,
                     t2 = llvm_ty(t)
                 ),
@@ -551,6 +578,14 @@ struct Lowerer<'a> {
     used: BTreeSet<String>,
     /// UI-interface symbols referenced (declared separately; see finish()).
     ui_used: BTreeSet<&'static str>,
+    /// The machine being built for: pointer width for c-record layout, and the
+    /// OS that decides what `system` means on a 32-bit target.
+    machine: TargetInfo,
+    /// A user subroutine's calling convention, by name. `Signature` — what the
+    /// registry keeps for argument checking — deliberately does not carry the
+    /// marker, so an internal call reads it here; the `Sub` AST node carries it
+    /// for the definition itself.
+    sub_convs: HashMap<String, Option<CallConv>>,
     /// Libraries whose own component entry points are referenced. Their names
     /// are only known at build time, so unlike the UI interface these cannot be
     /// a fixed set of `&'static str`.
@@ -921,15 +956,30 @@ impl Lowerer<'_> {
                 .join(", ");
             let takes = reg.sub(sub).is_some_and(|s| !s.params.is_empty());
             let args = if takes { decls.clone() } else { String::new() };
+            // The thunk itself is called by the runtime, so it stays cdecl; the
+            // call it makes to the handler carries the handler's convention.
+            let cc = self.cc_prefix(self.sub_convs.get(sub).copied().flatten());
+            let symbol = user_symbol(sub);
             self.thunks.insert(
                 name.clone(),
                 format!(
-                    "define internal void @{name}({decls}) {{\nentry:\n  call void @{}({args})\n  ret void\n}}\n\n",
-                    user_symbol(sub)
+                    "define internal void @{name}({decls}) {{\nentry:\n  call {cc}void @{symbol}({args})\n  ret void\n}}\n\n",
                 ),
             );
         }
         name
+    }
+
+    /// The LLVM calling-convention prefix for a call or definition, or an empty
+    /// string when the target's default already means it. Emitting
+    /// `x86_stdcallcc` on 32-bit Windows is what keeps a `system`-marked call
+    /// from corrupting the stack; on every 64-bit target it is empty, so the IR
+    /// is byte for byte what it always was.
+    fn cc_prefix(&self, conv: Option<CallConv>) -> String {
+        match conv.and_then(|c| c.llvm_cc(self.machine)) {
+            Some(cc) => format!("{cc} "),
+            None => String::new(),
+        }
     }
 
     fn fresh_label(&mut self, kind: &str) -> String {
@@ -1059,7 +1109,7 @@ impl Lowerer<'_> {
         let def = self.reg.record(rec).ok_or_else(|| LowerError {
             msg: format!("unknown record `{rec}`"),
         })?;
-        let (_, size, _) = def.c_layout(self.reg).ok_or_else(|| LowerError {
+        let (_, size, _) = def.c_layout(self.reg, self.machine).ok_or_else(|| LowerError {
             msg: format!("c-record `{rec}` has a field with no C layout"),
         })?;
         Ok(size)
@@ -1075,7 +1125,7 @@ impl Lowerer<'_> {
         let (pos, ty) = def.field(field).ok_or_else(|| LowerError {
             msg: format!("c-record `{rec}` has no field `{field}`"),
         })?;
-        let (offsets, _, _) = def.c_layout(self.reg).ok_or_else(|| LowerError {
+        let (offsets, _, _) = def.c_layout(self.reg, self.machine).ok_or_else(|| LowerError {
             msg: format!("c-record `{rec}` has a field with no C layout"),
         })?;
         Ok((offsets[pos - 1], ty))
@@ -1345,8 +1395,8 @@ impl Lowerer<'_> {
                 self.eval_call(cmd, args)?; // any return value discarded
                 Ok(())
             }
-            StmtKind::CallThrough { callee, args, ret, conv: _ } => {
-                self.eval_call_through(callee, args, *ret)?; // result discarded
+            StmtKind::CallThrough { callee, args, ret, conv } => {
+                self.eval_call_through(callee, args, *ret, *conv)?; // result discarded
                 Ok(())
             }
             StmtKind::If { arms, otherwise } => {
@@ -2368,7 +2418,7 @@ impl Lowerer<'_> {
                         bty.as_str()
                     ));
                 };
-                let (esize, _) = kiln_ir::c_field_size_align(a.elem, self.reg)
+                let (esize, _) = kiln_ir::c_field_size_align(a.elem, self.reg, self.machine)
                     .ok_or_else(|| LowerError {
                         msg: format!("`{}` has no C layout", a.elem.as_str()),
                     })?;
@@ -3461,8 +3511,8 @@ impl Lowerer<'_> {
             // `call through EXPR(args...): T` in a value position. The checker
             // has proven the callee is a `ptr` and that the site declares a
             // return type, so the result is always there to hand back.
-            Expr::CallThrough { callee, args, ret, conv: _ } => {
-                match self.eval_call_through(callee, args, *ret)? {
+            Expr::CallThrough { callee, args, ret, conv } => {
+                match self.eval_call_through(callee, args, *ret, *conv)? {
                     Some(v) => Ok(v),
                     None => err(
                         "a `call through` with no return type has no value".to_string(),
@@ -3475,7 +3525,7 @@ impl Lowerer<'_> {
             Expr::SizeOf(t) => {
                 let size = match t {
                     Ty::Record(rec) => self.c_record_size(rec)?,
-                    other => other.c_size_align().map(|(s, _)| s).ok_or_else(|| LowerError {
+                    other => other.c_size_align(self.machine).map(|(s, _)| s).ok_or_else(|| LowerError {
                         msg: format!("`size of {}` has no C layout", other.as_str()),
                     })?,
                 };
@@ -3760,14 +3810,23 @@ impl Lowerer<'_> {
         }
         let arglist = ops.join(", ");
         let symbol = user_symbol(name);
+        // An internal call must match the definition's convention: a `system`
+        // sub is defined `x86_stdcallcc` on 32-bit, and the verifier refuses a
+        // call that disagrees.
+        let cc = self.cc_prefix(self.sub_convs.get(name).copied().flatten());
         match sig.ret {
             None => {
-                writeln!(self.body, "  call void @{symbol}({arglist})").unwrap();
+                writeln!(self.body, "  call {cc}void @{symbol}({arglist})").unwrap();
                 Ok(None)
             }
             Some(t) => {
                 let r = self.fresh();
-                writeln!(self.body, "  {r} = call {} @{symbol}({arglist})", llvm_ty(t)).unwrap();
+                writeln!(
+                    self.body,
+                    "  {r} = call {cc}{} @{symbol}({arglist})",
+                    llvm_ty(t)
+                )
+                .unwrap();
                 Ok(Some(Val {
                     ty: t,
                     operand: r,
@@ -3836,7 +3895,7 @@ impl Lowerer<'_> {
         // callconv here would only risk perturbing the proven `--os windows`
         // path for no behavioural gain. The marker is carried on the `DllSig`
         // for a future 32-bit backend, which WOULD read it at this point.
-        self.emit_c_call(&fp, &ops, sig.ret)
+        self.emit_c_call(&fp, &ops, sig.ret, dll.conv)
     }
 
     /// One argument, in the C representation the boundary wants.
@@ -3881,11 +3940,16 @@ impl Lowerer<'_> {
         fp: &str,
         ops: &[String],
         ret: Option<Ty>,
+        conv: Option<CallConv>,
     ) -> Result<Option<Val>, LowerError> {
         let arglist = ops.join(", ");
+        // `x86_stdcallcc` on 32-bit Windows, empty on every 64-bit target, so
+        // an indirect `dll`/`call through` reaches its callee with the
+        // convention the source declared.
+        let cc = self.cc_prefix(conv);
         match ret {
             None => {
-                writeln!(self.body, "  call void {fp}({arglist})").unwrap();
+                writeln!(self.body, "  call {cc}void {fp}({arglist})").unwrap();
                 Ok(None)
             }
             Some(Ty::Text) => {
@@ -3894,7 +3958,7 @@ impl Lowerer<'_> {
                 // other text, and a NULL return becomes `""`.
                 self.needs_dll_text = true;
                 let raw = self.fresh();
-                writeln!(self.body, "  {raw} = call ptr {fp}({arglist})").unwrap();
+                writeln!(self.body, "  {raw} = call {cc}ptr {fp}({arglist})").unwrap();
                 let out = self.fresh();
                 writeln!(self.body, "  {out} = call ptr @kn_dll_text(ptr {raw})").unwrap();
                 Ok(Some(Val {
@@ -3906,7 +3970,7 @@ impl Lowerer<'_> {
                 // C truth is any non-zero int; normalise to 0/1 so a returned
                 // `bool` compares equal to `true` when it should.
                 let raw = self.fresh();
-                writeln!(self.body, "  {raw} = call i32 {fp}({arglist})").unwrap();
+                writeln!(self.body, "  {raw} = call {cc}i32 {fp}({arglist})").unwrap();
                 let nz = self.fresh();
                 writeln!(self.body, "  {nz} = icmp ne i32 {raw}, 0").unwrap();
                 let out = self.fresh();
@@ -3918,7 +3982,7 @@ impl Lowerer<'_> {
             }
             Some(t) => {
                 let r = self.fresh();
-                writeln!(self.body, "  {r} = call {} {fp}({arglist})", llvm_ty(t)).unwrap();
+                writeln!(self.body, "  {r} = call {cc}{} {fp}({arglist})", llvm_ty(t)).unwrap();
                 Ok(Some(Val { ty: t, operand: r }))
             }
         }
@@ -3938,12 +4002,13 @@ impl Lowerer<'_> {
     /// Each argument's own type is the parameter type: the call site declared
     /// the signature by writing the expressions, so there is nothing to check
     /// an argument against — the checker has already proven each has a C shape.
-    /// `conv` is not emitted, for the reason a `dll`'s is not.
+    /// The trailing convention marker is emitted the same way a `dll`'s is.
     fn eval_call_through(
         &mut self,
         callee: &Expr,
         args: &[Expr],
         ret: Option<Ty>,
+        conv: Option<CallConv>,
     ) -> Result<Option<Val>, LowerError> {
         let target = self.eval(callee)?;
         if target.ty != Ty::Ptr {
@@ -3960,7 +4025,7 @@ impl Lowerer<'_> {
             let v = self.eval(a)?;
             ops.push(self.marshal_c_arg(v.ty, &v));
         }
-        self.emit_c_call(&fp, &ops, ret)
+        self.emit_c_call(&fp, &ops, ret, conv)
     }
 
     /// Lower a command call via the slot ABI; returns the result if non-void.
@@ -4350,6 +4415,61 @@ mod tests {
     fn lower_dbg(src: &str) -> String {
         let m = parse(src).unwrap();
         lower_module_from(&m, &Registry::core(), Some("examples/demo.kiln")).unwrap()
+    }
+
+    /// Lower for a named machine, with the core registry. What the CLI does
+    /// when it is asked for a target other than the host.
+    fn lower_for(src: &str, machine: TargetInfo) -> Result<String, LowerError> {
+        let m = parse(src).unwrap();
+        lower_module_for(&m, &Registry::core(), None, DebugFormat::Records, machine)
+    }
+
+    /// A c-record's pointer-sized field is four bytes on a 32-bit target and
+    /// eight on a 64-bit one: the one number that makes every Win32 struct
+    /// (and every `is c` record) lay out the way the target's C compiler does.
+    #[test]
+    fn c_record_pointer_fields_follow_the_target() {
+        let src = "module m\nrecord S is c\n  a: int\n  p: ptr\n  b: int\nend\n\
+                   sub main\n  call print_int(int64_to_int(size of S))\nend\n";
+        let x64 = lower_for(src, TargetInfo::X86_64_LINUX).unwrap();
+        assert!(x64.contains("store i64 24, ptr"), "{x64}");
+        let x86 = lower_for(src, TargetInfo::X86_WINDOWS).unwrap();
+        assert!(x86.contains("store i64 12, ptr"), "{x86}");
+    }
+
+    /// A Win32 `system` call is `stdcall` on 32-bit Windows and the ordinary C
+    /// convention everywhere else. Getting this wrong corrupts the stack.
+    #[test]
+    fn system_dll_calls_are_stdcall_on_32_bit_windows_only() {
+        let src = "module m\n\
+                   dll MessageBoxA(h: ptr, t: text, c: text, k: int): int from \"user32\" system\n\
+                   sub main\n  call MessageBoxA(ptr_null(), \"a\", \"b\", 0)\nend\n";
+        let x64 = lower_for(src, TargetInfo::X86_64_WINDOWS).unwrap();
+        assert!(!x64.contains("x86_stdcallcc"), "{x64}");
+        let x86 = lower_for(src, TargetInfo::X86_WINDOWS).unwrap();
+        assert!(x86.contains("call x86_stdcallcc i32"), "{x86}");
+    }
+
+    /// A `system` subroutine is defined `stdcall` on 32-bit Windows, and the
+    /// call to it — the internal one and the exported wrapper — agrees, or the
+    /// verifier rejects the module.
+    #[test]
+    fn a_system_sub_is_stdcall_throughout_on_32_bit_windows() {
+        let src = "module m\n\
+                   sub cb(a: int): int system\n  return a\nend\n\
+                   sub main\n  call print_int(cb(1))\nend\n";
+        let x86 = lower_for(src, TargetInfo::X86_WINDOWS).unwrap();
+        assert!(
+            x86.contains("define x86_stdcallcc i32 @kn_user_cb"),
+            "{x86}"
+        );
+        assert!(
+            x86.contains("call x86_stdcallcc i32 @kn_user_cb"),
+            "{x86}"
+        );
+        let x64 = lower_for(src, TargetInfo::X86_64_LINUX).unwrap();
+        assert!(x64.contains("define i32 @kn_user_cb"), "{x64}");
+        assert!(!x64.contains("x86_stdcallcc"), "{x64}");
     }
 
     /// `Registry::core()` plus a non-visual component whose `beep` event hands

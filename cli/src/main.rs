@@ -39,7 +39,7 @@ mod templates;
 
 use std::collections::HashMap;
 
-use kiln_backend::{lower_module_with, DebugFormat};
+use kiln_backend::{lower_module_for, DebugFormat};
 use kiln_ir::registry::Registry;
 use kiln_ir::validate::{validate_with, Hints};
 use kiln_ir::{parse_with, resolve_units, Module, ParseOptions, Target};
@@ -157,6 +157,7 @@ fn usage() {
          kiln build|run --release         …optimised, hardened and stripped\n  \
          kiln build --emit-ir             …keeping the .ll it handed clang\n  \
          kiln build --os windows          …for Windows x86-64 (needs mingw-w64)\n  \
+         kiln build --os windows --arch x86  …for Windows 32-bit (i686; needs mingw32)\n  \
          kiln build --target sharedlib    …a library, with its C header beside it\n  \
            [--header <path>]                 where the header goes (default <module>.h)\n  \
          kiln emit  <in.kiln>              print generated LLVM IR\n  \
@@ -210,6 +211,8 @@ struct Io {
     emit_ir: bool,
     /// The operating system the output is for.
     os: Os,
+    /// The CPU architecture the output is for.
+    arch: Arch,
     /// Where a library build writes its C header; `None` is `<module>.h`
     /// beside the artifact.
     header: Option<PathBuf>,
@@ -258,21 +261,94 @@ impl Os {
     }
 }
 
+/// The CPU architecture a build is for.
+///
+/// Two, because that is what the mingw-w64 cross toolchain gives us and what
+/// the compiler now knows how to lay out for: 64-bit, and the 32-bit i386 that
+/// a Windows program written for the 2000s still is. The language and the IR
+/// are the same either way — only c-record pointer widths and the calling
+/// conventions on 32-bit Windows differ, and both read from `TargetInfo`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Arch {
+    X86_64,
+    X86,
+}
+
+impl Arch {
+    /// The architecture of the machine this toolchain runs on.
+    fn host() -> Arch {
+        Arch::X86_64
+    }
+
+    fn parse(s: &str) -> Option<Arch> {
+        match s {
+            "x86_64" | "x64" | "amd64" | "64" => Some(Arch::X86_64),
+            "x86" | "i686" | "i386" | "win32" | "32" => Some(Arch::X86),
+            _ => None,
+        }
+    }
+
+    /// The machine model the IR layer lays out for and the backend names a
+    /// calling convention from. `os` decides what `system` means on 32 bits.
+    fn target_info(self, os: Os) -> kiln_ir::TargetInfo {
+        match (self, os) {
+            (Arch::X86_64, Os::Linux) => kiln_ir::TargetInfo::X86_64_LINUX,
+            (Arch::X86_64, Os::Windows) => kiln_ir::TargetInfo::X86_64_WINDOWS,
+            (Arch::X86, Os::Windows) => kiln_ir::TargetInfo::X86_WINDOWS,
+            (Arch::X86, Os::Linux) => kiln_ir::TargetInfo::X86_LINUX,
+        }
+    }
+}
+
 /// The mingw-w64 cross toolchain, by the names the distributions install.
 ///
 /// The IR goes through clang, which knows the target from a flag, and every C
 /// source goes through the same clang so one set of flags compiles the whole
 /// program. The link is gcc's, because that driver knows where the mingw
 /// start files and import libraries live and clang's does not always.
-const MINGW_TRIPLE: &str = "x86_64-w64-mingw32";
-const MINGW_GCC: &str = "x86_64-w64-mingw32-gcc";
-const MINGW_AR: &str = "x86_64-w64-mingw32-ar";
-/// C++ is compiled by mingw's own g++ rather than by clang retargeted: the
-/// vendored RmlUi archive is g++'s, and the two compilers disagree about the
-/// size of C++ COMDAT type-info sections, which mingw's linker refuses to
-/// merge. C and the IR stay with clang, whose objects have no such sections.
-const MINGW_GXX: &str = "x86_64-w64-mingw32-g++";
-const MINGW_OBJDUMP: &str = "x86_64-w64-mingw32-objdump";
+///
+/// The five names are per-architecture: Fedora installs `i686-w64-mingw32-*`
+/// beside `x86_64-w64-mingw32-*`, and Debian's `gcc-mingw-w64-i686` the same.
+struct Mingw {
+    triple: &'static str,
+    gcc: &'static str,
+    ar: &'static str,
+    gxx: &'static str,
+    objdump: &'static str,
+    /// Where a Debian/Fedora sysroot keeps its DLLs, for the fallback list
+    /// `mingw_dll_dirs` builds when `-print-sysroot` says nothing useful.
+    sysroot: &'static str,
+}
+
+const MINGW_X86_64: Mingw = Mingw {
+    triple: "x86_64-w64-mingw32",
+    gcc: "x86_64-w64-mingw32-gcc",
+    ar: "x86_64-w64-mingw32-ar",
+    // C++ is compiled by mingw's own g++ rather than by clang retargeted: the
+    // vendored RmlUi archive is g++'s, and the two compilers disagree about
+    // the size of C++ COMDAT type-info sections, which mingw's linker refuses
+    // to merge. C and the IR stay with clang, whose objects have no such
+    // sections.
+    gxx: "x86_64-w64-mingw32-g++",
+    objdump: "x86_64-w64-mingw32-objdump",
+    sysroot: "/usr/x86_64-w64-mingw32",
+};
+
+const MINGW_X86: Mingw = Mingw {
+    triple: "i686-w64-mingw32",
+    gcc: "i686-w64-mingw32-gcc",
+    ar: "i686-w64-mingw32-ar",
+    gxx: "i686-w64-mingw32-g++",
+    objdump: "i686-w64-mingw32-objdump",
+    sysroot: "/usr/i686-w64-mingw32",
+};
+
+fn mingw(arch: Arch) -> &'static Mingw {
+    match arch {
+        Arch::X86_64 => &MINGW_X86_64,
+        Arch::X86 => &MINGW_X86,
+    }
+}
 
 /// The resource table a Windows program carries when it names no picture.
 ///
@@ -313,6 +389,7 @@ fn parse_io_args(rest: &[String]) -> Result<Io, String> {
     let mut release = false;
     let mut emit_ir = false;
     let mut os = Os::host();
+    let mut arch: Option<Arch> = None;
     let mut header: Option<PathBuf> = None;
     let mut i = 0;
     while i < rest.len() {
@@ -342,6 +419,13 @@ fn parse_io_args(rest: &[String]) -> Result<Io, String> {
                 os = Os::parse(v)
                     .ok_or_else(|| format!("unknown os `{v}` — expected linux or windows"))?;
             }
+            "--arch" | "-a" => {
+                i += 1;
+                let v = rest.get(i).ok_or("`--arch` needs a name")?;
+                arch = Some(Arch::parse(v).ok_or_else(|| {
+                    format!("unknown arch `{v}` — expected x86_64 or x86")
+                })?);
+            }
             s if s.starts_with('-') => return Err(format!("unknown flag `{s}`")),
             s => {
                 if input.is_some() {
@@ -360,6 +444,7 @@ fn parse_io_args(rest: &[String]) -> Result<Io, String> {
         release,
         emit_ir,
         os,
+        arch: arch.unwrap_or_else(Arch::host),
         header,
         project_output: None,
     })
@@ -373,7 +458,7 @@ fn cmd_emit(rest: &[String]) -> i32 {
             return 2;
         }
     };
-    match compile_with(&io.input, io.target, io.os, false, io.release) {
+    match compile_with(&io.input, io.target, io.os, io.arch, false, io.release) {
         Ok((ll, _plan, _t, _m)) => {
             print!("{ll}");
             0
@@ -424,7 +509,7 @@ fn cmd_commands(repo_root: &Path, args: &[String]) -> i32 {
             return 1;
         }
     };
-    let plan = match libload::load_metadata(&root, &uses) {
+    let plan = match libload::load_metadata(&root, &uses, Arch::host()) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("kiln: {e}");
@@ -733,10 +818,17 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
         }
     };
     let input = io.input;
+    if io.arch == Arch::X86 && io.os != Os::Windows {
+        eprintln!(
+            "kiln: the 32-bit backend targets Windows x86 only — build with \
+             `--os windows --arch x86`"
+        );
+        return 2;
+    }
     if io.os == Os::Windows {
         // Before any compiling: the one-line answer beats the same fact
         // arriving as a clang error after the IR has been generated.
-        if let Err(e) = mingw_available() {
+        if let Err(e) = mingw_available(io.arch) {
             eprintln!("kiln: {e}");
             return 1;
         }
@@ -748,7 +840,15 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
             return 2;
         }
     }
-    let (mut ll, mut plan, target, module) = match compile(&input, io.target, io.os, io.release) {
+    if io.arch == Arch::X86 && io.target == Some(Target::Gui) {
+        eprintln!(
+            "kiln: a GUI cannot be built for x86 yet — the vendored UI stack \
+             (RmlUi, SDL2, freetype) is 64-bit only. Use a console or shared/static \
+             library, or build for x86_64."
+        );
+        return 2;
+    }
+    let (mut ll, mut plan, target, module) = match compile(&input, io.target, io.os, io.arch, io.release) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("kiln: {e}");
@@ -809,7 +909,7 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
 
     let repo_root = find_repo_root().expect("runtime located during compile()");
     let linked = clang_link(
-        &ll_path, &repo_root, &plan, &out_bin, target, io.os, io.release,
+        &ll_path, &repo_root, &plan, &out_bin, target, io.os, io.arch, io.release,
     );
     // The `.ll` was clang's input, not an output anyone asked for. It goes
     // whether the link succeeded or not — a failed build should not leave a
@@ -921,9 +1021,10 @@ fn compile(
     input: &Path,
     target_override: Option<Target>,
     os: Os,
+    arch: Arch,
     release: bool,
 ) -> Result<(String, libload::LibPlan, Target, Module), String> {
-    compile_with(input, target_override, os, true, release)
+    compile_with(input, target_override, os, arch, true, release)
 }
 
 /// `require_impl` is false when the caller only wants the IR: emitting it
@@ -934,6 +1035,7 @@ fn compile_with(
     input: &Path,
     target_override: Option<Target>,
     os: Os,
+    arch: Arch,
     require_impl: bool,
     release: bool,
 ) -> Result<(String, libload::LibPlan, Target, Module), String> {
@@ -965,11 +1067,11 @@ fn compile_with(
     // staged root, so listing a command and calling it agree by construction.
     let lib_root = kit::overlay_root(&repo_root, &module.uses)?;
     let plan = if !require_impl {
-        libload::load_metadata(&lib_root, &module.uses)?
+        libload::load_metadata(&lib_root, &module.uses, arch)?
     } else if os == Os::host() {
         libload::load(&lib_root, &module.uses)?
     } else {
-        libload::load_cross(&lib_root, &module.uses)?
+        libload::load_cross(&lib_root, &module.uses, arch)?
     };
 
     // A kit that restricts itself to a set of operating systems (a Win32
@@ -1026,8 +1128,14 @@ fn compile_with(
     } else {
         input.to_str()
     };
-    let ll = lower_module_with(&module, &plan.registry, source, debug_format())
-        .map_err(|e| e.to_string())?;
+    let ll = lower_module_for(
+        &module,
+        &plan.registry,
+        source,
+        debug_format(),
+        arch.target_info(os),
+    )
+    .map_err(|e| e.to_string())?;
     Ok((ll, plan, target, module))
 }
 
@@ -1067,7 +1175,7 @@ fn elsewhere(repo_root: &Path) -> HashMap<String, String> {
     for k in kit::resolve_all(repo_root) {
         let uses = vec![k.name.clone()];
         let Ok(root) = kit::overlay_root(repo_root, &uses) else { continue };
-        if let Ok(plan) = libload::load_metadata(&root, &uses) {
+        if let Ok(plan) = libload::load_metadata(&root, &uses, Arch::host()) {
             for (name, _) in plan.registry.iter() {
                 map.entry(name.to_string()).or_insert_with(|| k.name.clone());
             }
@@ -1279,8 +1387,9 @@ fn clang_major() -> Option<u32> {
 /// Is the mingw-w64 cross compiler installed? One line naming the package
 /// when it is not, because the alternative is a screen of "cannot find
 /// crt2.o" from a driver that was never there.
-fn mingw_available() -> Result<(), String> {
-    match Command::new(MINGW_GCC)
+fn mingw_available(arch: Arch) -> Result<(), String> {
+    let tc = mingw(arch);
+    match Command::new(tc.gcc)
         .arg("--version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -1288,8 +1397,10 @@ fn mingw_available() -> Result<(), String> {
     {
         Ok(s) if s.success() => Ok(()),
         _ => Err(format!(
-            "building for windows needs the mingw-w64 cross compiler `{MINGW_GCC}` \
-             (package mingw64-gcc on Fedora, gcc-mingw-w64-x86-64 on Debian and Ubuntu)"
+            "building for windows needs the mingw-w64 cross compiler `{}` (package \
+             mingw64-gcc on Fedora, gcc-mingw-w64-x86-64 on Debian and Ubuntu; for \
+             --arch x86, mingw32-gcc / gcc-mingw-w64-i686)",
+            tc.gcc
         )),
     }
 }
@@ -1303,12 +1414,13 @@ fn clang_link(
     out_bin: &Path,
     target: Target,
     os: Os,
+    arch: Arch,
     release: bool,
 ) -> Result<(), i32> {
     let cfg = &plan.build;
     let driver = if cfg.needs_cxx { "clang++" } else { "clang" };
     if os == Os::Windows {
-        return mingw_link(ll_path, repo_root, plan, out_bin, target, release);
+        return mingw_link(ll_path, repo_root, plan, out_bin, target, arch, release);
     }
 
     // Flags every invocation needs, whether we are linking a program or
@@ -1540,11 +1652,13 @@ fn mingw_link(
     plan: &libload::LibPlan,
     out_bin: &Path,
     target: Target,
+    arch: Arch,
     release: bool,
 ) -> Result<(), i32> {
     let cfg = &plan.build;
+    let tc = mingw(arch);
     let driver = "clang";
-    let driver_args = vec![format!("--target={MINGW_TRIPLE}")];
+    let driver_args = vec![format!("--target={}", tc.triple)];
 
     let mut common: Vec<String> = vec![
         "-ffunction-sections".into(),
@@ -1564,7 +1678,7 @@ fn mingw_link(
     // The sysroot's pkg-config, never the host's: its `-I` names the mingw
     // SDL2 and freetype headers, which is what the ui library compiles
     // against for Windows (libs/ui/lib.json, `windows_pkg_config`).
-    match libload::pkg_config_flags_cross(&cfg.pkg_config, "--cflags") {
+    match libload::pkg_config_flags_cross(&cfg.pkg_config, "--cflags", arch) {
         Ok(flags) => common.extend(flags),
         Err(e) => {
             eprintln!("kiln: {e}");
@@ -1577,7 +1691,7 @@ fn mingw_link(
     let ldflags = if release {
         let cflags = mingw_release_cflags(&driver_args);
         common.splice(0..0, cflags.iter().cloned());
-        mingw_release_ldflags(&driver_args, &cflags)
+        mingw_release_ldflags(arch, &driver_args, &cflags)
     } else {
         common.insert(0, "-O0".into());
         Vec::new()
@@ -1624,7 +1738,7 @@ fn mingw_link(
             );
             return Err(1);
         }
-        return build_archive(driver, &driver_args, MINGW_AR, &clang_common, &c_inputs, out_bin);
+        return build_archive(driver, &driver_args, tc.ar, &clang_common, &c_inputs, out_bin);
     }
 
     let dir = std::env::temp_dir().join(format!("kiln_mingw_{}", std::process::id()));
@@ -1642,7 +1756,7 @@ fn mingw_link(
         }
     };
     if !cxx_inputs.is_empty() {
-        match compile_objects(MINGW_GXX, &[], &gxx_common, &cxx_inputs, &cxx_dir) {
+        match compile_objects(tc.gxx, &[], &gxx_common, &cxx_inputs, &cxx_dir) {
             Ok(o) => objects.extend(o),
             Err(code) => {
                 let _ = std::fs::remove_dir_all(&dir);
@@ -1652,11 +1766,11 @@ fn mingw_link(
     }
 
     // The link driver follows the sources: g++ knows where libstdc++ is.
-    let linker = if cxx_inputs.is_empty() { MINGW_GCC } else { MINGW_GXX };
+    let linker = if cxx_inputs.is_empty() { tc.gcc } else { tc.gxx };
     let mut cmd = Command::new(linker);
     cmd.args(&objects);
     cmd.args(&cfg.link_args);
-    match libload::pkg_config_flags_cross(&cfg.pkg_config, "--libs") {
+    match libload::pkg_config_flags_cross(&cfg.pkg_config, "--libs", arch) {
         // `-mwindows` is a fact about the TARGET, said below for a form and
         // not for a console program that merely uses the library; and
         // `SDL2main` is the entry SDL offers a program without one, which a
@@ -1679,11 +1793,15 @@ fn mingw_link(
     // costs the link nothing, and the link does not have to know which
     // library is which.
     cmd.arg("-lws2_32");
+    // libgcc goes into the image. On 32-bit i386 a `long long` divide and
+    // several other multi-word operations are libgcc calls, so a DLL-only C
+    // program would still import `libgcc_s_dw2-1.dll` (and, through it,
+    // `libwinpthread-1.dll`) — two files the machine it lands on has never
+    // heard of. Static is what the 64-bit path already got for free.
+    cmd.arg("-static-libgcc");
     if !cxx_inputs.is_empty() {
-        // The C++ runtime goes into the image: two DLLs fewer to ship, and
-        // the ones mingw would otherwise want are the ones most often
-        // missing on the machine the program lands on.
-        cmd.arg("-static-libgcc").arg("-static-libstdc++");
+        // The C++ runtime goes in the same way, and for the same reason.
+        cmd.arg("-static-libstdc++");
     }
     if target == Target::SharedLib {
         cmd.arg("-shared");
@@ -1721,7 +1839,7 @@ fn mingw_link(
     // it, transitively: what the image imports, what those import, and the
     // ones a library loads by hand and names in its manifest.
     if target.is_executable() {
-        match copy_windows_dlls(out_bin, &cfg.extra_dlls) {
+        match copy_windows_dlls(arch, out_bin, &cfg.extra_dlls) {
             Ok(dlls) if dlls.is_empty() => {}
             Ok(dlls) => eprintln!(
                 "kiln: copied beside it, because the program imports them: {}",
@@ -1739,32 +1857,34 @@ fn mingw_link(
 /// Where the mingw-w64 sysroot keeps its DLLs: `<gcc -print-sysroot>/mingw/bin`
 /// on Fedora, `/usr/x86_64-w64-mingw32/bin` on Debian and Ubuntu (and `lib`
 /// there, for the packages that put them beside the import libraries).
-fn mingw_dll_dirs() -> Vec<PathBuf> {
+fn mingw_dll_dirs(arch: Arch) -> Vec<PathBuf> {
+    let tc = mingw(arch);
     let mut dirs = Vec::new();
-    if let Ok(out) = Command::new(MINGW_GCC).arg("-print-sysroot").output() {
+    if let Ok(out) = Command::new(tc.gcc).arg("-print-sysroot").output() {
         let root = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if !root.is_empty() && root != "/" {
             dirs.push(PathBuf::from(&root).join("mingw/bin"));
             dirs.push(PathBuf::from(&root).join("bin"));
         }
     }
-    dirs.push(PathBuf::from("/usr/x86_64-w64-mingw32/sys-root/mingw/bin"));
-    dirs.push(PathBuf::from("/usr/x86_64-w64-mingw32/bin"));
-    dirs.push(PathBuf::from("/usr/x86_64-w64-mingw32/lib"));
+    dirs.push(PathBuf::from(format!("{}/sys-root/mingw/bin", tc.sysroot)));
+    dirs.push(PathBuf::from(format!("{}/bin", tc.sysroot)));
+    dirs.push(PathBuf::from(format!("{}/lib", tc.sysroot)));
     dirs.retain(|d| d.is_dir());
     dirs.dedup();
     dirs
 }
 
 /// The DLLs a PE image imports, by name, from its own import table.
-fn pe_imports(image: &Path) -> Result<Vec<String>, String> {
-    let out = Command::new(MINGW_OBJDUMP)
+fn pe_imports(arch: Arch, image: &Path) -> Result<Vec<String>, String> {
+    let tc = mingw(arch);
+    let out = Command::new(tc.objdump)
         .arg("-p")
         .arg(image)
         .output()
-        .map_err(|e| format!("could not invoke {MINGW_OBJDUMP}: {e}"))?;
+        .map_err(|e| format!("could not invoke {}: {e}", tc.objdump))?;
     if !out.status.success() {
-        return Err(format!("{MINGW_OBJDUMP} could not read {}", image.display()));
+        return Err(format!("{} could not read {}", tc.objdump, image.display()));
     }
     Ok(String::from_utf8_lossy(&out.stdout)
         .lines()
@@ -1779,8 +1899,8 @@ fn pe_imports(image: &Path) -> Result<Vec<String>, String> {
 /// not have is Windows' own (`KERNEL32.dll`) and is left alone; a name in
 /// `extra` the sysroot does not have is skipped, not an error — it was a
 /// courtesy for one distribution's packaging.
-fn copy_windows_dlls(image: &Path, extra: &[String]) -> Result<Vec<String>, String> {
-    let dirs = mingw_dll_dirs();
+fn copy_windows_dlls(arch: Arch, image: &Path, extra: &[String]) -> Result<Vec<String>, String> {
+    let dirs = mingw_dll_dirs(arch);
     // Windows resolves DLL names without regard to case; the sysroot spells
     // them one way and an import table may spell them another.
     let mut available: HashMap<String, PathBuf> = HashMap::new();
@@ -1799,7 +1919,7 @@ fn copy_windows_dlls(image: &Path, extra: &[String]) -> Result<Vec<String>, Stri
     let mut queue: Vec<PathBuf> = vec![image.to_path_buf()];
     let mut wanted: Vec<String> = extra.to_vec();
     while let Some(next) = queue.pop() {
-        wanted.extend(pe_imports(&next)?);
+        wanted.extend(pe_imports(arch, &next)?);
         while let Some(name) = wanted.pop() {
             let key = name.to_ascii_lowercase();
             if copied.iter().any(|c| c.to_ascii_lowercase() == key) {
@@ -1868,7 +1988,7 @@ fn mingw_release_cflags(driver_args: &[String]) -> Vec<String> {
 /// Probed by linking an object compiled with the cflags already taken, so a
 /// stack protector whose support library is missing shows up here, at the
 /// link, the way it would in the real build.
-fn mingw_release_ldflags(driver_args: &[String], cflags: &[String]) -> Vec<String> {
+fn mingw_release_ldflags(arch: Arch, driver_args: &[String], cflags: &[String]) -> Vec<String> {
     let want: Vec<Requirement> = vec![
         req(&[&["-Wl,--dynamicbase"]]),
         req(&[&["-Wl,--nxcompat"]]),
@@ -1896,8 +2016,9 @@ fn mingw_release_ldflags(driver_args: &[String], cflags: &[String]) -> Vec<Strin
         return Vec::new();
     }
     let out = dir.join("probe.exe");
-    let taken = probe_each(MINGW_GCC, &want, |taken, alt| {
-        Command::new(MINGW_GCC)
+    let tc = mingw(arch);
+    let taken = probe_each(tc.gcc, &want, |taken, alt| {
+        Command::new(tc.gcc)
             .args(taken)
             .args(alt)
             .arg("-Wl,--fatal-warnings")

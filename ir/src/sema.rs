@@ -1209,7 +1209,7 @@ fn type_of_expr_bare(
                 )),
                 None => err(format!("`size of {rec}`: there is no type `{rec}`")),
             },
-            other if other.c_size_align().is_some() => Ok(Ty::Int64),
+            other if other.has_c_layout() => Ok(Ty::Int64),
             other => err(format!(
                 "`size of {}`: only a c-record or a scalar has a byte size",
                 other.as_str()

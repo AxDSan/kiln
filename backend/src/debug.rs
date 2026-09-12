@@ -19,7 +19,7 @@
 //! that *has* debug information must give every call inside it a location, and
 //! there is no line in anyone's source to give.
 
-use kiln_ir::{c_field_size_align, Registry, Ty};
+use kiln_ir::{c_field_size_align, Registry, TargetInfo, Ty};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
@@ -88,13 +88,17 @@ pub(crate) struct DebugInfo {
     /// introduced in LLVM 19 and the intrinsics were removed in LLVM 21, so
     /// the toolchain that will assemble this module decides which one it gets.
     records: bool,
+    /// The machine the build is for. A c-record's debug member offsets and
+    /// sizes must match the layout the lowerer emitted, so they follow the same
+    /// pointer width.
+    machine: TargetInfo,
 }
 
 impl DebugInfo {
     /// `path` is the source as the user named it. It is split into a file and
     /// a directory because DWARF stores them separately, and a debugger that
     /// is handed a bare name cannot find the file to show.
-    pub(crate) fn new(path: &str, producer: &str, records: bool) -> Self {
+    pub(crate) fn new(path: &str, producer: &str, records: bool, machine: TargetInfo) -> Self {
         let (directory, filename) = match path.rfind('/') {
             Some(i) => (path[..i].to_string(), path[i + 1..].to_string()),
             None => (".".to_string(), path.to_string()),
@@ -111,6 +115,7 @@ impl DebugInfo {
             globals: None,
             global_exprs: HashMap::new(),
             records,
+            machine,
         }
     }
 
@@ -427,7 +432,7 @@ impl DebugInfo {
         };
         let line = def.line.max(1);
         let (offsets, size) = if def.is_c {
-            match def.c_layout(reg) {
+            match def.c_layout(reg, self.machine) {
                 Some((offsets, size, _)) => (
                     offsets.iter().map(|o| *o as u64 * 8).collect::<Vec<_>>(),
                     size as u64 * 8,
@@ -454,7 +459,7 @@ impl DebugInfo {
                 continue;
             };
             let (ty, bits) = if def.is_c {
-                let bits = c_field_size_align(*fty, reg).map(|(s, _)| s as u64 * 8);
+                let bits = c_field_size_align(*fty, reg, self.machine).map(|(s, _)| s as u64 * 8);
                 (self.field_type(*fty, reg), bits)
             } else {
                 (self.value_type(*fty, reg), None)
@@ -487,7 +492,7 @@ impl DebugInfo {
             Ty::Record(name) => self.composite(name, reg),
             Ty::CArray(a) => {
                 let elem = self.field_type(a.elem, reg);
-                let bits = c_field_size_align(a.elem, reg)
+                let bits = c_field_size_align(a.elem, reg, self.machine)
                     .map(|(s, _)| s as u64 * 8)
                     .unwrap_or(8)
                     * a.count as u64;
@@ -631,7 +636,12 @@ mod tests {
     }
 
     fn info() -> DebugInfo {
-        DebugInfo::new("examples/demo.kiln", "Kiln test", true)
+        DebugInfo::new(
+            "examples/demo.kiln",
+            "Kiln test",
+            true,
+            TargetInfo::X86_64_LINUX,
+        )
     }
 
     /// A unit that describes nothing but lines must say so. Claiming
@@ -846,7 +856,12 @@ mod tests {
     /// location is the trailing `!dbg` the record could not have.
     #[test]
     fn a_declare_intrinsic_is_a_call_carrying_a_trailing_location() {
-        let d = DebugInfo::new("examples/demo.kiln", "Kiln test", false);
+        let d = DebugInfo::new(
+            "examples/demo.kiln",
+            "Kiln test",
+            false,
+            TargetInfo::X86_64_LINUX,
+        );
         assert_eq!(
             d.declare("%v0", 12, 9),
             "  call void @llvm.dbg.declare(metadata ptr %v0, metadata !12, \
@@ -859,8 +874,8 @@ mod tests {
     #[test]
     fn the_intrinsic_form_declares_the_intrinsic_and_the_record_form_does_not() {
         let reg = Registry::core();
-        let mut records = DebugInfo::new("a.kiln", "Kiln test", true);
-        let mut calls = DebugInfo::new("a.kiln", "Kiln test", false);
+        let mut records = DebugInfo::new("a.kiln", "Kiln test", true, TargetInfo::X86_64_LINUX);
+        let mut calls = DebugInfo::new("a.kiln", "Kiln test", false, TargetInfo::X86_64_LINUX);
         for d in [&mut records, &mut calls] {
             let sp = d.subprogram("main", "ECodeStart", 1);
             let ty = d.value_type(Ty::Int, &reg);

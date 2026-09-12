@@ -9,7 +9,8 @@
 #
 #   HANDLE, HMODULE, HINSTANCE, LPVOID, LPCVOID, FARPROC, any pointer  -> ptr
 #   DWORD, UINT, BOOL, int                                             -> int / bool
-#   SIZE_T, DWORD_PTR, ULONGLONG, LARGE_INTEGER (its QuadPart)         -> int64
+#   SIZE_T, DWORD_PTR, ULONG_PTR                                       -> intptr
+#   ULONGLONG, LARGE_INTEGER (its QuadPart)                            -> int64
 #   LPCSTR that is always a real string                                -> text
 #   LPCSTR / LPSTR that may be NULL, or is an out buffer               -> ptr
 #   a struct the callee fills                                          -> the
@@ -81,21 +82,22 @@ const ERROR_PROC_NOT_FOUND = 127
 #
 # VirtualAlloc reserves and commits pages in the calling process; the *Ex forms
 # do the same in another process, given a handle opened with the right access.
-# Sizes are SIZE_T, so `int64` — a reservation may be larger than 4 GB.
+# Sizes are SIZE_T, so `intptr` — 64-bit on x64. On x86 a reservation is
+# bounded by the address space, and the type is 32-bit with it.
 # ---------------------------------------------------------------------------
 
-dll VirtualAlloc(lpAddress: ptr, dwSize: int64, flAllocationType: int, flProtect: int): ptr from "kernel32" system
-dll VirtualAllocEx(hProcess: ptr, lpAddress: ptr, dwSize: int64, flAllocationType: int, flProtect: int): ptr from "kernel32" system
-dll VirtualFree(lpAddress: ptr, dwSize: int64, dwFreeType: int): bool from "kernel32" system
-dll VirtualFreeEx(hProcess: ptr, lpAddress: ptr, dwSize: int64, dwFreeType: int): bool from "kernel32" system
+dll VirtualAlloc(lpAddress: ptr, dwSize: intptr, flAllocationType: int, flProtect: int): ptr from "kernel32" system
+dll VirtualAllocEx(hProcess: ptr, lpAddress: ptr, dwSize: intptr, flAllocationType: int, flProtect: int): ptr from "kernel32" system
+dll VirtualFree(lpAddress: ptr, dwSize: intptr, dwFreeType: int): bool from "kernel32" system
+dll VirtualFreeEx(hProcess: ptr, lpAddress: ptr, dwSize: intptr, dwFreeType: int): bool from "kernel32" system
 
 # lpflOldProtect is an out DWORD cell: mem_alloc(4), then ptr_read_int(cell, 0).
 # It is not optional — VirtualProtect fails when it is NULL.
-dll VirtualProtect(lpAddress: ptr, dwSize: int64, flNewProtect: int, lpflOldProtect: ptr): bool from "kernel32" system
-dll VirtualProtectEx(hProcess: ptr, lpAddress: ptr, dwSize: int64, flNewProtect: int, lpflOldProtect: ptr): bool from "kernel32" system
+dll VirtualProtect(lpAddress: ptr, dwSize: intptr, flNewProtect: int, lpflOldProtect: ptr): bool from "kernel32" system
+dll VirtualProtectEx(hProcess: ptr, lpAddress: ptr, dwSize: intptr, flNewProtect: int, lpflOldProtect: ptr): bool from "kernel32" system
 
-dll VirtualLock(lpAddress: ptr, dwSize: int64): bool from "kernel32" system
-dll VirtualUnlock(lpAddress: ptr, dwSize: int64): bool from "kernel32" system
+dll VirtualLock(lpAddress: ptr, dwSize: intptr): bool from "kernel32" system
+dll VirtualUnlock(lpAddress: ptr, dwSize: intptr): bool from "kernel32" system
 
 # MEMORY_BASIC_INFORMATION as x64 lays it out: 48 bytes. `PartitionId` is a
 # WORD on current SDKs and was DWORD `__alignment1` before; either way the two
@@ -107,7 +109,7 @@ record MEMORY_BASIC_INFORMATION is c
   AllocationProtect: int
   PartitionId: word
   Alignment1: word
-  RegionSize: int64
+  RegionSize: intptr
   State: int
   Protect: int
   Type: int
@@ -117,31 +119,31 @@ end
 # Both answer the number of bytes written into the buffer — 0 on failure — so
 # the return is SIZE_T, `int64`. Pass `size of MEMORY_BASIC_INFORMATION` as
 # dwLength.
-dll VirtualQuery(lpAddress: ptr, lpBuffer: MEMORY_BASIC_INFORMATION, dwLength: int64): int64 from "kernel32" system
-dll VirtualQueryEx(hProcess: ptr, lpAddress: ptr, lpBuffer: MEMORY_BASIC_INFORMATION, dwLength: int64): int64 from "kernel32" system
+dll VirtualQuery(lpAddress: ptr, lpBuffer: MEMORY_BASIC_INFORMATION, dwLength: intptr): intptr from "kernel32" system
+dll VirtualQueryEx(hProcess: ptr, lpAddress: ptr, lpBuffer: MEMORY_BASIC_INFORMATION, dwLength: intptr): intptr from "kernel32" system
 
 # lpNumberOfBytesRead / lpNumberOfBytesWritten are out SIZE_T cells:
 # mem_alloc(8), then ptr_read_int64(cell, 0). Both may be NULL.
-dll ReadProcessMemory(hProcess: ptr, lpBaseAddress: ptr, lpBuffer: ptr, nSize: int64, lpNumberOfBytesRead: ptr): bool from "kernel32" system
-dll WriteProcessMemory(hProcess: ptr, lpBaseAddress: ptr, lpBuffer: ptr, nSize: int64, lpNumberOfBytesWritten: ptr): bool from "kernel32" system
+dll ReadProcessMemory(hProcess: ptr, lpBaseAddress: ptr, lpBuffer: ptr, nSize: intptr, lpNumberOfBytesRead: ptr): bool from "kernel32" system
+dll WriteProcessMemory(hProcess: ptr, lpBaseAddress: ptr, lpBuffer: ptr, nSize: intptr, lpNumberOfBytesWritten: ptr): bool from "kernel32" system
 
 # The CPU may hold stale decoded instructions for a page whose bytes just
 # changed; this is what makes the new bytes the ones that execute.
-dll FlushInstructionCache(hProcess: ptr, lpBaseAddress: ptr, dwSize: int64): bool from "kernel32" system
+dll FlushInstructionCache(hProcess: ptr, lpBaseAddress: ptr, dwSize: intptr): bool from "kernel32" system
 
 # ---------------------------------------------------------------------------
 # HEAPS
 # ---------------------------------------------------------------------------
 
 dll GetProcessHeap(): ptr from "kernel32" system
-dll HeapCreate(flOptions: int, dwInitialSize: int64, dwMaximumSize: int64): ptr from "kernel32" system
+dll HeapCreate(flOptions: int, dwInitialSize: intptr, dwMaximumSize: intptr): ptr from "kernel32" system
 dll HeapDestroy(hHeap: ptr): bool from "kernel32" system
-dll HeapAlloc(hHeap: ptr, dwFlags: int, dwBytes: int64): ptr from "kernel32" system
-dll HeapReAlloc(hHeap: ptr, dwFlags: int, lpMem: ptr, dwBytes: int64): ptr from "kernel32" system
+dll HeapAlloc(hHeap: ptr, dwFlags: int, dwBytes: intptr): ptr from "kernel32" system
+dll HeapReAlloc(hHeap: ptr, dwFlags: int, lpMem: ptr, dwBytes: intptr): ptr from "kernel32" system
 dll HeapFree(hHeap: ptr, dwFlags: int, lpMem: ptr): bool from "kernel32" system
-dll HeapSize(hHeap: ptr, dwFlags: int, lpMem: ptr): int64 from "kernel32" system
+dll HeapSize(hHeap: ptr, dwFlags: int, lpMem: ptr): intptr from "kernel32" system
 dll HeapValidate(hHeap: ptr, dwFlags: int, lpMem: ptr): bool from "kernel32" system
-dll HeapCompact(hHeap: ptr, dwFlags: int): int64 from "kernel32" system
+dll HeapCompact(hHeap: ptr, dwFlags: int): intptr from "kernel32" system
 
 # ---------------------------------------------------------------------------
 # BLOCK MOVES
@@ -153,11 +155,11 @@ dll HeapCompact(hHeap: ptr, dwFlags: int): int64 from "kernel32" system
 # they are here so a transcription of C source keeps its own vocabulary.
 # ---------------------------------------------------------------------------
 
-dll CopyMemory(Destination: ptr, Source: ptr, Length: int64) from "kernel32" as "RtlMoveMemory" system
-dll MoveMemory(Destination: ptr, Source: ptr, Length: int64) from "kernel32" as "RtlMoveMemory" system
-dll RtlMoveMemory(Destination: ptr, Source: ptr, Length: int64) from "kernel32" system
-dll ZeroMemory(Destination: ptr, Length: int64) from "kernel32" as "RtlZeroMemory" system
-dll FillMemory(Destination: ptr, Length: int64, Fill: int) from "kernel32" as "RtlFillMemory" system
+dll CopyMemory(Destination: ptr, Source: ptr, Length: intptr) from "kernel32" as "RtlMoveMemory" system
+dll MoveMemory(Destination: ptr, Source: ptr, Length: intptr) from "kernel32" as "RtlMoveMemory" system
+dll RtlMoveMemory(Destination: ptr, Source: ptr, Length: intptr) from "kernel32" system
+dll ZeroMemory(Destination: ptr, Length: intptr) from "kernel32" as "RtlZeroMemory" system
+dll FillMemory(Destination: ptr, Length: intptr, Fill: int) from "kernel32" as "RtlFillMemory" system
 
 # ---------------------------------------------------------------------------
 # WHAT THE MACHINE HAS
@@ -173,7 +175,7 @@ record SYSTEM_INFO is c
   dwPageSize: int
   lpMinimumApplicationAddress: ptr
   lpMaximumApplicationAddress: ptr
-  dwActiveProcessorMask: int64
+  dwActiveProcessorMask: intptr
   dwNumberOfProcessors: int
   dwProcessorType: int
   dwAllocationGranularity: int
@@ -237,8 +239,8 @@ dll CreateFileA(lpFileName: text, dwDesiredAccess: int, dwShareMode: int, lpSecu
 # OVERLAPPED's third and fourth DWORDs are a union with `PVOID Pointer`; the
 # DWORD pair is the half a file offset is written through.
 record OVERLAPPED is c
-  Internal: int64
-  InternalHigh: int64
+  Internal: intptr
+  InternalHigh: intptr
   Offset: int
   OffsetHigh: int
   hEvent: ptr
@@ -300,9 +302,9 @@ dll CreateFileMappingA(hFile: ptr, lpFileMappingAttributes: ptr, flProtect: int,
 dll OpenFileMappingA(dwDesiredAccess: int, bInheritHandle: bool, lpName: text): ptr from "kernel32" system
 
 # dwNumberOfBytesToMap is SIZE_T; 0 means "to the end of the mapping".
-dll MapViewOfFile(hFileMappingObject: ptr, dwDesiredAccess: int, dwFileOffsetHigh: int, dwFileOffsetLow: int, dwNumberOfBytesToMap: int64): ptr from "kernel32" system
+dll MapViewOfFile(hFileMappingObject: ptr, dwDesiredAccess: int, dwFileOffsetHigh: int, dwFileOffsetLow: int, dwNumberOfBytesToMap: intptr): ptr from "kernel32" system
 dll UnmapViewOfFile(lpBaseAddress: ptr): bool from "kernel32" system
-dll FlushViewOfFile(lpBaseAddress: ptr, dwNumberOfBytesToFlush: int64): bool from "kernel32" system
+dll FlushViewOfFile(lpBaseAddress: ptr, dwNumberOfBytesToFlush: intptr): bool from "kernel32" system
 
 # ---------------------------------------------------------------------------
 # DIRECTORY ENUMERATION
