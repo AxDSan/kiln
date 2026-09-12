@@ -68,8 +68,8 @@ Download a release, unpack it anywhere, and run it — there is no installer and
 nothing to configure:
 
 ```sh
-tar xzf kiln-1.1.0-linux-x86_64.tar.gz
-cd kiln-1.1.0-linux-x86_64
+tar xzf kiln-1.2.0-linux-x86_64.tar.gz
+cd kiln-1.2.0-linux-x86_64
 bin/kiln-studio
 ```
 
@@ -263,7 +263,9 @@ From here the promise is ordinary semver, and it is about *your programs*:
 
 - **1.x will not break a program that compiles today.** New commands, new
   components and new targets arrive in minor releases; a language or ABI change
-  that invalidates working source waits for 2.0.
+  that invalidates working source waits for 2.0. 1.2.0 adds the 32-bit Windows
+  target (`--arch x86`) and nothing else that a 1.1.0 program can see: the same
+  source builds the same x86-64 binary it did, byte for byte.
 - **`Kiln_*` ABI structures grow at the end only**, and `KILN_ABI_VERSION` says
   when they have. A library compiled against ABI 4 keeps loading.
 - **What is not yet built is not a promise.** The Status section below is the
@@ -274,11 +276,12 @@ From here the promise is ordinary semver, and it is about *your programs*:
 Kiln is 1.0 and still narrow — the version says the interface has settled, not
 that the map is filled in:
 
-- **Linux x86-64, plus a Windows cross build.** Programs — windowed and
-  console — and libraries cross-build for Windows x86-64 from Linux
-  (`--os windows`, with mingw-w64 installed); console programs are tested
-  under wine, windowed ones as far as a headless wine goes (they load and
-  reach the UI library; the drawn window is unverified). Studio is
+- **Linux x86-64, plus a Windows cross build — 64-bit and 32-bit.**
+  Console programs and libraries cross-build for Windows x64 (`--os
+  windows`) and for 32-bit Windows (`--os windows --arch x86`, with the
+  matching mingw toolchain installed); both are tested under wine. A 32-bit
+  *windowed* program is not built yet — the vendored UI stack is x86-64
+  only, and `--arch x86` with `--target gui` is refused by name. Studio is
   Linux-only, nothing is built natively on Windows yet, and macOS and arm64
   are not supported.
 - **The debugger is Linux-only.** Breakpoints, stepping, the call stack and
