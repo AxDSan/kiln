@@ -33,6 +33,9 @@ pub enum Edit {
     /// Rename a component, updating nothing else — handlers are named
     /// separately, so this is the whole of it.
     RenameComponent { from: String, to: String },
+    /// Add an empty method to the half of the form that is *not* the
+    /// designer's, which is where a handler the designer just wired belongs.
+    AddMethod { name: String, params: Vec<String> },
     /// Replace the designer block's properties, components and wiring with
     /// exactly what is described, leaving the code half and everything else
     /// alone. This is what a designer's "save" is: it holds the whole form and
@@ -174,6 +177,66 @@ pub fn apply(src: &str, edit: &Edit) -> Result<String, String> {
     let mut program =
         parser::parse(toks).map_err(|e| format!("{}:{}: {}", e.span.line, e.span.col, e.msg))?;
 
+    // A new handler goes in the half that holds the code, which is the one the
+    // designer does *not* own: putting it beside the components would be
+    // rewriting the user's half from the designer's.
+    if let Edit::AddMethod { name, params } = edit {
+        let forms: Vec<usize> = program
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| matches!(i, Item::Form(_)))
+            .map(|(n, _)| n)
+            .collect();
+        if forms.is_empty() {
+            return Err("this file declares no form".into());
+        }
+        // The code half is the one with the fewest components; with only one
+        // form block, that is the same block and the method still lands.
+        let idx = *forms
+            .iter()
+            .min_by_key(|n| match &program.items[**n] {
+                Item::Form(f) => f.components.len() + f.properties.len(),
+                _ => usize::MAX,
+            })
+            .unwrap();
+        let Item::Form(f) = &mut program.items[idx] else {
+            unreachable!()
+        };
+        // The designer names a handler in the spelling it reads back from
+        // `kiln inspect` — `button1_click`. K2 source is written in C#'s
+        // casing, so the same conversion `sync` does applies here.
+        let name = to_pascal(name);
+        if f.methods.iter().any(|m| m.name == name) {
+            return Err(format!("`{name}` is already there"));
+        }
+        f.methods.push(Method {
+            attrs: Vec::new(),
+            leading: Vec::new(),
+            is_extern: false,
+            vis: Vis::Internal,
+            is_static: false,
+            name,
+            type_params: Vec::new(),
+            constraints: Vec::new(),
+            params: params
+                .iter()
+                .enumerate()
+                .map(|(i, t)| Param {
+                    name: format!("a{}", i + 1),
+                    ty: TypeRef::Named(t.clone()),
+                    span: Span::default(),
+                })
+                .collect(),
+            ret: TypeRef::Void,
+            body: Vec::new(),
+            expr_body: None,
+            doc: None,
+            span: Span::default(),
+        });
+        return Ok(print::program(&program));
+    }
+
     // The designer's half is the first `form` block that has components or
     // properties; a `partial form` holding only code is left alone.
     let form = program
@@ -236,6 +299,7 @@ pub fn apply(src: &str, edit: &Edit) -> Result<String, String> {
                 .ok_or_else(|| format!("no component `{from}`"))?;
             c.id = to.clone();
         }
+        Edit::AddMethod { .. } => unreachable!("handled before the designer's half is chosen"),
         Edit::Sync(spec) => {
             // A component that is still there keeps its comments: the designer
             // owns the block's *shape*, not the notes someone wrote in it.

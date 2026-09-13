@@ -59,6 +59,13 @@ struct Component {
 
 struct Model {
     std::string path;                 // the .kiln being edited
+    /// The `kiln` binary this model was loaded through. A save goes back out
+    /// the same way it came in: the CLI is the only reader of a project file,
+    /// and for Kiln 2 it is the only writer too.
+    std::string kiln_bin;
+    /// Whether the file is Kiln 2 rather than 1.x. Decided when it is loaded,
+    /// by the same first-line rule the compiler and the language server use.
+    bool is_k2 = false;
     /// The project.kproj this file belongs to, or "" for a loose file. Set
     /// when the model was opened THROUGH a project; the file is what is
     /// edited and saved, the project is what is remembered.

@@ -816,6 +816,34 @@ static void test_kiln2_form(const std::string& kiln, const std::string& designer
     // The other button, so this is about the file and not about one lucky row.
     const std::string other = session(designer, kiln, form, "select:reset;click:segevents;events");
     check("a second K2 handler is there too", has(other, "click=on_reset"));
+
+    // Saving a K2 form goes through `kiln edit sync`, never by splicing lines:
+    // a save that wrote `form main_window` into a K2 file would be the worst
+    // thing the designer could do, and it is what the first attempt did.
+    {
+        std::string path;
+        const std::string out =
+            session(designer, kiln, form, "select:add;drag:add@50,110->90,140;save", &path);
+        const std::string file = slurp(path);
+        check("the drag was saved", has(file, "Left = 80;"));
+        check("the file is still Kiln 2", has(file, "public partial form MainWindow"));
+        check("no 1.x syntax was written", !has(file, "form main_window") && !has(file, "\nend\n"));
+        check("the code half survived", has(file, "count.Text = $\"{n}\";"));
+        check("its comments survived", has(file, "// ── your half, in the same file"));
+    }
+
+    // The whole RAD gesture: drop a button, double-click it for a handler.
+    // The component belongs in the designer's half and the method in yours.
+    {
+        std::string path;
+        const std::string out =
+            session(designer, kiln, form, "add:button;dblclick:button1;save", &path);
+        const std::string file = slurp(path);
+        check("the dropped component is K2", has(file, "Button button1"));
+        check("the wiring is K2", has(file, "Click += Button1Click;"));
+        check("the handler is a method, not a sub", has(file, "void Button1Click()"));
+        check("the stub is not 1.x text", !has(file, "sub button1_click"));
+    }
 }
 
 static void test_settings(const std::string& kiln, const std::string& designer) {

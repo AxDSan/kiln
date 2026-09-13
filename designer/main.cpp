@@ -5115,10 +5115,22 @@ void open_handler(const std::string& id, const std::string& event) {
             while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) text.append(buf, n);
             std::fclose(f);
         }
-        const std::string stub = handler_stub(*cc, ev, name, text);
-        if (FILE* f = std::fopen(g.model.path.c_str(), "ab")) {
-            std::fwrite(stub.data(), 1, stub.size(), f);
-            std::fclose(f);
+        // Kiln 2 gets its stub through the tree, like every other change to a
+        // K2 file: appending `sub name ... end` would write 1.x syntax into it.
+        if (g.model.is_k2) {
+            std::string params;
+            if (ev.known) {
+                for (const auto& t : ev.params) params += " " + t;
+            }
+            std::string out;
+            kiln::sys::capture_output(
+                g.kiln_bin + " edit " + g.model.path + " stub " + name + params, true, out);
+        } else {
+            const std::string stub = handler_stub(*cc, ev, name, text);
+            if (FILE* f = std::fopen(g.model.path.c_str(), "ab")) {
+                std::fwrite(stub.data(), 1, stub.size(), f);
+                std::fclose(f);
+            }
         }
         g.model.subs.push_back(name);
         g.dirty = false;

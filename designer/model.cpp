@@ -1,4 +1,5 @@
 #include "model.h"
+#include "portable.h"
 
 #include <sys/stat.h>
 #include <algorithm>
@@ -8,6 +9,86 @@
 #include <sstream>
 
 namespace kiln::designer {
+
+/* Is this a Kiln 2 file? The same rule the compiler and the language server
+ * use: a 1.x program opens with `module` or `unit`, and anything else is K2.
+ * Decided from the file rather than from a flag, so opening one cannot
+ * disagree with compiling it. */
+static bool file_is_k2(const std::string& path) {
+    std::ifstream in(path);
+    if (!in) return false;
+    std::string line;
+    while (std::getline(in, line)) {
+        size_t a = line.find_first_not_of(" \t");
+        if (a == std::string::npos) continue;
+        const std::string t = line.substr(a);
+        if (t[0] == '#' || t.rfind("//", 0) == 0 || t.rfind("/*", 0) == 0) continue;
+        const bool m = t.rfind("module", 0) == 0 &&
+                       (t.size() == 6 || std::isspace((unsigned char)t[6]));
+        const bool u = t.rfind("unit", 0) == 0 &&
+                       (t.size() == 4 || std::isspace((unsigned char)t[4]));
+        return !(m || u);
+    }
+    return false;
+}
+
+/* Save a Kiln 2 form by handing the whole thing to `kiln edit ... sync`.
+ *
+ * Studio holds a form and has no record of which single edit got it there, so
+ * the save is the form itself, described in exactly the lines `kiln inspect`
+ * prints. The CLI has always been the only reader of a project file; for K2 it
+ * is the only writer too, and none of the 1.x line-splicing below runs. */
+static bool save_model_k2(Model& m, const std::vector<std::string>& new_subs,
+                          std::string& error) {
+    // The handlers wired in this session that have no method yet.
+    for (const auto& sub : new_subs) {
+        const std::string cmd = m.kiln_bin + " edit " + m.path + " stub " + sub;
+        std::string text;
+        if (kiln::sys::capture_output(cmd, true, text) != 0) {
+            error = text.empty() ? "kiln edit stub failed" : text;
+            return false;
+        }
+    }
+
+    std::string spec = "form: " + m.form_name + "\n";
+    auto props = [&spec](const std::string& id,
+                         const std::vector<std::pair<std::string, std::string>>& ps) {
+        for (const auto& p : ps) {
+            std::string v;
+            for (char c : p.second) {
+                if (c == '\\') v += "\\\\";
+                else if (c == '\n') v += "\\n";
+                else v += c;
+            }
+            spec += "prop: " + id + " " + p.first + " " + v + "\n";
+        }
+    };
+    props(m.form_name, m.form.properties);
+    for (const auto& c : m.children) {
+        if (c.removed) continue;
+        spec += "component: " + c.id + " " + c.type_name + "\n";
+        props(c.id, c.properties);
+        for (const auto& h : c.handlers) {
+            if (h.second.empty()) continue;
+            spec += "handler: " + c.id + " " + h.first + " " + h.second + "\n";
+        }
+    }
+
+    // Through a file rather than a pipe: Studio spawns the toolchain directly
+    // on Windows, where there is no shell to redirect stdin for it.
+    const std::string spec_path = m.path + ".designer-save";
+    { std::ofstream f(spec_path, std::ios::trunc); f << spec; }
+    std::string text;
+    const int rc = kiln::sys::capture_output(
+        m.kiln_bin + " edit " + m.path + " sync " + spec_path, true, text);
+    std::remove(spec_path.c_str());
+    if (rc != 0) {
+        error = text.empty() ? "kiln edit sync failed" : text;
+        return false;
+    }
+    m.renames.clear();
+    return true;
+}
 namespace {
 
 std::vector<std::string> split_words(const std::string& line, int max_parts) {
@@ -108,6 +189,11 @@ bool load_model(const std::string& kiln_bin, const std::string& given, Model& ou
     out = Model{};
     out.path = path;
     out.project = project;
+    // After the reset, not before it: everything set on `out` above this line
+    // is thrown away, which is exactly how the first attempt at this wrote 1.x
+    // syntax into a Kiln 2 file.
+    out.kiln_bin = kiln_bin;
+    out.is_k2 = file_is_k2(path);
     std::string text;
     char buf[4096];
     while (fgets(buf, sizeof buf, pipe)) text += buf;
@@ -319,6 +405,8 @@ struct Region {
 
 bool save_model(Model& m, const std::vector<std::string>& new_subs,
                 const NeedsQuotes& needs_quotes, std::string& error) {
+    // Kiln 2 is written through the tree, never by splicing lines.
+    if (m.is_k2) return save_model_k2(m, new_subs, error);
     std::ifstream in(m.path);
     if (!in) { error = "cannot read " + m.path; return false; }
     std::vector<std::string> lines;

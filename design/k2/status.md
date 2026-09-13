@@ -104,7 +104,13 @@ clang and checks stdout):
   designer's save has to take — it holds a form and has no record of which
   single edit got it there — and it makes the CLI the only writer as well as
   the only reader. An untouched save is byte-identical; the code half, its
-  comments and the designer block's own comments all survive
+  comments and the designer block's own comments all survive. `stub` adds the
+  empty handler a wiring gesture leaves behind, in the half that holds code
+- **Studio saves a Kiln 2 form**: dragging a component and saving changes only
+  the two coordinates in the file, and the whole RAD gesture — drop a button,
+  double-click it — writes `Button button1` into the designer's half and
+  `void Button1Click()` into yours, wired and compiling. Its own tests drive
+  the gestures and read the file back
 - **`kiln edit`**: `set`, `add`, `remove`, `rename`, `on` change a form's
   designer block **through the tree**, not as text — so comments, the code half
   and everything else survive. This is what Studio calls: the CLI has always
@@ -214,7 +220,7 @@ clang and checks stdout):
 3. constraints beyond interfaces (`where T : class`, `new()`) are parsed and ignored
 4. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
 5. ABI v5 proper: a handler that captures a *local*; Studio itself calling `kiln edit` (the command exists; the C++ side still splices 1.x text)
-6. Studio itself: it can now *read* a K2 form through `kiln inspect` and *write* one through `kiln edit`, but its C++ still splices 1.x text on save and highlights with its own keyword list
+6. Studio's code view still highlights from a C++ keyword list rather than the language server (reading, saving and the RAD gestures all go through the CLI now)
 
 ## Milestone: the RAD half runs
 

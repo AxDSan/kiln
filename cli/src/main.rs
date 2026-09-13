@@ -486,7 +486,8 @@ fn cmd_edit(rest: &[String]) -> i32 {
                  or: kiln edit <file> remove <id>\n   \
                  or: kiln edit <file> rename <id> <new-id>\n   \
                  or: kiln edit <file> on <id> <Event> <Method>\n   \
-                 or: kiln edit <file> sync   (a form description on stdin)";
+                 or: kiln edit <file> sync [description]   (or on stdin)\n   \
+                 or: kiln edit <file> stub <Method> [param-type...]";
     let Some((file, op)) = rest.split_first() else {
         eprintln!("{usage}");
         return 2;
@@ -515,10 +516,22 @@ fn cmd_edit(rest: &[String]) -> i32 {
         // `sync` takes back exactly what `kiln inspect` printed. A designer
         // holds a whole form and has no record of which single edit got it
         // there, so this is the shape its save has to take.
-        Some((verb, a)) if verb == "sync" && a.is_empty() => {
+        // The empty handler a wiring gesture leaves behind, in the half of the
+        // form that holds code rather than components.
+        Some((verb, a)) if verb == "stub" && !a.is_empty() => kiln_k2::Edit::AddMethod {
+            name: a[0].clone(),
+            params: a[1..].to_vec(),
+        },
+        Some((verb, a)) if verb == "sync" && a.len() <= 1 => {
             use std::io::Read as _;
+            // A file rather than stdin when one is named: Studio spawns this
+            // directly on Windows, with no shell to redirect for it.
             let mut text = String::new();
-            if let Err(e) = std::io::stdin().read_to_string(&mut text) {
+            let read = match a.first() {
+                Some(p) => std::fs::read_to_string(p).map(|s| text = s),
+                None => std::io::stdin().read_to_string(&mut text).map(|_| ()),
+            };
+            if let Err(e) = read {
                 eprintln!("kiln edit: cannot read the description: {e}");
                 return 1;
             }

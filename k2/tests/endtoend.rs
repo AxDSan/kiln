@@ -1686,3 +1686,50 @@ handler: go click on_go
     .unwrap();
     assert_eq!(out, src, "an untouched save rewrote the file");
 }
+
+#[test]
+fn a_wired_handler_lands_in_the_code_half() {
+    // The designer wires an event and leaves an empty handler behind. It
+    // belongs in the half of the form that holds code — putting it beside the
+    // components would be the designer rewriting the user's half. The name
+    // arrives in the designer's spelling and is written in K2's.
+    let src = "\
+namespace W;
+
+public partial form MainWindow
+{
+    Title = \"x\";
+    Button go { Text = \"Go\"; }
+}
+
+public partial form MainWindow
+{
+    int n;
+}
+";
+    let out = kiln_k2::edit(
+        src,
+        &kiln_k2::Edit::AddMethod {
+            name: "button1_click".into(),
+            params: vec![],
+        },
+    )
+    .unwrap();
+    assert!(out.contains("void Button1Click()"), "{out}");
+    // In the code half: after the field, not among the components.
+    let code_half = out.rsplit("public partial form MainWindow").next().unwrap();
+    assert!(code_half.contains("Button1Click"), "wrong half:\n{out}");
+    assert!(!code_half.contains("Button go"), "wrong half:\n{out}");
+    kiln_k2::compile(&out).expect("still compiles");
+
+    // An event that hands something over gets a parameter for it.
+    let with_params = kiln_k2::edit(
+        src,
+        &kiln_k2::Edit::AddMethod {
+            name: "grid1_select".into(),
+            params: vec!["int".into()],
+        },
+    )
+    .unwrap();
+    assert!(with_params.contains("void Grid1Select(int a1)"), "{with_params}");
+}
