@@ -98,7 +98,13 @@ clang and checks stdout):
 - **Studio opens a Kiln 2 form**: the window, its components and their handler
   wiring all render, and the Events tab shows `click`/`on_add` as it would for
   1.x — verified by dumping a frame and looking at it, and pinned by a scripted
-  session in the designer's own tests. Reading is done; saving is not
+  session in the designer's own tests
+- **`kiln edit <file> sync`**: a whole form, described in exactly the lines
+  `kiln inspect` prints, applied through the tree. That is the shape a
+  designer's save has to take — it holds a form and has no record of which
+  single edit got it there — and it makes the CLI the only writer as well as
+  the only reader. An untouched save is byte-identical; the code half, its
+  comments and the designer block's own comments all survive
 - **`kiln edit`**: `set`, `add`, `remove`, `rename`, `on` change a form's
   designer block **through the tree**, not as text — so comments, the code half
   and everything else survive. This is what Studio calls: the CLI has always
@@ -245,5 +251,6 @@ record, a `List<T>`, a `Select` lambda and a `switch` over an enum.
   `k2-lower` as `k2-sema` grows (it is currently folded into the lowerer).
 - Comments are carried as *leading* trivia, so one written at the end of a line
   moves above the next construct. Blank lines between constructs are
-  normalised rather than preserved.
+  normalised rather than preserved — the printer puts one between components
+  and between methods, and drops the rest.
 - Parser cast heuristic `(T)e` is conservative; revisit with the full grammar.

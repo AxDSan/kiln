@@ -270,7 +270,16 @@ impl<'a, 'b> FnEmit<'a, 'b> {
         // thunk, a lifted lambda — has no source position worth stopping in.
         if !self.f.synthetic {
             if let Some(d) = self.e.debug.as_mut() {
-                self.scope = Some(d.subprogram(&self.f.symbol, self.f.line));
+                let sp = d.subprogram(&self.f.symbol, self.f.line);
+                self.scope = Some(sp);
+                // Start at the declaration line rather than at no location.
+                // LLVM discards a module's debug information entirely if a
+                // call in a function that has some carries no `!dbg` — so an
+                // instruction emitted before the first line marker (a
+                // prologue, an initialiser) would silently cost the whole
+                // program its debuggability.
+                let line = self.f.line;
+                self.loc = Some(d.location(line, sp));
             }
         }
 

@@ -110,7 +110,10 @@ fn name(s: &str) -> String {
 fn vis(v: Vis) -> &'static str {
     match v {
         Vis::Public => "public ",
-        Vis::Internal => "internal ",
+        // `internal` is what an unwritten visibility parses as, so writing it
+        // out means `kiln fmt` turns `int n;` into `internal int n;` and is not
+        // a fixed point. The canonical spelling of a default is to omit it.
+        Vis::Internal => "",
         Vis::Private => "private ",
     }
 }
@@ -157,7 +160,12 @@ fn item(o: &mut Out, it: &Item) {
             if !f.properties.is_empty() && !f.components.is_empty() {
                 o.blank();
             }
-            for c in &f.components {
+            for (i, c) in f.components.iter().enumerate() {
+                // One blank line between components: a form block is a list of
+                // things with bodies, and run together they are hard to read.
+                if i > 0 {
+                    o.blank();
+                }
                 o.leading(&c.leading);
                 o.open(&format!("{} {}", c.type_name, c.id));
                 for (n, v) in &c.properties {
@@ -176,8 +184,15 @@ fn item(o: &mut Out, it: &Item) {
             for fl in &f.fields {
                 field(o, fl);
             }
-            for m in &f.methods {
-                o.blank();
+            for (i, m) in f.methods.iter().enumerate() {
+                // A blank line separates a method from what came before it —
+                // but not when it is the first thing in the block, where it
+                // would open the body with an empty line.
+                if i > 0 || !f.fields.is_empty() || !f.components.is_empty()
+                    || !f.properties.is_empty()
+                {
+                    o.blank();
+                }
                 method(o, m);
             }
             o.close();

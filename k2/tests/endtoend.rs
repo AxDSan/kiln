@@ -1561,3 +1561,128 @@ public static class P
 "#;
     assert_eq!(run_k2(src), "10 20 \n");
 }
+
+#[test]
+fn a_designers_save_goes_through_the_tree() {
+    // What Studio's save has to be: it holds a whole form and has no record of
+    // which single edit got it there. `sync` takes back exactly what
+    // `kiln inspect` prints, so the CLI stays the only reader *and* writer.
+    let src = "\
+namespace Counter;
+
+// Studio owns this block.
+public partial form MainWindow
+{
+    Title = \"Counter\";
+
+    // The number, which is text and must stay text.
+    Label count
+    {
+        Text = \"0\";
+        Left = 40;
+    }
+}
+
+public partial form MainWindow
+{
+    int n;
+
+    void OnAdd()
+    {
+        n = n + 1;      // a comment of mine
+        count.Text = $\"{n}\";
+    }
+}
+";
+    // A save that moves the label and wires a button that was just dropped.
+    let spec = "\
+form: main_window span=4..15
+prop: main_window title Counter
+component: count label
+prop: count text 0
+prop: count left 80
+component: add button
+prop: add text Add one
+handler: add click on_add
+";
+    let out = kiln_k2::edit(
+        src,
+        &kiln_k2::Edit::Sync(kiln_k2::edit::parse_spec(spec).unwrap()),
+    )
+    .unwrap();
+
+    // The designer's half is what it was told.
+    assert!(out.contains("Left = 80;"), "the move was not saved:\n{out}");
+    assert!(out.contains("Button add"), "the new button is missing:\n{out}");
+    assert!(out.contains("Click += OnAdd;"), "the wiring is missing:\n{out}");
+    // Names come back in K2's casing, not the designer's.
+    assert!(!out.contains("background_color"), "snake case leaked:\n{out}");
+
+    // A value that is text stays text: `Text = "0"` must not become `Text = 0`,
+    // which is what guessing the type from the printed value would do.
+    assert!(out.contains("Text = \"0\";"), "a string became a number:\n{out}");
+
+    // And none of this touches the half that is not the designer's.
+    assert!(out.contains("int n;"), "the code half lost a field:\n{out}");
+    assert!(
+        out.contains("// a comment of mine"),
+        "a comment in the code half was lost:\n{out}"
+    );
+    assert!(
+        out.contains("// The number, which is text and must stay text."),
+        "a comment in the designer's block was lost:\n{out}"
+    );
+
+    // What it produces still compiles.
+    kiln_k2::compile(&out).expect("a saved form still compiles");
+}
+
+#[test]
+fn a_save_round_trips_through_inspect_unchanged() {
+    // Saving a form nobody edited must change nothing at all — otherwise every
+    // open-and-close rewrites the file, and the diff is noise forever.
+    let src = "\
+namespace RT;
+
+public partial form MainWindow
+{
+    Title = \"Hi\";
+
+    Label count
+    {
+        Text = \"0\";
+        Left = 40;
+    }
+
+    Button go
+    {
+        Text = \"Go\";
+        Click += OnGo;
+    }
+}
+
+public partial form MainWindow
+{
+    void OnGo()
+    {
+        count.Text = \"1\";
+    }
+}
+";
+    let spec = "\
+form: main_window span=3..18
+prop: main_window title Hi
+component: count label
+prop: count text 0
+prop: count left 40
+component: go button
+prop: go text Go
+handler: go click on_go
+";
+    let out = kiln_k2::edit(
+        src,
+        &kiln_k2::Edit::Sync(kiln_k2::edit::parse_spec(spec).unwrap()),
+    )
+    .unwrap();
+    assert_eq!(out, src, "an untouched save rewrote the file");
+}

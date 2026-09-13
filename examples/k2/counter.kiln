@@ -5,6 +5,7 @@
 // The property assignments and component blocks are the designer's half — the
 // same half Studio owns and rewrites. The methods below are yours, in the same
 // file.
+
 namespace Counter;
 
 // ── the designer's half ─────────────────────────────────────────────────────
@@ -50,7 +51,6 @@ public partial form MainWindow
         BorderRadius = 6;
         Click += OnReset;
     }
-
 }
 
 // ── your half, in the same file ─────────────────────────────────────────────

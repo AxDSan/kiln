@@ -1,35 +1,40 @@
 // A Kiln 2 tour. Build and run it with:
 //
 //   kiln k2 examples/k2/demo.kiln --run
+
 namespace Demo;
 
-public enum Profession { Warrior, Champion, Mage, Priest }
+public enum Profession
+{
+    Warrior,
+    Champion,
+    Mage,
+    Priest,
+}
 
 /// A rectangle, with a method reached through `this`.
 public record Rect(int W, int H)
 {
     public int Area() => W * H;
+
     public string Describe() => $"{W}x{H} = {Area()}";
 }
 
 public static class Program
 {
     /// Each class's level-one weapon — a switch expression over the enum.
-    public static uint WeaponFor(int p) => p switch
-    {
-        0 => 1000,   // Short Sword
-        1 => 1400,   // Spear
-        2 => 1700,   // Short Wand
-        _ => 1800,   // Long Staff
-    };
+    public static uint WeaponFor(int p) => p switch { 0 => 1000, 1 => 1400, 2 => 1700, _ => 1800 };
 
     /// Generic, monomorphised per type argument.
-    public static T Max<T>(T a, T b) => a >= b ? a : b;
+    public static T Max<T>(T a, T b) => (a >= b ? a : b);
 
     /// Failure is a value, not an exception.
     public static Result<int> Half(int n)
     {
-        if (n % 2 != 0) return Error("not even");
+        if (n % 2 != 0)
+        {
+            return Error("not even");
+        }
         return n / 2;
     }
 
@@ -44,23 +49,21 @@ public static class Program
     {
         var r = new Rect(3, 4);
         Console.WriteLine(r.Describe());
-
         Console.WriteLine($"a mage wields {WeaponFor(2)}");
         Console.WriteLine($"max: {Max(3, 9)} and {Max(2.5, 1.5)}");
-
         // Closures capture by reference.
         var total = 0;
         Action<int> add = n => { total = total + n; };
         foreach (var i in 1..5)
+        {
             add(i);
+        }
         Console.WriteLine($"total {total}");
-
         // Result, with a fallback and a propagated failure.
-        Console.WriteLine($"half of 84 is {Half(84) ?? -1}");
-        Console.WriteLine($"half of 7 is {Half(7) ?? -1}");
+        Console.WriteLine($"half of 84 is {(Half(84) ?? -1)}");
+        Console.WriteLine($"half of 7 is {(Half(7) ?? -1)}");
         var q = Quarter(6);
         Console.WriteLine($"quarter of 6: ok={q.IsOk} err={q.Error}");
-
         // Cleanup runs on the way out, however the block is left.
         defer Console.WriteLine("done");
         Console.WriteLine("working");

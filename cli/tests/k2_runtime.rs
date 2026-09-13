@@ -492,3 +492,50 @@ public static class P
         "1\n3\na b c \n1\n",
     );
 }
+
+#[test]
+fn every_call_carries_a_location_so_debug_info_survives() {
+    // LLVM discards a module's debug information *entirely* if a call inside a
+    // function that has some carries no `!dbg`. So one untagged instruction —
+    // a prologue, an initialiser emitted before the first line marker — costs
+    // the whole program its debuggability, silently. The only symptom is a
+    // warning from clang that a build otherwise ignores.
+    let path = tmp("dbgall.kiln");
+    std::fs::write(
+        &path,
+        "namespace DbgAll;\npublic static class P\n{\n    static int Inner() => 7;\n    static int Outer() { return Inner() + 1; }\n    public static void Main()\n    {\n        Console.WriteLine($\"{Outer()}\");\n    }\n}\n",
+    )
+    .unwrap();
+    let ir = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["k2", path.to_str().unwrap(), "--emit-ir"])
+        .output()
+        .expect("kiln k2 --emit-ir");
+    let ll = String::from_utf8_lossy(&ir.stdout);
+
+    // Every `call` in a function that has a subprogram must carry a location.
+    let mut untagged = Vec::new();
+    for line in ll.lines() {
+        let t = line.trim();
+        if t.contains(" call ") && !t.contains("!dbg") && !t.starts_with("declare") {
+            untagged.push(t.to_string());
+        }
+    }
+    assert!(
+        untagged.is_empty(),
+        "these calls carry no location, which costs the module its debug info:\n{}",
+        untagged.join("\n")
+    );
+
+    // And clang agrees: no complaint about invalid debug info.
+    let ll_path = tmp("dbgall.ll");
+    std::fs::write(&ll_path, ll.as_bytes()).unwrap();
+    let cc = Command::new("clang")
+        .args(["-c", ll_path.to_str().unwrap(), "-o", "/dev/null"])
+        .output()
+        .expect("clang");
+    let err = String::from_utf8_lossy(&cc.stderr);
+    assert!(
+        !err.contains("invalid debug info"),
+        "clang discarded the debug info:\n{err}"
+    );
+}

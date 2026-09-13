@@ -485,7 +485,8 @@ fn cmd_edit(rest: &[String]) -> i32 {
                  or: kiln edit <file> add <Type> <id>\n   \
                  or: kiln edit <file> remove <id>\n   \
                  or: kiln edit <file> rename <id> <new-id>\n   \
-                 or: kiln edit <file> on <id> <Event> <Method>";
+                 or: kiln edit <file> on <id> <Event> <Method>\n   \
+                 or: kiln edit <file> sync   (a form description on stdin)";
     let Some((file, op)) = rest.split_first() else {
         eprintln!("{usage}");
         return 2;
@@ -511,6 +512,24 @@ fn cmd_edit(rest: &[String]) -> i32 {
             from: a[0].clone(),
             to: a[1].clone(),
         },
+        // `sync` takes back exactly what `kiln inspect` printed. A designer
+        // holds a whole form and has no record of which single edit got it
+        // there, so this is the shape its save has to take.
+        Some((verb, a)) if verb == "sync" && a.is_empty() => {
+            use std::io::Read as _;
+            let mut text = String::new();
+            if let Err(e) = std::io::stdin().read_to_string(&mut text) {
+                eprintln!("kiln edit: cannot read the description: {e}");
+                return 1;
+            }
+            match kiln_k2::edit::parse_spec(&text) {
+                Ok(spec) => kiln_k2::Edit::Sync(spec),
+                Err(e) => {
+                    eprintln!("kiln edit: {e}");
+                    return 1;
+                }
+            }
+        }
         Some((verb, a)) if verb == "on" && a.len() == 3 => kiln_k2::Edit::AddHandler {
             target: a[0].clone(),
             event: a[1].clone(),
