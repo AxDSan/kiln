@@ -106,9 +106,11 @@ clang and checks stdout):
   implementation's methods, so two unrelated types work through one interface
   and a `List<IShape>` holds both; a missing implementation is a compile error
 - **The Kiln runtime, opt-in**: `kiln k2 --runtime` links the runtime and
-  support libraries exactly as a 1.x build does, and `Console.WriteLine`
-  becomes the `print_text` command over the slot ABI instead of `printf` —
-  the first K2 program to reach the real runtime
+  support libraries exactly as a 1.x build does; `Console.WriteLine` becomes
+  the `print_text` command over the slot ABI, and **every allocation comes from
+  the collector** — records, strings, lists, dictionaries, sets and packed
+  buffers alike. A program that allocates megabytes across 400 rounds holds
+  49 bytes after a collection
 - **`[Table]` with compile-time SQL**: `[Table("...")]`, `[Column("...")]`,
   `[Auto]` on a record give `T.InsertSql()` and `T.SelectSql(x => ...)`, where
   the predicate is translated to a parameterised `where` clause **at compile
@@ -147,7 +149,7 @@ clang and checks stdout):
 
 **Not yet built** (next phases, in rough order):
 
-1. hashing for `Dictionary` and `HashSet` (both scan linearly); moving strings and the collections onto the runtime's own text/array commands and the collector (the link path exists; the data structures still use libc)
+1. hashing for `Dictionary` and `HashSet` (both scan linearly); the collections are collector-allocated but are still K2's own structures rather than the runtime's `kn_ary_*`/text commands
 2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
 3. constraints beyond interfaces (`where T : class`, `new()`) are parsed and ignored
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)

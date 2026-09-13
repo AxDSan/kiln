@@ -93,12 +93,14 @@ pub fn load(path: &Path) -> Result<Project, String> {
         match key.trim() {
             "name" => name = value.to_string(),
             "main" => main = value.to_string(),
-            "target" => target = Some(Target::parse(value).ok_or_else(|| {
-                format!(
+            "target" => {
+                target = Some(Target::parse(value).ok_or_else(|| {
+                    format!(
                     "{}: unknown target `{value}` — expected console, gui, sharedlib or staticlib",
                     file.display()
                 )
-            })?),
+                })?)
+            }
             // Either shape reads the same, so a file written by hand with
             // commas is not wrong.
             "kits" => kits.extend(

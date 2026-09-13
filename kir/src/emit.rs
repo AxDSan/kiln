@@ -773,11 +773,29 @@ impl<'a, 'b> FnEmit<'a, 'b> {
             Layout::C { size, .. } => (*size, rec.fields.iter().map(|f| f.ty).collect()),
             Layout::Managed => unimplemented!("managed MakeRecord: kn_rec_new, later phase"),
         };
-        self.e
-            .externs
-            .insert("declare ptr @malloc(i64)".to_string());
+        // A record is heap-allocated. With the collector linked the block must
+        // come from it, or it is never traced and never reclaimed.
         let base = self.fresh();
-        writeln!(self.body, "  {base} = call ptr @malloc(i64 {size})").unwrap();
+        match self.e.m.allocator {
+            Allocator::Runtime => {
+                self.e
+                    .externs
+                    .insert("declare ptr @kn_notify(i32, ptr, ptr)".to_string());
+                let sz = self.fresh();
+                writeln!(self.body, "  {sz} = inttoptr i64 {size} to ptr").unwrap();
+                writeln!(
+                    self.body,
+                    "  {base} = call ptr @kn_notify(i32 1, ptr {sz}, ptr null)"
+                )
+                .unwrap();
+            }
+            Allocator::Libc => {
+                self.e
+                    .externs
+                    .insert("declare ptr @malloc(i64)".to_string());
+                writeln!(self.body, "  {base} = call ptr @malloc(i64 {size})").unwrap();
+            }
+        }
         let vals: Vec<V> = fields.iter().map(|f| self.expr(f)).collect();
         for (i, v) in vals.iter().enumerate() {
             let p = self.fresh();

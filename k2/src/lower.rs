@@ -109,6 +109,10 @@ pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> 
         }
     }
 
+    // With the runtime linked, the collector owns the heap.
+    if runtime == Runtime::Kiln {
+        b.m.allocator = Allocator::Runtime;
+    }
     // `Bytes` is addressed as a buffer of u8; intern that once up front.
     let _ = b.m.types.intern(TyKind::Array(TyTable::U8));
     let mut cx = Cx {
@@ -2017,17 +2021,10 @@ impl<'a> FnLower<'a> {
             to: TyTable::I64,
         };
         let buf = self.new_local("$buf", TyTable::STR);
+        let alloc = self.alloc(size, TyTable::STR);
         self.push(Stmt::Let {
             local: buf,
-            value: Expr::Call(Box::new(Call::Dll {
-                library: "c".into(),
-                symbol: "malloc".into(),
-                conv: CallConv::Cdecl,
-                args: vec![size],
-                arg_tys: vec![TyTable::I64],
-                ret: TyTable::STR,
-                varargs: false,
-            })),
+            value: alloc,
         });
         // snprintf(buf, n + 1, fmt, ...)
         let mut fill = vec![
@@ -2630,24 +2627,11 @@ impl<'a> FnLower<'a> {
                         return Err("Bytes.Alloc takes a length".into());
                     }
                     let (n, _) = self.expr(&args[0], Some(TyTable::I32))?;
-                    return Ok((
-                        Expr::Call(Box::new(Call::Dll {
-                            library: "c".into(),
-                            symbol: "calloc".into(),
-                            conv: CallConv::Cdecl,
-                            args: vec![
-                                Expr::Cast {
-                                    value: Box::new(n),
-                                    to: TyTable::I64,
-                                },
-                                Expr::Int(1, TyTable::I64),
-                            ],
-                            arg_tys: vec![TyTable::I64, TyTable::I64],
-                            ret: TyTable::BYTES,
-                            varargs: false,
-                        })),
-                        TyTable::BYTES,
-                    ));
+                    let size = Expr::Cast {
+                        value: Box::new(n),
+                        to: TyTable::I64,
+                    };
+                    return Ok((self.alloc(size, TyTable::BYTES), TyTable::BYTES));
                 }
                 if name == "Read" && self.cx.packed.contains(obj) {
                     if args.len() != 2 {
@@ -2666,15 +2650,7 @@ impl<'a> FnLower<'a> {
                     let dst = self.new_local("$read", rty);
                     self.push(Stmt::Let {
                         local: dst,
-                        value: Expr::Call(Box::new(Call::Dll {
-                            library: "c".into(),
-                            symbol: "malloc".into(),
-                            conv: CallConv::Cdecl,
-                            args: vec![Expr::Int(size as i128, TyTable::I64)],
-                            arg_tys: vec![TyTable::I64],
-                            ret: rty,
-                            varargs: false,
-                        })),
+                        value: self.alloc(Expr::Int(size as i128, TyTable::I64), rty),
                     });
                     self.push(Stmt::Expr(self.memcpy(
                         Expr::Cast {
@@ -2925,29 +2901,16 @@ impl<'a> FnLower<'a> {
             },
             Stmt::Assign {
                 place: Place::Field(Box::new(l()), LIST_DATA),
-                value: Expr::Call(Box::new(Call::Dll {
-                    library: "c".into(),
-                    symbol: "realloc".into(),
-                    conv: CallConv::Cdecl,
-                    args: vec![
-                        Expr::Cast {
-                            value: Box::new(Expr::Field(Box::new(l()), LIST_DATA)),
-                            to: TyTable::PTR,
-                        },
-                        Expr::Cast {
-                            value: Box::new(Expr::Bin(
-                                BinOp::Mul,
-                                Box::new(Expr::Local(newcap)),
-                                Box::new(Expr::Int(esize as i128, TyTable::I32)),
-                                TyTable::I32,
-                            )),
-                            to: TyTable::I64,
-                        },
-                    ],
-                    arg_tys: vec![TyTable::PTR, TyTable::I64],
-                    ret: data_ty,
-                    varargs: false,
-                })),
+                value: self.realloc(
+                    Expr::Field(Box::new(l()), LIST_DATA),
+                    Expr::Bin(
+                        BinOp::Mul,
+                        Box::new(Expr::Local(newcap)),
+                        Box::new(Expr::Int(esize as i128, TyTable::I32)),
+                        TyTable::I32,
+                    ),
+                    data_ty,
+                ),
             },
             Stmt::Assign {
                 place: Place::Field(Box::new(l()), LIST_CAP),
@@ -3143,6 +3106,81 @@ impl<'a> FnLower<'a> {
         ))
     }
 
+    /// Allocate `size` bytes: from the collector when it is linked, from libc
+    /// otherwise. Everything K2 puts on the heap goes through here.
+    fn alloc(&self, size: Expr, ret: TyId) -> Expr {
+        match self.cx.runtime {
+            Runtime::Kiln => Expr::Call(Box::new(Call::Dll {
+                library: "runtime".into(),
+                symbol: "kn_notify".into(),
+                conv: CallConv::Cdecl,
+                args: vec![
+                    Expr::Int(1, TyTable::I32), // KN_NRS_MALLOC
+                    Expr::Cast {
+                        value: Box::new(size),
+                        to: TyTable::PTR,
+                    },
+                    Expr::Null(TyTable::PTR),
+                ],
+                arg_tys: vec![TyTable::I32, TyTable::PTR, TyTable::PTR],
+                ret,
+                varargs: false,
+            })),
+            Runtime::Libc => Expr::Call(Box::new(Call::Dll {
+                library: "c".into(),
+                symbol: "malloc".into(),
+                conv: CallConv::Cdecl,
+                args: vec![size],
+                arg_tys: vec![TyTable::I64],
+                ret,
+                varargs: false,
+            })),
+        }
+    }
+
+    /// Grow a block, preserving what is in it.
+    fn realloc(&self, ptr: Expr, size: Expr, ret: TyId) -> Expr {
+        match self.cx.runtime {
+            Runtime::Kiln => Expr::Call(Box::new(Call::Dll {
+                library: "runtime".into(),
+                symbol: "kn_notify".into(),
+                conv: CallConv::Cdecl,
+                args: vec![
+                    Expr::Int(3, TyTable::I32), // KN_NRS_MREALLOC
+                    Expr::Cast {
+                        value: Box::new(ptr),
+                        to: TyTable::PTR,
+                    },
+                    Expr::Cast {
+                        value: Box::new(size),
+                        to: TyTable::PTR,
+                    },
+                ],
+                arg_tys: vec![TyTable::I32, TyTable::PTR, TyTable::PTR],
+                ret,
+                varargs: false,
+            })),
+            Runtime::Libc => Expr::Call(Box::new(Call::Dll {
+                library: "c".into(),
+                symbol: "realloc".into(),
+                conv: CallConv::Cdecl,
+                args: vec![
+                    Expr::Cast {
+                        value: Box::new(ptr),
+                        to: TyTable::PTR,
+                    },
+                    Expr::Cast {
+                        value: Box::new(size),
+                        to: TyTable::I64,
+                    },
+                ],
+                arg_tys: vec![TyTable::PTR, TyTable::I64],
+                ret,
+                varargs: false,
+            })),
+        }
+    }
+
     /// `memcpy(dst, src, n)`.
     fn memcpy(&self, dst: Expr, src: Expr, n: i64) -> Expr {
         Expr::Call(Box::new(Call::Dll {
@@ -3321,30 +3359,17 @@ impl<'a> FnLower<'a> {
         let keys_ty = self.cx.b.m.record(drid).fields[DICT_KEYS].ty;
         let vals_ty = self.cx.b.m.record(drid).fields[DICT_VALUES].ty;
         let newcap = self.new_local("$dcap", TyTable::I32);
-        let realloc = |buf: Expr, elem: i64, cap: Expr, ret: TyId| {
-            Expr::Call(Box::new(Call::Dll {
-                library: "c".into(),
-                symbol: "realloc".into(),
-                conv: CallConv::Cdecl,
-                args: vec![
-                    Expr::Cast {
-                        value: Box::new(buf),
-                        to: TyTable::PTR,
-                    },
-                    Expr::Cast {
-                        value: Box::new(Expr::Bin(
-                            BinOp::Mul,
-                            Box::new(cap),
-                            Box::new(Expr::Int(elem as i128, TyTable::I32)),
-                            TyTable::I32,
-                        )),
-                        to: TyTable::I64,
-                    },
-                ],
-                arg_tys: vec![TyTable::PTR, TyTable::I64],
+        let realloc = |s: &Self, buf: Expr, elem: i64, cap: Expr, ret: TyId| {
+            s.realloc(
+                buf,
+                Expr::Bin(
+                    BinOp::Mul,
+                    Box::new(cap),
+                    Box::new(Expr::Int(elem as i128, TyTable::I32)),
+                    TyTable::I32,
+                ),
                 ret,
-                varargs: false,
-            }))
+            )
         };
         let grow = vec![
             Stmt::If {
@@ -3371,6 +3396,7 @@ impl<'a> FnLower<'a> {
             Stmt::Assign {
                 place: Place::Field(Box::new(d()), DICT_KEYS),
                 value: realloc(
+                    self,
                     Expr::Field(Box::new(d()), DICT_KEYS),
                     ksize,
                     Expr::Local(newcap),
@@ -3380,6 +3406,7 @@ impl<'a> FnLower<'a> {
             Stmt::Assign {
                 place: Place::Field(Box::new(d()), DICT_VALUES),
                 value: realloc(
+                    self,
                     Expr::Field(Box::new(d()), DICT_VALUES),
                     vsize,
                     Expr::Local(newcap),

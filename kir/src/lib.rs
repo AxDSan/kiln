@@ -278,6 +278,16 @@ fn is_ptr_kind(k: &TyKind) -> bool {
 
 // ─── Module ─────────────────────────────────────────────────────────────────
 
+/// Where a module's heap comes from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Allocator {
+    /// libc `malloc`/`realloc`. Self-contained, and never freed.
+    #[default]
+    Libc,
+    /// The Kiln collector, through `kn_notify`. Traced and reclaimed.
+    Runtime,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ModuleKind {
     Console,
@@ -314,6 +324,9 @@ pub struct Module {
     pub funcs: Vec<Func>,
     pub entry: Option<FuncId>,
     pub kind: ModuleKind,
+    /// Where allocations come from. A record, a string and a collection all
+    /// allocate; with the runtime linked they should be collectable.
+    pub allocator: Allocator,
 }
 
 impl Module {
@@ -327,6 +340,7 @@ impl Module {
             funcs: Vec::new(),
             entry: None,
             kind,
+            allocator: Allocator::Libc,
         }
     }
 
