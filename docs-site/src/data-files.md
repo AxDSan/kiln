@@ -1,6 +1,6 @@
-# Reading the client's own files
+# Reading data files
 
-Two kits exist for the files a game client ships: `xml` for the tables, and
+Two kits exist for the data files a program reads: `xml` for the tables, and
 `encoding` for the codepages they are written in. They are separate because the
 two problems are separate — a document can be UTF-8 XML that needs no decoding,
 and a name can be GBK in a `.dat` with no XML anywhere near it.
@@ -90,7 +90,7 @@ mappings and hand-copying them is how a decoder ends up 99% right and silently
 wrong on a name — so it asks the platform: iconv on POSIX, the Win32 codepage API
 on Windows. `gbk`, `gb2312`, `cp936`, `gb18030`, `big5`, `shift-jis`, `latin1`,
 `utf-16le`, `utf-16be` and `utf-8` all resolve, and `encoding_known` answers
-whether this build can do one *before* a player finds out.
+whether this build can do one *before* a program depends on it.
 
 ```
 module names

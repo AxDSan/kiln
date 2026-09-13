@@ -945,7 +945,7 @@ end
 
 `encoding_encode(text, text) -> bytes`
 
-Write text back in a named encoding as a byte-set, for the client to read.
+Write text back in a named encoding as a byte-set, for another program to read.
 
 ```kiln
 module example
@@ -960,7 +960,7 @@ end
 
 `encoding_known(text) -> bool`
 
-Whether this build can convert a named encoding, so a start-up check can say so before a player asks.
+Whether this build can convert a named encoding, so a start-up check can say so before a program asks.
 
 ```kiln
 module example

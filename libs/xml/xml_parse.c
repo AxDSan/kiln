@@ -1,6 +1,6 @@
 /* The `xml` library's parser — one pass, no recursion, no dependency.
  *
- * What it must survive is the client's own tables, so the shape of those files
+ * What it must survive is the tables these files carry, so their shape
  * is the spec: a GB2312 declaration over bytes that are really GBK, a comment
  * block carrying Chinese text, CRLF, 523-character lines, and 3,430
  * self-closing rows whose attributes are the actual data.  Three consequences
@@ -264,7 +264,7 @@ int32_t xml_doc_build(const char *src, int32_t len, XmlDoc **out, XmlError *err)
             /* A declaration, in practice a DOCTYPE.  Skipped whole, an internal
              * subset and all: the entities it declares are not read, so a
              * document that relies on them decodes them as written.  None of
-             * the client's files carries one, which is why this is a skip
+             * these files carries one, which is why this is a skip
              * rather than a feature. */
             i += 2;
             int32_t bracket = 0;

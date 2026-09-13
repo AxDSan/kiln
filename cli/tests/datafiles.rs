@@ -1,6 +1,6 @@
 //! `libs/xml` and `libs/encoding`, end to end in a built binary.
 //!
-//! Both exist for one job — reading the game client's own data files, which are
+//! Both exist for one job — reading data files, which are
 //! XML with a GB2312 declaration over GBK bytes — so the fixtures here are
 //! written to disk as BYTES rather than as source strings: a GBK byte pair that
 //! survives a round trip through a temporary file is the property that matters,
@@ -55,7 +55,7 @@ fn run_in(dir: &PathBuf, src: &str, tag: &str) -> String {
     String::from_utf8_lossy(&run.stdout).to_string()
 }
 
-/// A table in the client's shape: a GB2312 declaration over GBK bytes, a
+/// A table in the shape these files have: a GB2312 declaration over GBK bytes, a
 /// comment block carrying Chinese, CRLF, and one self-closing row per item —
 /// under a group element, because the real item table nests.
 fn item_table(dir: &PathBuf) -> PathBuf {
@@ -234,7 +234,7 @@ sub main
   call print_int(bytes_count(kept))
   call print_int(bytes_at(kept, 1))
   call print_int(bytes_at(kept, 2))
-  # the attribute reached the program as the client's own bytes, and decoding
+  # the attribute reached the program as the file's own bytes, and decoding
   # them is what turns the name into text the language can print
   let wide = encoding_decode(kept, "gbk")
   call print_text("decoded '{{wide}}' length {{length(wide)}}")
@@ -272,7 +272,7 @@ target console
 use encoding
 
 sub main
-  # 中文 as GBK bytes, and back to the client's own codepage
+  # 中文 as GBK bytes, and back to the codepage it came from
   var gbk: bytes = bytes_new(4)
   call bytes_set(gbk, 1, 214)
   call bytes_set(gbk, 2, 208)

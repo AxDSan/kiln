@@ -1,10 +1,10 @@
 /* "xml" library metadata (design-time only; compiled into the introspection
  * .so, never a shipped program — same split as core_libinfo.c).
  *
- * The reader exists because the game client's tables ARE the game: item
- * templates, forge probabilities, quests and UI layouts all live in XML that
- * only a client ships, and a program that cannot read them can only be a
- * reimplementation of tables someone typed out by hand.  Everything here reads
+ * The reader exists because a great deal of data lives in XML: item tables,
+ * probabilities, quests and UI layouts, in files whose shape and encoding are
+ * someone else's decision.  Reading them is cheaper than reimplementing tables
+ * nobody can type out reliably.  Everything here reads
  * bytes as bytes, so a GB2312 declaration over GBK content is not a problem to
  * solve — it is a document to read (see libs/xml/xml_parse.c). */
 #include "kiln_abi.h"

@@ -49,7 +49,7 @@ verified at all.**
 | the guide pages (`language`, `components`, `networking`, `databases`, `data-files`, `memory`, `build-targets`, `kits`, `interop`, `win-kit`, `studio`, `editors`, `forms-and-events`, `installation`, `quick-start`, `first-gui-app`, `introduction`) | whichever the release touches | `tools/check-docs.sh` compiles every whole-program sample; `mdbook build` and `tools/check-site.sh` check the links |
 | `docs-site/src/SUMMARY.md` | a line for every new page | `tools/check-release.sh`: a page that is not listed is a page nobody reads |
 | `libs/README.md` | the command-prefix table, when a kit lands | nothing |
-| `docs/*.md` | the port records, when they name a state that changed | nothing — they say "open, deliberately" and stay true only if somebody looks |
+| `docs/ports/` (untracked local notes) | a port record, when it names a state that changed | nothing — they say "open, deliberately" and stay true only if somebody looks |
 | `Cargo.toml` | the workspace `version` | `tools/package.sh` refuses a binary whose reported version differs from it |
 | `Cargo.lock` | refreshed by any build | — |
 | `tools/bundle-README.md` | nothing: it carries `__VERSION__`, substituted at package time | `tools/package.sh` |

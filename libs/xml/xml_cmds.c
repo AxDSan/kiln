@@ -1,4 +1,4 @@
-/* The `xml` library — reading the game client's own tables.
+/* The `xml` library — reading XML data files.
  *
  * A parsed document is a handle (kind KN_HK_XML).  Inside it, an ELEMENT is a
  * small positive int, and 0 means "nothing" — the same numbering the rest of
@@ -377,7 +377,7 @@ void xml_attr_at(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
 /* The element's own text: its direct runs, concatenated, with the whitespace
  * at either end taken off.  Whitespace-only content answers "" — an element
  * holding nothing but the newline and indent before its children is the normal
- * case in every one of the client's files, and handing that back as text would
+ * case in every one of these files, and handing that back as text would
  * make `xml_text` useless for the question it is asked. */
 void xml_text(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;

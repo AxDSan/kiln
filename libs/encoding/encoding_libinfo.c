@@ -1,11 +1,11 @@
 /* "encoding" library metadata (design-time only; compiled into the
  * introspection .so, never a shipped program — same split as core_libinfo.c).
  *
- * Four commands, because the port needs exactly four things: read a table that
- * is GBK, read one that is broken GBK without giving up on it, write a name
- * back in the client's own codepage, and ask whether this build can do any of
- * it — which a program wants to know once at start-up rather than at the moment
- * a player is waiting for a realm list. */
+ * Four commands, covering what reading such a file needs: decode one that is
+ * GBK, decode broken GBK without giving up on it, write text back in the
+ * codepage it came from, and ask whether this build can do any of it — which a
+ * program wants to know once at start-up rather than at the moment it
+ * matters. */
 #include "kiln_abi.h"
 
 void encoding_decode(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv);
@@ -27,11 +27,11 @@ static const Kiln_CommandDesc ENCODING_COMMANDS[] = {
       "let raw: bytes = bytes_new(3)\ncall bytes_set(raw, 1, 65)\ncall bytes_set(raw, 2, 255)\ncall bytes_set(raw, 3, 66)\ncall print_text(encoding_decode_lossy(raw, \"gbk\"))" },
 
     { "encoding_encode", "encoding_encode", KN_SDT_BIN, 2, P_TT,
-      "Write text back in a named encoding as a byte-set, for the client to read",
+      "Write text back in a named encoding as a byte-set, for another program to read",
       "call print_int(bytes_count(encoding_encode(\"\u4e2d\u6587\", \"gbk\")))" },
 
     { "encoding_known", "encoding_known", KN_SDT_BOOL, 1, P_T,
-      "Whether this build can convert a named encoding, so a start-up check can say so before a player asks",
+      "Whether this build can convert a named encoding, so a start-up check can say so before a program asks",
       "let ok: bool = encoding_known(\"gbk\")\ncall print_text(\"gbk: {ok}\")" },
 };
 

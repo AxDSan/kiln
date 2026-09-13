@@ -88,10 +88,10 @@ typedef struct {
 } DbRows;
 
 /* --- an asynchronous request ---------------------------------------------
- * The game server writes on every kill, pickup, equip, forge and quest, on a
- * 10 Hz tick, and a synchronous `db_query` holds the pump — every other
- * client's frames — until the server answers.  A request is that statement
- * carried to a worker thread instead, so the pump keeps turning and the answer
+ * A program writing on a tick holds the pump with a synchronous `db_query` —
+ * every other event waits — until the server answers.  A request is that
+ * statement carried to a worker thread instead, so the pump keeps turning and
+ * the answer
  * is collected when it is ready.
  *
  * Everything a request owns is PLAIN malloc, and that is a correctness
@@ -987,10 +987,9 @@ void db_result_close(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
 
 /* --- asynchronous requests -------------------------------------------------
  *
- * The game server writes on every kill, pickup, equip, forge and quest, on a
- * 10 Hz tick, and a synchronous `db_query` holds the pump — every other
- * client's frames — until the server answers.  On loopback that is a
- * millisecond and invisible, which is how the 0x2711 timing bug survived every
+ * A program writing on a tick holds the pump with a synchronous `db_query` —
+ * every other event waits — until the server answers.  On loopback that is a
+ * millisecond and invisible, which is how a timing problem survives every
  * local run.  A request is that statement carried to a worker thread instead.
  *
  * **The worker never calls into the runtime.**  No `kn_malloc` (the collector

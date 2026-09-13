@@ -328,10 +328,9 @@ mdbook build docs-site && mkdir -p _site && cp -r docs-site/landing/. _site/ \
 ```
 
 A release touches more than the compiler: the generated reference, the landing
-page's three counts, the counts and unpack lines here, the book's table of
-contents, and the port records that name a state. [`RELEASING.md`](RELEASING.md)
-is the list, in order, and `tools/check-release.sh` is the part of it a script
-can hold to account.
+page's three counts, the counts and unpack lines here, and the book's table of
+contents. [`RELEASING.md`](RELEASING.md) is the list, in order, and
+`tools/check-release.sh` is the part of it a script can hold to account.
 
 ## Licence
 

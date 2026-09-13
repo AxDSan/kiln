@@ -89,3 +89,6 @@ kiln_dotgrid.tga
 /docs-site/book/
 /_site/
 /designer/kiln-designer
+
+# Port records: local notes for work in progress, never a published surface.
+/docs/ports/

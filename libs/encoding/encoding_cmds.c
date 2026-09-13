@@ -1,6 +1,6 @@
-/* The `encoding` library — the client's own text encodings, in and out.
+/* The `encoding` library — the text encodings data files use, in and out.
  *
- * The game client was written for a Chinese market in 2008 and its text is not
+ * These files were written for a Chinese market in 2008, and their text is not
  * UTF-8: tables declare GB2312 over bytes that are really GBK, some files are
  * UTF-16LE, and the item, quest and NPC names the server has to send back are
  * in the same codepage the client reads.  Kiln text is UTF-8, so exactly one
@@ -15,7 +15,7 @@
  * written out here rather than delegated, because each is a byte loop and
  * sending them through two platform APIs would be two more places to be wrong.
  *
- * Two decoders rather than one, and the reason is the port this exists for.
+ * Two decoders rather than one, because a program replacing its own reader
  * The C# server being replaced reads GBK through a `StreamReader`, which
  * REPLACES malformed input with U+FFFD and carries on — so a faithful port has
  * to be able to do the same.  `encoding_decode` is the other half of the pair:
@@ -429,9 +429,8 @@ void encoding_encode(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     /* Validated before it is converted, and for a reason that is not tidiness:
      * a malformed byte here is a caller that handed over bytes which are not
      * text at all — GBK held in a `text`, most likely — and replacing it with
-     * U+FFFD would send the client a name that is quietly wrong.  Refusing says
-     * which byte, and the caller finds out at the call rather than at the
-     * player. */
+     * U+FFFD would send a wrong name quietly.  Refusing says
+     * which byte, and the caller finds out at the call rather than in use. */
     if (!enc_utf8_validate(in, len, &bad_at)) {
         char msg[128];
         snprintf(msg, sizeof msg, "encoding_encode: the text is not UTF-8: byte %d",

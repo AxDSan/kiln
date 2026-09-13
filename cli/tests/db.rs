@@ -2,7 +2,7 @@
 //!
 //! Everything here runs against SQLite's `:memory:`, so the suite needs no
 //! server, no file and no credentials — and every statement it runs is one of
-//! the four the login slice runs, in the shape it runs them. MySQL shares the
+//! the four shapes a request surface needs. MySQL shares the
 //! surface and the parameter path; what it does not share is a machine with a
 //! server on it, so it is exercised by hand rather than here.
 
@@ -46,10 +46,10 @@ fn run(src: &str, tag: &str) -> String {
     String::from_utf8_lossy(&run.stdout).to_string()
 }
 
-/// The four statements the login slice runs, in the shapes it runs them: a
+/// The four statement shapes a request surface needs: a
 /// one-row SELECT with a bound name, an UPDATE, a DELETE and an INSERT.
 #[test]
-fn the_login_statements_run_with_bound_parameters() {
+fn the_four_statement_shapes_run_with_bound_parameters() {
     let out = run(
         r#"module dbslice
 target console
@@ -94,9 +94,9 @@ end
 
 /// The distinction the whole `_n` family exists for: a bound NULL is not an
 /// empty string, and `db_is_null` is the only thing that can tell them apart
-/// afterwards. `AccountRepository.RecordSuccessfulLoginAsync` writes NULL for
-/// an IP the client did not send, so a port that wrote `""` would show a blank
-/// address where the .NET server shows "never".
+/// afterwards. A row inserted with a NULL address is not a row inserted with
+/// an empty one, and a program that wrote `""` for an address it never
+/// received would show a blank where it means "never".
 #[test]
 fn a_bound_null_is_not_an_empty_string() {
     let out = run(
@@ -125,10 +125,10 @@ end
     assert!(out.contains("null_one null=true text=''"), "{out}");
 }
 
-/// What the game-server port needs beyond the login slice, in the shapes it
-/// needs them: a transaction that undoes an INSERT, the id that INSERT
-/// produced, and a double, a bool and a column name read back typed. The
-/// MySQL half of each is `docs/gbo-port-probes/p9_transactions_typed.kiln`.
+/// The shapes a request surface needs beyond a plain query: a transaction that
+/// undoes an INSERT, the id that INSERT produced, and a double, a bool and a
+/// column name read back typed. The MySQL half of each runs against a live
+/// server when one is configured rather than here.
 #[test]
 fn transactions_insert_ids_and_typed_reads() {
     let out = run(

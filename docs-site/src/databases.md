@@ -191,7 +191,7 @@ synchronous call gets one turn, because the statement runs inside it.
 No bulk insert, no connection pool, one connection per handle, and one worker
 thread — two slow statements queue behind each other. The thread is started on
 the first asynchronous call, so a program that never uses one never creates
-one. The surface is the one a login path and a game server's data layer need —
+one. The surface is the one a long-running program's data layer needs —
 SELECT, UPDATE, DELETE and INSERT with bound parameters, transactions around
 them, and the choice of paying for them now or later — and it grows when
 something real needs more, not before.

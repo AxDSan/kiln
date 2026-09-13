@@ -65,8 +65,8 @@ tools/fetch-mbedtls.sh       # optional: https in `net`
 
 A release can leave more stale than the compiler: the generated reference, the
 landing page's three counts, the README's counts and unpack lines, the book's
-`SUMMARY.md`, `limitations.md`, and the port records under `docs/` that name a
-state ("open, deliberately"). [`RELEASING.md`](../RELEASING.md) is that list in
+`SUMMARY.md`, `limitations.md`, and the port records under `docs/ports/` that
+name a state ("open, deliberately") — local notes, untracked and never published. [`RELEASING.md`](../RELEASING.md) is that list in
 order, and `tools/check-release.sh` checks the four of those a script can:
 the README's counts against the toolchain, every `kiln-X.Y.Z-<platform>`
 filename against `Cargo.toml`, every guide page against `SUMMARY.md`, and the
