@@ -68,8 +68,8 @@ Download a release, unpack it anywhere, and run it — there is no installer and
 nothing to configure:
 
 ```sh
-tar xzf kiln-1.3.0-linux-x86_64.tar.gz
-cd kiln-1.3.0-linux-x86_64
+tar xzf kiln-1.3.1-linux-x86_64.tar.gz
+cd kiln-1.3.1-linux-x86_64
 bin/kiln-studio
 ```
 
@@ -268,7 +268,9 @@ From here the promise is ordinary semver, and it is about *your programs*:
   source builds the same x86-64 binary it did, byte for byte. 1.3.0 adds the
   `xml` and `encoding` kits and a second, asynchronous way to run a database
   statement: new commands, no language change, and no structure in the ABI moved
-  or changed value, so a 1.2.0 program compiles unchanged.
+  or changed value, so a 1.2.0 program compiles unchanged. 1.3.1 changes no code
+  at all — only the writing and the handbook inside the bundle — so the same
+  source builds the same binary it did.
 - **`Kiln_*` ABI structures grow at the end only**, and `KILN_ABI_VERSION` says
   when they have. A library compiled against ABI 4 keeps loading.
 - **What is not yet built is not a promise.** The Status section below is the
