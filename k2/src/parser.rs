@@ -250,7 +250,17 @@ impl Parser {
                         while self.peek() != &Tok::RBrace {
                             let n = self.ident()?;
                             if self.eat(&Tok::PlusEq) {
-                                handlers.push((n, self.ident()?));
+                                // a method by name, or a lambda written here
+                                if let Some(l) = self.try_lambda()? {
+                                    match l.kind {
+                                        ExprKind::Lambda(lam) => {
+                                            handlers.push((n, HandlerRef::Lambda(lam)))
+                                        }
+                                        _ => unreachable!(),
+                                    }
+                                } else {
+                                    handlers.push((n, HandlerRef::Method(self.ident()?)));
+                                }
                             } else {
                                 self.expect(&Tok::Eq)?;
                                 cprops.push((n, self.expr()?));

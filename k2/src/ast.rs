@@ -55,8 +55,8 @@ pub struct ComponentDecl {
     /// The component's name in code.
     pub id: String,
     pub properties: Vec<(String, Expr)>,
-    /// `Click += OnAdd`
-    pub handlers: Vec<(String, String)>,
+    /// `Click += OnAdd` or `Click += () => { … }`
+    pub handlers: Vec<(String, HandlerRef)>,
     pub span: Span,
 }
 
@@ -307,6 +307,15 @@ pub enum SwitchPat {
     Relational(BinOp, Expr),
     /// `_`
     Discard,
+}
+
+/// What an event is wired to.
+#[derive(Clone, Debug)]
+pub enum HandlerRef {
+    /// A method of the form, by name.
+    Method(String),
+    /// A lambda written at the wiring site.
+    Lambda(Lambda),
 }
 
 #[derive(Clone, Debug)]

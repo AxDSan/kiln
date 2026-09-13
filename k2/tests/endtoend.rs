@@ -1013,3 +1013,26 @@ public form B { Title = "b"; }
     };
     assert!(err.contains("one form"), "got: {err}");
 }
+
+#[test]
+fn an_event_can_be_wired_to_a_lambda() {
+    // A form's state lives in globals, so a handler lambda that touches it
+    // needs no environment pointer — it binds on the ABI as it stands.
+    let src = r#"
+namespace LH;
+public partial form MainWindow
+{
+    Title = "Lambdas";
+    Label count { Text = "0"; }
+    Button add { Text = "Add"; Click += () => { n = n + 1; count.Text = $"{n}"; }; }
+}
+public partial form MainWindow { int n; }
+"#;
+    let m = kiln_k2::compile(src).unwrap();
+    let ll = kiln_kir::emit::emit(&m);
+    // The lambda became its own handler, bound by address.
+    assert!(ll.contains("ptr @MainWindow_add_click"), "{ll}");
+    // It reaches the form's state and the component directly.
+    assert!(ll.contains("@MainWindow__state_n"), "{ll}");
+    assert!(ll.contains("@MainWindow__count"), "{ll}");
+}

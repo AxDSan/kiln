@@ -1195,12 +1195,58 @@ impl Cx {
                 },
             )));
             for (event, handler) in &c.handlers {
-                let sig = fl
-                    .cx
-                    .methods
-                    .get(&format!("{}.{}", f.name, handler))
-                    .ok_or_else(|| format!("`{handler}` is not a method of `{}`", f.name))?;
-                let target = Expr::FuncPtr(sig.fid);
+                let fid = match handler {
+                    ast::HandlerRef::Method(nm) => {
+                        fl.cx
+                            .methods
+                            .get(&format!("{}.{}", f.name, nm))
+                            .ok_or_else(|| format!("`{nm}` is not a method of `{}`", f.name))?
+                            .fid
+                    }
+                    // A lambda written at the wiring site becomes a handler of
+                    // its own. A form's state lives in globals, so one that
+                    // touches form state needs no environment pointer and binds
+                    // on the ABI as it stands.
+                    ast::HandlerRef::Lambda(lam) => {
+                        if !lam.params.is_empty() {
+                            return Err("an event handler lambda takes no parameters yet".into());
+                        }
+                        let n = fl.cx.b.m.funcs.len();
+                        let sym = format!("{}_{}_{}", f.name, c.id, snake_case(event));
+                        let _ = n;
+                        let hid = fl.cx.b.declare_func(&sym, vec![], TyTable::VOID);
+                        let method = ast::Method {
+                            attrs: Vec::new(),
+                            is_extern: false,
+                            vis: ast::Vis::Private,
+                            is_static: true,
+                            name: sym.clone(),
+                            type_params: Vec::new(),
+                            params: Vec::new(),
+                            ret: ast::TypeRef::Void,
+                            body: match &lam.body {
+                                ast::LambdaBody::Block(b) => b.clone(),
+                                ast::LambdaBody::Expr(e) => vec![ast::Stmt {
+                                    kind: ast::StmtKind::Expr((**e).clone()),
+                                    span: Default::default(),
+                                }],
+                            },
+                            expr_body: None,
+                            doc: None,
+                            span: Default::default(),
+                        };
+                        fl.cx.pending.push(Pending {
+                            fid: hid,
+                            method,
+                            tvars: HashMap::new(),
+                            this: false,
+                            env: None,
+                            ctor: None,
+                        });
+                        hid
+                    }
+                };
+                let target = Expr::FuncPtr(fid);
                 fl.push(Stmt::Expr(ui_call(
                     "kn_ui_on",
                     vec![Expr::Global(g), Expr::Str(snake_case(event)), target],
