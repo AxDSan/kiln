@@ -301,3 +301,109 @@ end
     );
     assert!(out.starts_with("0\n10006"), "{out}");
 }
+
+
+/// The reason the asynchronous surface exists, asserted rather than described:
+/// a statement that takes a while must not stop the event loop.
+///
+/// The proof is the tick count. The program queues a query that takes a few
+/// hundred milliseconds, and the timer keeps firing — 39 times over a 780 ms
+/// statement in the probe this was written from. Were the call synchronous the
+/// count would be one: the statement would have run inside the same turn of the
+/// loop that asked for it, and the timer would not have had a turn.
+#[test]
+fn a_slow_statement_does_not_hold_the_event_loop() {
+    let out = run(
+        r#"module dbasync
+target console
+use db
+
+var conn: int = 0
+var job: int = 0
+var claimed: bool = false
+
+timer poller
+  interval = 10
+  on tick: on_tick
+end
+
+sub main
+  conn = db_open("sqlite::memory:")
+  job = db_query_async(conn, "with recursive c(i) as (select 1 union all select i+1 from c where i < 400000) select count(*) from c", [])
+
+  if job = 0
+    call print_text("submit failed: {last_error_text()}")
+    call quit()
+    return
+  end
+
+  let early: bool = db_req_ready(job)
+  call print_text("finished before the first turn of the loop: {early}")
+
+  # The connection belongs to the worker until the answer is claimed, and the
+  # synchronous surface says so rather than racing it.
+  let refused: int = db_exec(conn, "insert into t values (1)", [])
+  call print_text("synchronous use while in flight -> {refused}")
+  call print_text(last_error_text())
+end
+
+sub on_tick(n: int)
+  if claimed
+    return
+  end
+  if db_req_ready(job) = false
+    return
+  end
+
+  claimed = true
+  let rows: int = db_req_rows(job)
+  let cols: int = db_req_columns(job)
+  let cell: text = db_req_text(job, 1, 1)
+  call print_text("ticks {n} rows {rows} cols {cols} cell {cell}")
+  call print_text("error '{db_req_error(job)}' freed {db_req_free(job)}")
+  call quit()
+end
+"#,
+        "async",
+    );
+
+    let mut ticks = 0;
+    let mut cell = String::new();
+    let mut early = true;
+    let mut error = String::new();
+
+    for line in out.lines() {
+        if let Some(rest) = line.strip_prefix("finished before the first turn of the loop: ") {
+            early = rest == "true";
+        }
+        if let Some(rest) = line.strip_prefix("ticks ") {
+            let mut it = rest.split(' ');
+            ticks = it.next().unwrap().parse().expect("a tick count");
+            while let Some(word) = it.next() {
+                if let Some(v) = word.strip_prefix("cell") {
+                    cell = v.to_string();
+                }
+                if let Some(_) = word.strip_prefix("cell") {
+                    if let Some(c) = it.next() {
+                        cell = c.to_string();
+                    }
+                }
+            }
+        }
+        if let Some(rest) = line.strip_prefix("error '") {
+            error = rest.to_string();
+        }
+    }
+
+    assert!(!early, "the query answered before the loop started, so nothing was proven");
+    assert_eq!(cell, "400000", "the collected cell was wrong:\n{out}");
+    assert!(
+        ticks >= 3,
+        "the loop only had {ticks} turn(s) while the statement ran, so it was held:\n{out}"
+    );
+    assert!(error.starts_with("' freed true"), "the request was not freed: {out}");
+    assert!(
+        out.contains("asynchronous request in flight"),
+        "a synchronous call was allowed on a busy connection:\n{out}"
+    );
+}

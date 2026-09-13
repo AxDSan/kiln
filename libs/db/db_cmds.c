@@ -66,6 +66,7 @@ typedef struct {
     MYSQL   *my;
 #endif
     int in_tx;               /* between db_begin and its commit or rollback  */
+    int in_flight;           /* asynchronous requests the worker is running   */
     int64_t last_insert;     /* MySQL: the last statement's AUTO_INCREMENT id;
                                 SQLite asks the connection at read time      */
 } DbConn;
@@ -85,6 +86,78 @@ typedef struct {
 #endif
     int done;                /* the last `db_next` fell off the end         */
 } DbRows;
+
+/* --- an asynchronous request ---------------------------------------------
+ * The game server writes on every kill, pickup, equip, forge and quest, on a
+ * 10 Hz tick, and a synchronous `db_query` holds the pump — every other
+ * client's frames — until the server answers.  A request is that statement
+ * carried to a worker thread instead, so the pump keeps turning and the answer
+ * is collected when it is ready.
+ *
+ * Everything a request owns is PLAIN malloc, and that is a correctness
+ * requirement rather than a taste: `kn_malloc` belongs to the runtime, whose
+ * collector traces the program's stack, and neither is safe to touch from
+ * another thread.  The worker never calls into the runtime at all — the result
+ * handle, if any, is built by the program when it claims the answer. */
+typedef struct DbReq {
+    struct DbReq *next;      /* the queue, and the live list                  */
+    DbConn       *conn;
+    int32_t       handle;    /* the request's own handle, for in-flight count */
+    int           is_query;
+    char         *sql;       /* malloc'd copies: the worker owns these        */
+    void         *params;    /* an ABI-shaped array of malloc'd strings       */
+    void         *nulls;     /* ditto, or NULL                                */
+    volatile int  state;     /* DB_REQ_*; the only field both threads touch   */
+    int32_t       rows;      /* rows affected, or rows in the set             */
+    int32_t       columns;
+    char        **cells;     /* rows * columns; NULL cell means SQL NULL      */
+    int32_t       error_code;
+    char         *error;     /* the failure text, or NULL                     */
+} DbReq;
+
+enum { DB_REQ_PENDING = 0, DB_REQ_READY = 1 };
+
+/* Which request the driver code below is running for, if it is running for one.
+ * Thread-local, because the program's own thread may be failing a statement on
+ * one connection while the worker fails one on another. */
+static _Thread_local DbReq *g_req = NULL;
+
+static char *db_strdup(const char *s) {
+    if (!s) return NULL;
+    size_t n = strlen(s);
+    char *o = (char *)malloc(n + 1);
+    if (o) memcpy(o, s, n + 1);
+    return o;
+}
+
+/* Where a failure goes.  The bodies further down are shared by the program's
+ * own thread and by the worker, and `kn_error_set` is the runtime's — writing
+ * it from the worker would race the program for one slot.  While a request is
+ * running the message is attached to it instead, and read back with
+ * `db_req_error`. */
+static void db_fail(int32_t code, const char *msg) {
+    if (g_req) {
+        if (!g_req->error) g_req->error = db_strdup(msg);
+        g_req->error_code = code;
+        return;
+    }
+    kn_error_set(code, msg);
+}
+
+/* A connection with a request in flight is the worker's until the program
+ * claims the answer.  Two threads on one connection is not a race to be
+ * survived: it is a crash in the MySQL client and a corrupt statement in
+ * SQLite, so the second user is refused by name. */
+/* The success half of the same rule: the worker must not clear the runtime's
+ * error slot either. */
+static void db_ok(void) { if (!g_req) kn_error_clear(); }
+
+static int32_t db_busy(void) {
+    db_fail(KN_ERR_INVALID_ARG,
+                 "this connection has an asynchronous request in flight; wait for it "
+                 "(db_req_ready) before using the connection again");
+    return -1;
+}
 
 /* --- small helpers -------------------------------------------------------- */
 
@@ -306,7 +379,18 @@ void db_open(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
 /* db_close(h) -> bool */
 void db_close(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
-    kn_ret_bool(ret, kn_handle_close(kn_arg_int(argv, 0), KN_HK_DB));
+    /* A connection is not closed under a request the worker is still running:
+     * the worker holds the connection itself, so freeing it here is a
+     * use-after-free in the driver rather than a failed call. */
+    const int32_t h = kn_arg_int(argv, 0);
+    DbConn *c = (DbConn *)kn_handle_resolve(h, KN_HK_DB);
+    if (c && c->in_flight > 0) {
+        kn_error_set(KN_ERR_INVALID_ARG,
+                     "db_close: this connection has an asynchronous request in flight");
+        kn_ret_bool(ret, 0);
+        return;
+    }
+    kn_ret_bool(ret, kn_handle_close(h, KN_HK_DB));
 }
 
 #ifdef KILN_DB
@@ -314,16 +398,13 @@ void db_close(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
  * how many rows it changed. -1 on any failure, with the driver's own message
  * in the slot — a SQL error the program cannot see is a program that reports
  * "0 rows" for a typo. */
-static int32_t db_exec_impl(int32_t h, const char *sql, void *params, void *nulls) {
-    DbConn *c = (DbConn *)kn_handle_resolve(h, KN_HK_DB);
-    if (!c) return -1;
-
+static int32_t db_exec_conn(DbConn *c, const char *sql, void *params, void *nulls) {
     if (c->backend == DB_SQLITE) {
         sqlite3_stmt *st = NULL;
         if (sqlite3_prepare_v2(c->lite, sql, -1, &st, NULL) != SQLITE_OK) {
             char msg[512];
             snprintf(msg, sizeof msg, "sqlite: %s", sqlite3_errmsg(c->lite));
-            kn_error_set(KN_ERR_INVALID_ARG, msg);
+            db_fail(KN_ERR_INVALID_ARG, msg);
             return -1;
         }
         if (!db_bind_sqlite(st, params, nulls)) { sqlite3_finalize(st); return -1; }
@@ -331,25 +412,25 @@ static int32_t db_exec_impl(int32_t h, const char *sql, void *params, void *null
         if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
             char msg[512];
             snprintf(msg, sizeof msg, "sqlite: %s", sqlite3_errmsg(c->lite));
-            kn_error_set(KN_ERR_INVALID_ARG, msg);
+            db_fail(KN_ERR_INVALID_ARG, msg);
             sqlite3_finalize(st);
             return -1;
         }
         const int32_t changed = (int32_t)sqlite3_changes(c->lite);
         sqlite3_finalize(st);
-        kn_error_clear();
+        db_ok();
         return changed;
     }
 
     MYSQL_STMT *st = mysql_stmt_init(c->my);
     if (!st) {
-        kn_error_set(KN_ERR_TABLE_FULL, "out of memory preparing a statement");
+        db_fail(KN_ERR_TABLE_FULL, "out of memory preparing a statement");
         return -1;
     }
     if (mysql_stmt_prepare(st, sql, (unsigned long)strlen(sql)) != 0) {
         char msg[512];
         snprintf(msg, sizeof msg, "mysql: %s", mysql_stmt_error(st));
-        kn_error_set(KN_ERR_INVALID_ARG, msg);
+        db_fail(KN_ERR_INVALID_ARG, msg);
         mysql_stmt_close(st);
         return -1;
     }
@@ -360,7 +441,7 @@ static int32_t db_exec_impl(int32_t h, const char *sql, void *params, void *null
     if (n && (!b || !lens || !isnull)) {
         free(b); free(lens); free(isnull);
         mysql_stmt_close(st);
-        kn_error_set(KN_ERR_TABLE_FULL, "out of memory binding parameters");
+        db_fail(KN_ERR_TABLE_FULL, "out of memory binding parameters");
         return -1;
     }
     db_bind_mysql(b, lens, isnull, params, nulls);
@@ -368,11 +449,11 @@ static int32_t db_exec_impl(int32_t h, const char *sql, void *params, void *null
     if (n && mysql_stmt_bind_param(st, b) != 0) {
         char msg[512];
         snprintf(msg, sizeof msg, "mysql: %s", mysql_stmt_error(st));
-        kn_error_set(KN_ERR_INVALID_ARG, msg);
+        db_fail(KN_ERR_INVALID_ARG, msg);
     } else if (mysql_stmt_execute(st) != 0) {
         char msg[512];
         snprintf(msg, sizeof msg, "mysql: %s", mysql_stmt_error(st));
-        kn_error_set(KN_ERR_INVALID_ARG, msg);
+        db_fail(KN_ERR_INVALID_ARG, msg);
     } else {
         changed = (int32_t)mysql_stmt_affected_rows(st);
         /* MySQL's own LAST_INSERT_ID() keeps its value across statements that
@@ -380,21 +461,19 @@ static int32_t db_exec_impl(int32_t h, const char *sql, void *params, void *null
          * that overwrites the last one. */
         const my_ulonglong id = mysql_stmt_insert_id(st);
         if (id != 0) c->last_insert = (int64_t)id;
-        kn_error_clear();
+        db_ok();
     }
     free(b); free(lens); free(isnull);
     mysql_stmt_close(st);
     return changed;
 }
 
-/* The shared body of `db_query` and `db_query_n`. */
-static int32_t db_query_impl(int32_t h, const char *sql, void *params, void *nulls) {
-    DbConn *c = (DbConn *)kn_handle_resolve(h, KN_HK_DB);
-    if (!c) return 0;
-
+/* The shared body of `db_query` and `db_query_n`, and of an asynchronous
+ * query: it takes the connection directly so the worker can run it too. */
+static DbRows *db_query_rows(DbConn *c, const char *sql, void *params, void *nulls) {
     DbRows *rows = (DbRows *)calloc(1, sizeof *rows);
     if (!rows) {
-        kn_error_set(KN_ERR_TABLE_FULL, "out of memory starting a query");
+        db_fail(KN_ERR_TABLE_FULL, "out of memory starting a query");
         return 0;
     }
     rows->backend = c->backend;
@@ -403,7 +482,7 @@ static int32_t db_query_impl(int32_t h, const char *sql, void *params, void *nul
         if (sqlite3_prepare_v2(c->lite, sql, -1, &rows->lite, NULL) != SQLITE_OK) {
             char msg[512];
             snprintf(msg, sizeof msg, "sqlite: %s", sqlite3_errmsg(c->lite));
-            kn_error_set(KN_ERR_INVALID_ARG, msg);
+            db_fail(KN_ERR_INVALID_ARG, msg);
             free(rows);
             return 0;
         }
@@ -432,7 +511,7 @@ static int32_t db_query_impl(int32_t h, const char *sql, void *params, void *nul
         }
         stmt = (char *)malloc(cap);
         if (!stmt) {
-            kn_error_set(KN_ERR_TABLE_FULL, "out of memory building a query");
+            db_fail(KN_ERR_TABLE_FULL, "out of memory building a query");
             free(rows);
             return 0;
         }
@@ -457,7 +536,7 @@ static int32_t db_query_impl(int32_t h, const char *sql, void *params, void *nul
         if (rc != 0) {
             char msg[512];
             snprintf(msg, sizeof msg, "mysql: %s", mysql_error(c->my));
-            kn_error_set(KN_ERR_INVALID_ARG, msg);
+            db_fail(KN_ERR_INVALID_ARG, msg);
             free(rows);
             return 0;
         }
@@ -466,20 +545,43 @@ static int32_t db_query_impl(int32_t h, const char *sql, void *params, void *nul
             char msg[512];
             snprintf(msg, sizeof msg, "mysql: %s",
                      mysql_errno(c->my) ? mysql_error(c->my) : "the statement returned no rows");
-            kn_error_set(KN_ERR_INVALID_ARG, msg);
+            db_fail(KN_ERR_INVALID_ARG, msg);
             free(rows);
             return 0;
         }
         rows->columns = (int32_t)mysql_num_fields(rows->my);
     }
 
+    db_ok();
+    return rows;
+}
+
+/* The command's half of a query: resolve the handle, run the shared body, and
+ * give the result set a handle of its own. */
+static int32_t db_query_impl(int32_t h, const char *sql, void *params, void *nulls) {
+    DbConn *c = (DbConn *)kn_handle_resolve(h, KN_HK_DB);
+    if (!c) return 0;
+    if (c->in_flight > 0) { db_busy(); return 0; }
+    DbRows *rows = db_query_rows(c, sql, params, nulls);
+    if (!rows) return 0;
     const int32_t rh = kn_handle_new(KN_HK_DB_ROWS, rows, db_close_rows);
     if (rh == 0) {
         db_close_rows(rows);
         return 0;
     }
-    kn_error_clear();
+    db_ok();
     return rh;
+}
+
+/* The command's half of an execute. */
+static int32_t db_exec_impl(int32_t h, const char *sql, void *params, void *nulls) {
+    DbConn *c = (DbConn *)kn_handle_resolve(h, KN_HK_DB);
+    if (!c) return -1;
+    /* The connection is the worker's while a request is in flight: two threads
+     * on one connection is a crash in the MySQL client and a corrupt statement
+     * in SQLite, not a race to be survived. */
+    if (c->in_flight > 0) return db_busy();
+    return db_exec_conn(c, sql, params, nulls);
 }
 #endif /* KILN_DB */
 
@@ -532,6 +634,36 @@ void db_query_n(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
 #endif
 }
 
+#ifdef KILN_DB
+/* One step of a result set: 1 when a row is current, 0 at the end or on a
+ * failure — which `db_fail` has already reported.  Shared by the command above
+ * and by the worker, so an asynchronous query walks its rows through exactly
+ * the code a synchronous one does. */
+static int db_rows_next(DbRows *r) {
+    if (r->done) return 0;
+
+    if (r->backend == DB_SQLITE) {
+        const int rc = sqlite3_step(r->lite);
+        if (rc == SQLITE_ROW) return 1;
+        r->done = 1;
+        if (rc != SQLITE_DONE) {
+            db_fail(KN_ERR_INVALID_ARG, "sqlite: the query failed part way through");
+            return 0;
+        }
+        return 0;
+    }
+
+    r->row = mysql_fetch_row(r->my);
+    if (!r->row) {
+        r->done = 1;
+        r->lengths = NULL;
+        return 0;
+    }
+    r->lengths = mysql_fetch_lengths(r->my);
+    return 1;
+}
+#endif
+
 /* db_next(r) -> bool: advance to the next row. False at the end, with the slot
  * clear — the end of a result is not a failure. False with a code set is. */
 void db_next(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
@@ -542,33 +674,9 @@ void db_next(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
 #else
     DbRows *r = (DbRows *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_DB_ROWS);
     if (!r) { kn_ret_bool(ret, 0); return; }
-    if (r->done) { kn_error_clear(); kn_ret_bool(ret, 0); return; }
-
-    if (r->backend == DB_SQLITE) {
-        const int rc = sqlite3_step(r->lite);
-        if (rc == SQLITE_ROW) { kn_error_clear(); kn_ret_bool(ret, 1); return; }
-        r->done = 1;
-        if (rc != SQLITE_DONE) {
-            kn_error_set(KN_ERR_INVALID_ARG, "sqlite: the query failed part way through");
-            kn_ret_bool(ret, 0);
-            return;
-        }
-        kn_error_clear();
-        kn_ret_bool(ret, 0);
-        return;
-    }
-
-    r->row = mysql_fetch_row(r->my);
-    if (!r->row) {
-        r->done = 1;
-        r->lengths = NULL;
-        kn_error_clear();
-        kn_ret_bool(ret, 0);
-        return;
-    }
-    r->lengths = mysql_fetch_lengths(r->my);
-    kn_error_clear();
-    kn_ret_bool(ret, 1);
+    const int got = db_rows_next(r);
+    if (got) kn_error_clear();
+    kn_ret_bool(ret, got);
 #endif
 }
 
@@ -701,6 +809,10 @@ static int db_tx_fail(DbConn *c, const char *what) {
  * a bug, and SQLite would say so while MySQL would not. */
 void db_begin(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
+    {
+        DbConn *busy = (DbConn *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_DB);
+        if (busy && busy->in_flight > 0) { db_busy(); kn_ret_bool(ret, 0); return; }
+    }
 #ifndef KILN_DB
     db_unsupported();
     kn_ret_bool(ret, 0);
@@ -730,6 +842,10 @@ void db_begin(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
 
 #ifdef KILN_DB
 static void db_tx_end(Kiln_Slot *ret, Kiln_Slot *argv, int commit) {
+    {
+        DbConn *busy = (DbConn *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_DB);
+        if (busy && busy->in_flight > 0) { db_busy(); kn_ret_bool(ret, 0); return; }
+    }
     DbConn *c = (DbConn *)kn_handle_resolve(kn_arg_int(argv, 0), KN_HK_DB);
     if (!c) { kn_ret_bool(ret, 0); return; }
     if (!c->in_tx) {
@@ -866,4 +982,460 @@ void db_column_name(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
 void db_result_close(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
     (void)argc;
     kn_ret_bool(ret, kn_handle_close(kn_arg_int(argv, 0), KN_HK_DB_ROWS));
+}
+
+
+/* --- asynchronous requests -------------------------------------------------
+ *
+ * The game server writes on every kill, pickup, equip, forge and quest, on a
+ * 10 Hz tick, and a synchronous `db_query` holds the pump — every other
+ * client's frames — until the server answers.  On loopback that is a
+ * millisecond and invisible, which is how the 0x2711 timing bug survived every
+ * local run.  A request is that statement carried to a worker thread instead.
+ *
+ * **The worker never calls into the runtime.**  No `kn_malloc` (the collector
+ * traces the program's stack), no `kn_error_set` (one slot, two writers), no
+ * `kn_handle_new` (the handle table).  Everything a request owns is plain
+ * malloc, and every handle a program sees is built by the program, on its own
+ * thread, when it claims the answer.  That is the whole reason this is shaped
+ * the way it is, and it is why `db_fail` and `db_ok` exist above.
+ *
+ * A connection with a request in flight is the worker's.  The synchronous
+ * surface refuses to use it until the answer is claimed — two threads on one
+ * connection is a crash in the MySQL client and a corrupt statement in SQLite,
+ * not a race to be survived — and `db_close` refuses too.
+ *
+ * The program drives it with a timer:
+ *
+ *     on_tick
+ *       if db_req_ready(job)
+ *         while db_req_rows(job) ... db_req_text(job, r, c) ...
+ *         call db_req_free(job)
+ *       end
+ *     end
+ */
+
+#ifdef KILN_DB
+
+/* --- the thread shim ------------------------------------------------------
+ * One place knows the platform; the queue below reads the same on both. */
+#ifdef _WIN32
+#include <windows.h>
+
+static INIT_ONCE  g_once  = INIT_ONCE_STATIC_INIT;
+static CRITICAL_SECTION g_cs;
+static CONDITION_VARIABLE g_wake;
+static HANDLE g_thread = NULL;
+static int g_ready = 0;
+
+static BOOL CALLBACK db_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
+    (void)once; (void)param; (void)ctx;
+    InitializeCriticalSection(&g_cs);
+    InitializeConditionVariable(&g_wake);
+    g_ready = 1;
+    return TRUE;
+}
+static void db_shim_init(void) { InitOnceExecuteOnce(&g_once, db_once, NULL, NULL); }
+static void db_lock(void) { EnterCriticalSection(&g_cs); }
+static void db_unlock(void) { LeaveCriticalSection(&g_cs); }
+static void db_signal(void) { WakeConditionVariable(&g_wake); }
+static void db_wait(void) { SleepConditionVariableCS(&g_wake, &g_cs, INFINITE); }
+static void db_thread_start(void);
+static DWORD WINAPI db_thread_body(LPVOID arg);
+#else
+#include <pthread.h>
+
+static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  g_wake = PTHREAD_COND_INITIALIZER;
+static pthread_t       g_thread;
+static int g_ready = 1;
+
+static void db_shim_init(void) { /* statically initialised on POSIX */ }
+static void db_lock(void) { pthread_mutex_lock(&g_lock); }
+static void db_unlock(void) { pthread_mutex_unlock(&g_lock); }
+static void db_signal(void) { pthread_cond_signal(&g_wake); }
+static void db_wait(void) { pthread_cond_wait(&g_wake, &g_lock); }
+static void db_thread_start(void);
+static void *db_thread_body(void *arg);
+#endif
+
+static void db_worker_loop(void);
+static void db_run(DbReq *r);
+
+/* --- what a request owns -------------------------------------------------- */
+
+/* A copy of a parameter list in the ABI's own array layout, so the binding code
+ * below is the code the synchronous path runs: it reads `len` and `elems` and
+ * nothing else, and the strings are ours.  That is the whole trick — it is a
+ * lookalike built with plain malloc, not a runtime array. */
+static void *db_copy_array(void *src, int as_text) {
+    const int32_t n = src ? db_ary_len(src) : 0;
+    if (n <= 0) return NULL;
+    Kiln_Array *a = (Kiln_Array *)malloc(sizeof(Kiln_Array) + (size_t)n * sizeof(int64_t));
+    if (!a) return NULL;
+    a->elem_tag = KN_SDT_TEXT;
+    a->len = n;
+    a->cap = n;
+    a->_pad = 0;
+    int64_t *elems = (int64_t *)(a + 1);
+    for (int32_t i = 1; i <= n; i++) {
+        if (as_text) {
+            const char *v = (const char *)(intptr_t)db_ary_at(src, i);
+            elems[i - 1] = (int64_t)(intptr_t)db_strdup(v ? v : "");
+        } else {
+            elems[i - 1] = db_ary_at(src, i) ? 1 : 0;
+        }
+    }
+    return a;
+}
+
+static void db_free_array(void *p, int as_text) {
+    if (!p) return;
+    Kiln_Array *a = (Kiln_Array *)p;
+    if (as_text) {
+        int64_t *elems = (int64_t *)(a + 1);
+        for (int32_t i = 0; i < a->len; i++) free((void *)(intptr_t)elems[i]);
+    }
+    free(a);
+}
+
+static void db_req_release(DbReq *r) {
+    if (!r) return;
+    free(r->sql);
+    db_free_array(r->params, 1);
+    db_free_array(r->nulls, 0);
+    if (r->cells) {
+        for (int32_t i = 0; i < r->rows * r->columns; i++) free(r->cells[i]);
+        free(r->cells);
+    }
+    free(r->error);
+    free(r);
+}
+
+/* The handle's close function.  A request the worker is still running is left
+ * alone rather than freed under it: the leak is one struct at exit, and the
+ * alternative is the worker writing into freed memory. */
+static void db_close_req(void *payload) {
+    DbReq *r = (DbReq *)payload;
+    if (!r || r->state != DB_REQ_READY) return;
+    db_req_release(r);
+}
+
+/* --- the worker ----------------------------------------------------------- */
+
+static int      g_stop = 0;
+static int      g_started = 0;
+static DbReq   *g_queue_head = NULL;
+static DbReq   *g_queue_tail = NULL;
+
+static void db_run(DbReq *r) {
+    g_req = r;
+    if (r->is_query) {
+        DbRows *rows = db_query_rows(r->conn, r->sql, r->params, r->nulls);
+        if (!rows) { g_req = NULL; return; }        /* the message is on the request */
+        r->columns = rows->columns;
+        int32_t cap = 0;
+        while (db_rows_next(rows)) {
+            if (r->rows == cap) {
+                const int32_t ncap = cap ? cap * 2 : 16;
+                char **g = (char **)realloc(r->cells,
+                                            (size_t)ncap * (size_t)rows->columns * sizeof(char *));
+                if (!g) { db_fail(KN_ERR_TABLE_FULL, "out of memory collecting a result set"); break; }
+                r->cells = g;
+                cap = ncap;
+            }
+            /* Copied now: a driver's buffers are its own and are gone the
+             * moment the result set is closed — and the program reads this on
+             * another thread anyway.  A NULL cell is SQL NULL, which is a
+             * different value from an empty string. */
+            for (int32_t c = 1; c <= rows->columns; c++) {
+                size_t n = 0;
+                int bad = 0;
+                const char *v = db_cell(rows, c, &n, &bad);
+                char *copy = NULL;
+                if (v && !bad) {
+                    copy = (char *)malloc(n + 1);
+                    if (copy) { memcpy(copy, v, n); copy[n] = '\0'; }
+                }
+                r->cells[(size_t)r->rows * (size_t)rows->columns + (size_t)(c - 1)] = copy;
+            }
+            r->rows++;
+        }
+        db_close_rows(rows);
+    } else {
+        r->rows = db_exec_conn(r->conn, r->sql, r->params, r->nulls);
+    }
+    g_req = NULL;
+}
+
+static void db_worker_loop(void) {
+    for (;;) {
+        db_lock();
+        while (!g_queue_head && !g_stop) db_wait();
+        DbReq *r = g_queue_head;
+        if (r) {
+            g_queue_head = r->next;
+            if (!g_queue_head) g_queue_tail = NULL;
+            r->next = NULL;
+        }
+        const int stopping = g_stop;
+        db_unlock();
+
+        if (!r) { if (stopping) break; continue; }
+
+        db_run(r);
+
+        db_lock();
+        r->state = DB_REQ_READY;
+        if (r->conn) r->conn->in_flight--;
+        db_unlock();
+    }
+}
+
+#ifndef _WIN32
+static void *db_thread_body(void *arg) { (void)arg; db_worker_loop(); return NULL; }
+static void db_thread_start(void) { pthread_create(&g_thread, NULL, db_thread_body, NULL); }
+#else
+static DWORD WINAPI db_thread_body(LPVOID arg) { (void)arg; db_worker_loop(); return 0; }
+static void db_thread_start(void) { g_thread = CreateThread(NULL, 0, db_thread_body, NULL, 0, NULL); }
+#endif
+
+/* --- submitting ----------------------------------------------------------- */
+
+static int32_t db_submit(int32_t h, const char *sql, void *params, void *nulls, int is_query) {
+    DbConn *c = (DbConn *)kn_handle_resolve(h, KN_HK_DB);
+    if (!c) return 0;
+
+    DbReq *r = (DbReq *)calloc(1, sizeof *r);
+    if (!r) {
+        kn_error_set(KN_ERR_TABLE_FULL, "out of memory queueing a statement");
+        return 0;
+    }
+    r->conn = c;
+    r->is_query = is_query;
+    r->sql = db_strdup(db_nz(sql));
+    r->params = db_copy_array(params, 1);
+    r->nulls = db_copy_array(nulls, 0);
+    if (!r->sql || (params && db_ary_len(params) > 0 && !r->params)) {
+        db_req_release(r);
+        kn_error_set(KN_ERR_TABLE_FULL, "out of memory copying a statement");
+        return 0;
+    }
+
+    const int32_t rh = kn_handle_new(KN_HK_DB_REQ, r, db_close_req);
+    if (rh == 0) { db_req_release(r); return 0; }
+    r->handle = rh;
+
+    db_shim_init();
+    if (!g_ready && !g_started) { db_req_release(r); kn_handle_close(rh, KN_HK_DB_REQ); return 0; }
+    db_lock();
+    if (!g_started) { db_thread_start(); g_started = 1; }
+    c->in_flight++;
+    if (g_queue_tail) g_queue_tail->next = r; else g_queue_head = r;
+    g_queue_tail = r;
+    db_signal();
+    db_unlock();
+
+    kn_error_clear();
+    return rh;
+}
+
+/* The reading side's shared first step: the request, and whether it is done. */
+static DbReq *db_req_of(int32_t req, const char *cmd, int need_ready) {
+    DbReq *r = (DbReq *)kn_handle_resolve(req, KN_HK_DB_REQ);
+    if (!r) return NULL;
+    if (need_ready && r->state != DB_REQ_READY) {
+        char msg[128];
+        snprintf(msg, sizeof msg, "%s: the request has not finished; poll db_req_ready", cmd);
+        kn_error_set(KN_ERR_INVALID_ARG, msg);
+        return NULL;
+    }
+    return r;
+}
+
+#endif /* KILN_DB */
+
+/* --- the commands --------------------------------------------------------- */
+
+/* db_exec_async(h, sql, params) -> int : a request id, or 0 with the reason in
+ * the slot.  The connection is the worker's until the answer is claimed. */
+void db_exec_async(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_int(ret, 0);
+#else
+    kn_ret_int(ret, db_submit(kn_arg_int(argv, 0), db_nz(kn_arg_text(argv, 1)),
+                              kn_arg_ptr(argv, 2), NULL, 0));
+#endif
+}
+
+/* db_exec_async_n(h, sql, params, nulls) -> int */
+void db_exec_async_n(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_int(ret, 0);
+#else
+    kn_ret_int(ret, db_submit(kn_arg_int(argv, 0), db_nz(kn_arg_text(argv, 1)),
+                              kn_arg_ptr(argv, 2), kn_arg_ptr(argv, 3), 0));
+#endif
+}
+
+/* db_query_async(h, sql, params) -> int */
+void db_query_async(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_int(ret, 0);
+#else
+    kn_ret_int(ret, db_submit(kn_arg_int(argv, 0), db_nz(kn_arg_text(argv, 1)),
+                              kn_arg_ptr(argv, 2), NULL, 1));
+#endif
+}
+
+/* db_query_async_n(h, sql, params, nulls) -> int */
+void db_query_async_n(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_int(ret, 0);
+#else
+    kn_ret_int(ret, db_submit(kn_arg_int(argv, 0), db_nz(kn_arg_text(argv, 1)),
+                              kn_arg_ptr(argv, 2), kn_arg_ptr(argv, 3), 1));
+#endif
+}
+
+/* db_req_ready(req) -> bool : false while it is still running, and false with
+ * a code set when the handle is not one. */
+void db_req_ready(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_bool(ret, 0);
+#else
+    DbReq *r = db_req_of(kn_arg_int(argv, 0), "db_req_ready", 0);
+    if (!r) { kn_ret_bool(ret, 0); return; }
+    kn_error_clear();
+    kn_ret_bool(ret, r->state == DB_REQ_READY);
+#endif
+}
+
+/* db_req_rows(req) -> int : rows changed by an execute, rows in the set for a
+ * query, and -1 when it failed — db_req_error says why. */
+void db_req_rows(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_int(ret, -1);
+#else
+    DbReq *r = db_req_of(kn_arg_int(argv, 0), "db_req_rows", 1);
+    if (!r) { kn_ret_int(ret, -1); return; }
+    if (r->error) {
+        kn_error_set(r->error_code, r->error);
+        kn_ret_int(ret, -1);
+        return;
+    }
+    kn_error_clear();
+    kn_ret_int(ret, r->rows);
+#endif
+}
+
+void db_req_columns(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_int(ret, -1);
+#else
+    DbReq *r = db_req_of(kn_arg_int(argv, 0), "db_req_columns", 1);
+    if (!r) { kn_ret_int(ret, -1); return; }
+    if (r->error) {
+        kn_error_set(r->error_code, r->error);
+        kn_ret_int(ret, -1);
+        return;
+    }
+    kn_error_clear();
+    kn_ret_int(ret, r->columns);
+#endif
+}
+
+/* db_req_text(req, row, column) -> text : a cell of the collected set, "" for
+ * SQL NULL, and "" with a code set for a row or column that is not there. */
+void db_req_text(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_text(ret, kn_empty_text());
+#else
+    DbReq *r = db_req_of(kn_arg_int(argv, 0), "db_req_text", 1);
+    if (!r) { kn_ret_text(ret, kn_empty_text()); return; }
+    const int32_t row = kn_arg_int(argv, 1), col = kn_arg_int(argv, 2);
+    if (row < 1 || row > r->rows || col < 1 || col > r->columns) {
+        kn_error_set(KN_ERR_OUT_OF_RANGE,
+                     "db_req_text: no such cell — rows and columns count from 1");
+        kn_ret_text(ret, kn_empty_text());
+        return;
+    }
+    const char *v = r->cells[(size_t)(row - 1) * (size_t)r->columns + (size_t)(col - 1)];
+    kn_error_clear();
+    kn_ret_text(ret, v ? db_text(v) : kn_empty_text());
+#endif
+}
+
+/* db_req_is_null(req, row, column) -> bool : what separates a NULL cell from
+ * an empty one. */
+void db_req_is_null(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_bool(ret, 0);
+#else
+    DbReq *r = db_req_of(kn_arg_int(argv, 0), "db_req_is_null", 1);
+    if (!r) { kn_ret_bool(ret, 0); return; }
+    const int32_t row = kn_arg_int(argv, 1), col = kn_arg_int(argv, 2);
+    if (row < 1 || row > r->rows || col < 1 || col > r->columns) {
+        kn_error_set(KN_ERR_OUT_OF_RANGE,
+                     "db_req_is_null: no such cell — rows and columns count from 1");
+        kn_ret_bool(ret, 0);
+        return;
+    }
+    const char *v = r->cells[(size_t)(row - 1) * (size_t)r->columns + (size_t)(col - 1)];
+    kn_error_clear();
+    kn_ret_bool(ret, v == NULL);
+#endif
+}
+
+/* db_req_error(req) -> text : "" when the statement succeeded. */
+void db_req_error(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_text(ret, kn_empty_text());
+#else
+    DbReq *r = db_req_of(kn_arg_int(argv, 0), "db_req_error", 1);
+    if (!r) { kn_ret_text(ret, kn_empty_text()); return; }
+    kn_error_clear();
+    kn_ret_text(ret, r->error ? db_text(r->error) : kn_empty_text());
+#endif
+}
+
+/* db_req_free(req) -> bool : the answer is released.  Refused while the request
+ * is still running, because the worker owns it until then. */
+void db_req_free(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+#ifndef KILN_DB
+    db_unsupported();
+    kn_ret_bool(ret, 0);
+#else
+    const int32_t req = kn_arg_int(argv, 0);
+    DbReq *r = db_req_of(req, "db_req_free", 0);
+    if (!r) { kn_ret_bool(ret, 0); return; }
+    if (r->state != DB_REQ_READY) {
+        kn_error_set(KN_ERR_INVALID_ARG,
+                     "db_req_free: the request is still running; wait for db_req_ready");
+        kn_ret_bool(ret, 0);
+        return;
+    }
+    kn_ret_bool(ret, kn_handle_close(req, KN_HK_DB_REQ));
+#endif
 }
