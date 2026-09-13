@@ -11,6 +11,10 @@ use crate::ast::*;
 /// Print a whole program.
 pub fn program(p: &Program) -> String {
     let mut o = Out::default();
+    o.leading(&p.leading);
+    if !p.leading.is_empty() {
+        o.blank();
+    }
     if let Some(ns) = &p.namespace {
         o.line(&format!("namespace {ns};"));
         o.blank();
@@ -75,6 +79,16 @@ impl Out {
         self.depth -= 1;
         self.line("}");
     }
+    /// Comments written above a construct, put back verbatim.
+    fn leading(&mut self, c: &[String]) {
+        for l in c {
+            if l.trim().is_empty() {
+                self.line("//");
+            } else {
+                self.line(&format!("//{l}"));
+            }
+        }
+    }
     fn doc(&mut self, d: &Option<String>) {
         if let Some(d) = d {
             for l in d.lines() {
@@ -95,6 +109,7 @@ fn vis(v: Vis) -> &'static str {
 fn item(o: &mut Out, it: &Item) {
     match it {
         Item::Enum(e) => {
+            o.leading(&e.leading);
             o.doc(&e.doc);
             let backing = match &e.backing {
                 Some(t) => format!(" : {}", ty(t)),
@@ -110,6 +125,7 @@ fn item(o: &mut Out, it: &Item) {
             o.close();
         }
         Item::Interface(i) => {
+            o.leading(&i.leading);
             o.doc(&i.doc);
             o.open(&format!("{}interface {}", vis(i.vis), i.name));
             for m in &i.methods {
@@ -123,6 +139,7 @@ fn item(o: &mut Out, it: &Item) {
             o.close();
         }
         Item::Form(f) => {
+            o.leading(&f.leading);
             o.doc(&f.doc);
             o.open(&format!("{}partial form {}", vis(f.vis), f.name));
             for (n, v) in &f.properties {
@@ -132,6 +149,7 @@ fn item(o: &mut Out, it: &Item) {
                 o.blank();
             }
             for c in &f.components {
+                o.leading(&c.leading);
                 o.open(&format!("{} {}", c.type_name, c.id));
                 for (n, v) in &c.properties {
                     o.line(&format!("{n} = {};", expr(v)));
@@ -160,6 +178,7 @@ fn item(o: &mut Out, it: &Item) {
 }
 
 fn type_decl(o: &mut Out, t: &TypeDecl) {
+    o.leading(&t.leading);
     o.doc(&t.doc);
     for a in &t.attrs {
         o.line(&attribute(a));
@@ -204,6 +223,7 @@ fn type_decl(o: &mut Out, t: &TypeDecl) {
     }
     o.open(&header);
     for c in &t.consts {
+        o.leading(&c.leading);
         o.line(&format!(
             "{}const {} {} = {};",
             vis(c.vis),
@@ -225,6 +245,7 @@ fn type_decl(o: &mut Out, t: &TypeDecl) {
 }
 
 fn field(o: &mut Out, f: &Field) {
+    o.leading(&f.leading);
     for a in &f.attrs {
         o.line(&attribute(a));
     }
@@ -242,6 +263,7 @@ fn field(o: &mut Out, f: &Field) {
 }
 
 fn method(o: &mut Out, m: &Method) {
+    o.leading(&m.leading);
     o.doc(&m.doc);
     for a in &m.attrs {
         o.line(&attribute(a));
@@ -316,6 +338,7 @@ fn ty(t: &TypeRef) -> String {
 }
 
 fn stmt(o: &mut Out, s: &Stmt) {
+    o.leading(&s.leading);
     match &s.kind {
         StmtKind::Local {
             name,

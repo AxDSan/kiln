@@ -189,6 +189,10 @@ pub struct Spanned {
     pub span: Span,
     /// A doc comment (`///`) that immediately preceded this token.
     pub doc: Option<String>,
+    /// Ordinary comments that preceded this token, in order, each without its
+    /// `//`. They belong to whatever construct starts here, so the printer can
+    /// put them back.
+    pub leading: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -204,8 +208,9 @@ struct Lexer<'a> {
     line: usize,
     col: usize,
     pending_doc: Option<String>,
-    /// Whether an ordinary (non-doc) comment was skipped. The printer cannot
-    /// reproduce those yet, so `kiln fmt` refuses rather than eat them.
+    /// Ordinary comments seen since the last token.
+    pending_comments: Vec<String>,
+    /// Whether an ordinary (non-doc) comment was seen at all.
     saw_comment: bool,
 }
 
@@ -221,6 +226,7 @@ pub fn lex_with_trivia(src: &str) -> Result<(Vec<Spanned>, bool), LexError> {
         line: 1,
         col: 1,
         pending_doc: None,
+        pending_comments: Vec::new(),
         saw_comment: false,
     };
     let toks = lx.run()?;
@@ -237,6 +243,26 @@ impl Lexer<'_> {
     fn peek3(&self) -> u8 {
         *self.src.get(self.i + 2).unwrap_or(&0)
     }
+    /// Consume one whole UTF-8 scalar. Source content — a string's characters,
+    /// a comment's text — must not be read a byte at a time, or anything
+    /// outside ASCII is mangled.
+    fn bump_char(&mut self) -> char {
+        let rest = &self.src[self.i..];
+        let s = std::str::from_utf8(rest).unwrap_or("");
+        match s.chars().next() {
+            Some(c) => {
+                for _ in 0..c.len_utf8() {
+                    self.bump();
+                }
+                c
+            }
+            None => {
+                self.bump();
+                '\u{FFFD}'
+            }
+        }
+    }
+
     fn bump(&mut self) -> u8 {
         let c = self.peek();
         self.i += 1;
@@ -281,6 +307,7 @@ impl Lexer<'_> {
                 end_col: self.col,
             },
             doc: self.pending_doc.take(),
+            leading: std::mem::take(&mut self.pending_comments),
         }
     }
 
@@ -302,7 +329,7 @@ impl Lexer<'_> {
                 }
                 let mut text = String::new();
                 while self.peek() != b'\n' && self.i < self.src.len() {
-                    text.push(self.bump() as char);
+                    text.push(self.bump_char());
                 }
                 if !is_doc {
                     self.saw_comment = true;
@@ -315,6 +342,8 @@ impl Lexer<'_> {
                         }
                         None => self.pending_doc = Some(text),
                     }
+                } else {
+                    self.pending_comments.push(text);
                 }
             } else if c == b'/' && self.peek2() == b'*' {
                 self.saw_comment = true;
@@ -523,8 +552,7 @@ impl Lexer<'_> {
                     self.bump();
                     s.push(self.escape()?);
                 } else {
-                    // UTF-8 passthrough
-                    s.push(self.bump() as char);
+                    s.push(self.bump_char());
                 }
             }
             return Ok(Tok::Str(s));
@@ -569,7 +597,7 @@ impl Lexer<'_> {
                             break;
                         }
                     }
-                    hole.push(self.bump() as char);
+                    hole.push(self.bump_char());
                 }
                 parts.push(InterpPart::Hole(hole));
             } else if c == b'}' && self.peek2() == b'}' {
@@ -577,7 +605,7 @@ impl Lexer<'_> {
                 self.bump();
                 cur.push('}');
             } else {
-                cur.push(self.bump() as char);
+                cur.push(self.bump_char());
             }
         }
         parts.push(InterpPart::Lit(cur));
@@ -590,7 +618,7 @@ impl Lexer<'_> {
             self.bump();
             self.escape()?
         } else {
-            self.bump() as char
+            self.bump_char()
         };
         if self.bump() != b'\'' {
             return Err(self.err("unterminated char literal"));

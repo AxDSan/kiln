@@ -1196,15 +1196,49 @@ public static class P
 }
 
 #[test]
-fn formatting_refuses_to_eat_comments() {
-    // The printer does not carry ordinary comments yet. Rather than delete
-    // them, `kiln fmt` refuses — losing a comment is worse than not formatting.
-    let src = "namespace C;\n// a note worth keeping\npublic static class P { public static void Main() { } }\n";
-    let err = kiln_k2::format(src).unwrap_err();
-    assert!(err.contains("does not carry them yet"), "got: {err}");
-
-    // A doc comment is carried, so this one formats.
+fn formatting_keeps_comments() {
+    let src = "namespace C;\n// a note worth keeping\npublic static class P\n{\n    // inside, too\n    public static void Main()\n    {\n        // and here\n        var x = 1;\n    }\n}\n";
+    let out = kiln_k2::format(src).unwrap();
+    for c in ["// a note worth keeping", "// inside, too", "// and here"] {
+        assert!(out.contains(c), "lost {c}:\n{out}");
+    }
+    // Doc comments are kept too, and formatting stays a fixed point.
     let ok = "namespace D;\n/// kept\npublic static class P { public static void Main() { } }\n";
     let out = kiln_k2::format(ok).unwrap();
     assert!(out.contains("/// kept"), "{out}");
+    assert_eq!(kiln_k2::format(&out).unwrap(), out);
+}
+
+#[test]
+fn the_examples_format_without_losing_anything() {
+    // The real test: the shipped examples are comment-heavy. Formatting them
+    // must keep every comment, stay a fixed point, and not change the program.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    for name in ["examples/k2/demo.kiln", "examples/k2/starter.kiln"] {
+        let src = std::fs::read_to_string(root.join(name)).unwrap();
+        let once = kiln_k2::format(&src).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(
+            kiln_k2::format(&once).unwrap(),
+            once,
+            "{name}: not a fixed point"
+        );
+        // Every comment in the source survives.
+        for line in src.lines() {
+            let t = line.trim();
+            if let Some(c) = t.strip_prefix("//") {
+                if !c.starts_with('/') && !c.trim().is_empty() {
+                    assert!(
+                        once.contains(c.trim()),
+                        "{name}: lost comment `{}`",
+                        c.trim()
+                    );
+                }
+            }
+        }
+        let before = kiln_k2::compile_to_llvm(&src).unwrap();
+        let after = kiln_k2::compile_to_llvm(&once).unwrap();
+        assert_eq!(before, after, "{name}: reformatting changed the program");
+    }
 }

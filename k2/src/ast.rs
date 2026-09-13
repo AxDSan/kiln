@@ -7,6 +7,8 @@ use crate::lexer::Span;
 
 #[derive(Clone, Debug)]
 pub struct Program {
+    /// Comments at the very top of the file, above everything.
+    pub leading: Vec<String>,
     pub namespace: Option<String>,
     pub usings: Vec<Using>,
     pub items: Vec<Item>,
@@ -37,6 +39,8 @@ pub enum Item {
 #[derive(Clone, Debug)]
 pub struct FormDecl {
     pub vis: Vis,
+    /// Comments written above this, carried so the printer can put them back.
+    pub leading: Vec<String>,
     pub name: String,
     pub properties: Vec<(String, Expr)>,
     pub components: Vec<ComponentDecl>,
@@ -52,6 +56,8 @@ pub struct FormDecl {
 pub struct ComponentDecl {
     /// `Label`, `Button`, … as written.
     pub type_name: String,
+    /// Comments written above this, carried so the printer can put them back.
+    pub leading: Vec<String>,
     /// The component's name in code.
     pub id: String,
     pub properties: Vec<(String, Expr)>,
@@ -64,6 +70,8 @@ pub struct ComponentDecl {
 #[derive(Clone, Debug)]
 pub struct InterfaceDecl {
     pub vis: Vis,
+    /// Comments written above this, carried so the printer can put them back.
+    pub leading: Vec<String>,
     pub name: String,
     pub methods: Vec<Method>,
     pub doc: Option<String>,
@@ -89,6 +97,8 @@ pub enum TypeKind {
 pub struct TypeDecl {
     /// Attributes written above the type (`[Packed]`, `[Table(...)]`).
     pub attrs: Vec<Attribute>,
+    /// Comments written above this, carried so the printer can put them back.
+    pub leading: Vec<String>,
     /// Interfaces this type declares it implements (`class C : I, J`).
     pub implements: Vec<String>,
     /// Generic type parameters (`class Cache<K, V>`).
@@ -108,6 +118,8 @@ pub struct TypeDecl {
 #[derive(Clone, Debug)]
 pub struct EnumDecl {
     pub vis: Vis,
+    /// Comments written above this, carried so the printer can put them back.
+    pub leading: Vec<String>,
     pub name: String,
     /// Backing type name (`enum E : byte`), default `int`.
     pub backing: Option<TypeRef>,
@@ -120,6 +132,8 @@ pub struct EnumDecl {
 pub struct Field {
     /// Attributes written on the field (`[Column("x")]`, `[Key]`, `[Auto]`).
     pub attrs: Vec<Attribute>,
+    /// Comments written above this, carried so the printer can put them back.
+    pub leading: Vec<String>,
     pub vis: Vis,
     pub name: String,
     pub ty: TypeRef,
@@ -131,6 +145,8 @@ pub struct Field {
 
 #[derive(Clone, Debug)]
 pub struct ConstDecl {
+    /// Comments written above this, carried so the printer can put them back.
+    pub leading: Vec<String>,
     pub vis: Vis,
     pub name: String,
     pub ty: TypeRef,
@@ -157,6 +173,8 @@ pub struct Attribute {
 pub struct Method {
     /// Attributes written above the method.
     pub attrs: Vec<Attribute>,
+    /// Comments written above this, carried so the printer can put them back.
+    pub leading: Vec<String>,
     /// `extern` — declared here, defined elsewhere (see `[Dll]`).
     pub is_extern: bool,
     pub vis: Vis,
@@ -193,6 +211,8 @@ pub enum TypeRef {
 #[derive(Clone, Debug)]
 pub struct Stmt {
     pub kind: StmtKind,
+    /// Comments written above this, carried so the printer can put them back.
+    pub leading: Vec<String>,
     pub span: Span,
 }
 

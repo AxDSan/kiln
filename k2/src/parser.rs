@@ -36,6 +36,10 @@ impl Parser {
     fn doc(&self) -> Option<String> {
         self.toks[self.i].doc.clone()
     }
+    /// Comments written above whatever starts at the current token.
+    fn leading(&self) -> Vec<String> {
+        self.toks[self.i].leading.clone()
+    }
     fn bump(&mut self) -> Tok {
         let t = self.toks[self.i].tok.clone();
         if self.i + 1 < self.toks.len() {
@@ -85,6 +89,7 @@ impl Parser {
     // ─── program ──────────────────────────────────────────────────────────
 
     fn program(&mut self) -> Result<Program, ParseError> {
+        let file_leading = self.leading();
         let mut namespace = None;
         if self.peek() == &Tok::Keyword(Kw::Namespace) {
             self.bump();
@@ -117,6 +122,7 @@ impl Parser {
             }
         }
         Ok(Program {
+            leading: file_leading,
             namespace,
             usings,
             items,
@@ -213,11 +219,12 @@ impl Parser {
 
     fn item(&mut self) -> Result<Item, ParseError> {
         let doc = self.doc();
+        let leading = self.leading();
         let attrs = self.attributes()?;
         let span = self.span();
         let (vis, is_static) = self.modifiers();
         match self.bump() {
-            Tok::Keyword(Kw::Enum) => Ok(Item::Enum(self.enum_decl(vis, doc, span)?)),
+            Tok::Keyword(Kw::Enum) => Ok(Item::Enum(self.enum_decl(vis, doc, leading, span)?)),
             Tok::Keyword(Kw::Form) => {
                 let name = self.ident()?;
                 self.expect(&Tok::LBrace)?;
@@ -242,6 +249,7 @@ impl Parser {
                         && self.peek_at(2) == &Tok::LBrace
                     {
                         let cspan = self.span();
+                        let cleading = self.leading();
                         let type_name = self.ident()?;
                         let id = self.ident()?;
                         self.expect(&Tok::LBrace)?;
@@ -269,6 +277,7 @@ impl Parser {
                         }
                         self.expect(&Tok::RBrace)?;
                         components.push(ComponentDecl {
+                            leading: cleading,
                             type_name,
                             id,
                             properties: cprops,
@@ -281,6 +290,7 @@ impl Parser {
                 }
                 self.expect(&Tok::RBrace)?;
                 Ok(Item::Form(FormDecl {
+                    leading,
                     vis,
                     name,
                     properties,
@@ -303,6 +313,7 @@ impl Parser {
                     let params = self.params()?;
                     self.expect(&Tok::Semi)?;
                     methods.push(Method {
+                        leading: Vec::new(),
                         attrs: Vec::new(),
                         is_extern: false,
                         vis: mvis,
@@ -320,6 +331,7 @@ impl Parser {
                 }
                 self.expect(&Tok::RBrace)?;
                 Ok(Item::Interface(InterfaceDecl {
+                    leading,
                     vis,
                     name,
                     methods,
@@ -335,7 +347,9 @@ impl Parser {
                     (Kw::Struct, _) => TypeKind::Struct,
                     _ => unreachable!(),
                 };
-                Ok(Item::Type(self.type_decl(kind, vis, doc, span, attrs)?))
+                Ok(Item::Type(
+                    self.type_decl(kind, vis, doc, leading, span, attrs)?,
+                ))
             }
             other => {
                 self.i -= 1;
@@ -348,6 +362,7 @@ impl Parser {
         &mut self,
         vis: Vis,
         doc: Option<String>,
+        leading: Vec<String>,
         span: Span,
     ) -> Result<EnumDecl, ParseError> {
         let name = self.ident()?;
@@ -372,6 +387,7 @@ impl Parser {
         }
         self.expect(&Tok::RBrace)?;
         Ok(EnumDecl {
+            leading,
             vis,
             name,
             backing,
@@ -386,6 +402,7 @@ impl Parser {
         kind: TypeKind,
         vis: Vis,
         doc: Option<String>,
+        leading: Vec<String>,
         span: Span,
         attrs: Vec<Attribute>,
     ) -> Result<TypeDecl, ParseError> {
@@ -401,6 +418,7 @@ impl Parser {
                 let ty = self.type_ref()?;
                 let pname = self.ident()?;
                 record_params.push(Field {
+                    leading: Vec::new(),
                     attrs: fattrs,
                     vis: Vis::Public,
                     name: pname,
@@ -434,6 +452,7 @@ impl Parser {
         // A record with only positional params may end in `;`.
         if self.eat(&Tok::Semi) {
             return Ok(TypeDecl {
+                leading: leading.clone(),
                 attrs: attrs.clone(),
                 implements: implements.clone(),
                 type_params: type_params.clone(),
@@ -454,6 +473,7 @@ impl Parser {
         }
         self.expect(&Tok::RBrace)?;
         Ok(TypeDecl {
+            leading,
             attrs,
             implements,
             type_params,
@@ -512,6 +532,7 @@ impl Parser {
         methods: &mut Vec<Method>,
     ) -> Result<(), ParseError> {
         let doc = self.doc();
+        let leading = self.leading();
         let attrs = self.attributes()?;
         let span = self.span();
         let (vis, is_static) = self.modifiers();
@@ -546,6 +567,7 @@ impl Parser {
             let params = self.params()?;
             let body = self.block()?;
             methods.push(Method {
+                leading: leading.clone(),
                 attrs,
                 is_extern: false,
                 vis,
@@ -578,6 +600,7 @@ impl Parser {
                 self.method_body()?
             };
             methods.push(Method {
+                leading: leading.clone(),
                 attrs,
                 is_extern,
                 vis,
@@ -601,6 +624,7 @@ impl Parser {
             let value = self.expr()?;
             self.expect(&Tok::Semi)?;
             consts.push(ConstDecl {
+                leading,
                 vis,
                 name,
                 ty,
@@ -617,6 +641,7 @@ impl Parser {
         };
         self.expect(&Tok::Semi)?;
         fields.push(Field {
+            leading,
             attrs,
             vis,
             name,
@@ -787,6 +812,13 @@ impl Parser {
     }
 
     fn stmt(&mut self) -> Result<Stmt, ParseError> {
+        let leading = self.leading();
+        let mut s = self.stmt_inner()?;
+        s.leading = leading;
+        Ok(s)
+    }
+
+    fn stmt_inner(&mut self) -> Result<Stmt, ParseError> {
         let span = self.span();
         let kind = match self.peek() {
             Tok::LBrace => StmtKind::Block(self.block()?),
@@ -842,7 +874,11 @@ impl Parser {
             }
             _ => return self.expr_or_decl_stmt(),
         };
-        Ok(Stmt { kind, span })
+        Ok(Stmt {
+            leading: Vec::new(),
+            kind,
+            span,
+        })
     }
 
     fn body_or_stmt(&mut self) -> Result<Vec<Stmt>, ParseError> {
@@ -870,6 +906,7 @@ impl Parser {
             Vec::new()
         };
         Ok(Stmt {
+            leading: Vec::new(),
             kind: StmtKind::If { cond, then, els },
             span,
         })
@@ -901,6 +938,7 @@ impl Parser {
         self.expect(&Tok::RParen)?;
         let body = self.body_or_stmt()?;
         Ok(Stmt {
+            leading: Vec::new(),
             kind: StmtKind::For {
                 init: Box::new(init),
                 cond,
@@ -925,6 +963,7 @@ impl Parser {
         self.expect(&Tok::RParen)?;
         let body = self.body_or_stmt()?;
         Ok(Stmt {
+            leading: Vec::new(),
             kind: StmtKind::ForEach { var, coll, body },
             span,
         })
@@ -940,6 +979,7 @@ impl Parser {
             self.expect(&Tok::Eq)?;
             let value = self.expr()?;
             return Ok(Stmt {
+                leading: Vec::new(),
                 kind: StmtKind::Local {
                     name,
                     ty: None,
@@ -986,6 +1026,7 @@ impl Parser {
                 };
                 self.expect(&Tok::Semi)?;
                 return Ok(Some(Stmt {
+                    leading: Vec::new(),
                     kind: StmtKind::Local {
                         name,
                         ty: Some(ty),
@@ -1016,6 +1057,7 @@ impl Parser {
             self.bump();
             let value = self.expr()?;
             return Ok(Stmt {
+                leading: Vec::new(),
                 kind: StmtKind::Assign {
                     target: lhs,
                     op,
@@ -1029,6 +1071,7 @@ impl Parser {
             let is_inc = self.peek() == &Tok::PlusPlus;
             self.bump();
             return Ok(Stmt {
+                leading: Vec::new(),
                 kind: StmtKind::Assign {
                     target: lhs,
                     op: if is_inc { AssignOp::Add } else { AssignOp::Sub },
@@ -1041,6 +1084,7 @@ impl Parser {
             });
         }
         Ok(Stmt {
+            leading: Vec::new(),
             kind: StmtKind::Expr(lhs),
             span,
         })

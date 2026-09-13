@@ -1216,6 +1216,7 @@ impl Cx {
                         let _ = n;
                         let hid = fl.cx.b.declare_func(&sym, vec![], TyTable::VOID);
                         let method = ast::Method {
+                            leading: Vec::new(),
                             attrs: Vec::new(),
                             is_extern: false,
                             vis: ast::Vis::Private,
@@ -1228,6 +1229,7 @@ impl Cx {
                             body: match &lam.body {
                                 ast::LambdaBody::Block(b) => b.clone(),
                                 ast::LambdaBody::Expr(e) => vec![ast::Stmt {
+                                    leading: Vec::new(),
                                     kind: ast::StmtKind::Expr((**e).clone()),
                                     span: Default::default(),
                                 }],
@@ -3551,6 +3553,7 @@ impl<'a> FnLower<'a> {
 
         // Queue the body; `this` binds parameter 0, the (unused) env pointer.
         let method = ast::Method {
+            leading: Vec::new(),
             attrs: Vec::new(),
             is_extern: false,
             vis: ast::Vis::Private,

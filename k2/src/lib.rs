@@ -20,15 +20,7 @@ pub use kiln_kir::ModuleKind;
 
 /// Parse and re-print K2 source in its canonical spelling — `kiln fmt`.
 pub fn format(src: &str) -> Result<String, String> {
-    let (toks, had_comments) =
-        lexer::lex_with_trivia(src).map_err(|e| format!("{}:{}: {}", e.line, e.col, e.msg))?;
-    if had_comments {
-        return Err(
-            "this source has ordinary comments, and the printer does not carry them yet — \
-             formatting it would delete them. Doc comments (`///`) are kept."
-                .into(),
-        );
-    }
+    let toks = lexer::lex(src).map_err(|e| format!("{}:{}: {}", e.line, e.col, e.msg))?;
     let program =
         parser::parse(toks).map_err(|e| format!("{}:{}: {}", e.span.line, e.span.col, e.msg))?;
     Ok(print::program(&program))
