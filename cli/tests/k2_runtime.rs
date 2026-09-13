@@ -260,3 +260,36 @@ fn a_k2_binary_carries_a_line_table() {
     let run = Command::new(&exe).output().expect("runs");
     assert_eq!(String::from_utf8_lossy(&run.stdout), "40\n");
 }
+
+#[test]
+fn a_record_is_described_by_its_fields() {
+    // A record is held by pointer, so a debugger needs both the struct type and
+    // a pointer to it before it can print `{W = 3, H = 4}` instead of an address.
+    let path = tmp("recdbg.kiln");
+    std::fs::write(
+        &path,
+        "namespace RecDbg;\npublic record Rect(int W, int H);\npublic static class P\n{\n    static int Area(Rect r)\n    {\n        var a = r.W * r.H;\n        return a;\n    }\n    public static void Main()\n    {\n        Console.WriteLine($\"{Area(new Rect(3, 4))}\");\n    }\n}\n",
+    )
+    .unwrap();
+    let ir = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["k2", path.to_str().unwrap(), "--emit-ir"])
+        .output()
+        .expect("kiln k2 --emit-ir");
+    let ll = String::from_utf8_lossy(&ir.stdout);
+    assert!(
+        ll.contains("DICompositeType(tag: DW_TAG_structure_type, name: \"Rect\""),
+        "no struct type:\n{ll}"
+    );
+    for field in ["name: \"W\"", "name: \"H\""] {
+        assert!(
+            ll.contains(&format!("DW_TAG_member, {field}")),
+            "no member {field}:\n{ll}"
+        );
+    }
+    // The second field sits one int along.
+    assert!(ll.contains("offset: 32"), "member offsets are wrong:\n{ll}");
+    assert!(
+        ll.contains("DW_TAG_pointer_type"),
+        "a record is held by pointer:\n{ll}"
+    );
+}

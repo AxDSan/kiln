@@ -72,7 +72,9 @@ clang and checks stdout):
   prints a backtrace naming both frames. **Variables are described too**: each
   named local and parameter is declared against the slot that holds it, so
   `info args` and `info locals` print them by name and value. Compiler-invented
-  names are left out — they are machinery, not the user's variables
+  names are left out — they are machinery, not the user's variables. **A record
+  is described by its fields**, so `ptype r` prints the struct and `p *r` gives
+  `{W = 3, H = 4}` rather than an address
 - **Editor grammars**: the VS Code and Kate definitions highlight K2 — `//` and
   `/* */` comments, the keyword and type sets, `[Attributes]`, `$"…{x}…"`
   interpolation — while still highlighting 1.x, since both share `.kiln` during
@@ -180,7 +182,7 @@ clang and checks stdout):
 5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
 6. binding the generated SQL to `libs/db` and returning rows (the statement text is generated; execution needs the runtime)
 7. ABI v5 proper: a handler that captures a *local*; Studio itself calling `kiln edit` (the command exists; the C++ side still splices 1.x text)
-8. a record's fields in the debugger (scalars and parameters are described; an aggregate shows as a pointer); hover and completion still read the 1.x index
+8. hover and completion still read the 1.x index (diagnostics, outline, formatting, grammars and the debugger are done)
 
 ## Milestone: the RAD half runs
 

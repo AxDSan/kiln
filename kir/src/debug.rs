@@ -31,6 +31,8 @@ pub struct Debug {
     types: Vec<(String, usize)>,
     /// Local variables: their rendered text, in order.
     variables: Vec<String>,
+    /// Nodes rendered as they were created — members, member lists, composites.
+    extra: Vec<String>,
     /// Whether any variable was described, which is what turns the compile unit
     /// from a line table into full debug information.
     described: bool,
@@ -57,6 +59,7 @@ impl Debug {
             producer: producer.to_string(),
             types: Vec::new(),
             variables: Vec::new(),
+            extra: Vec::new(),
             described: false,
         }
     }
@@ -105,6 +108,61 @@ impl Debug {
         }
         let n = self.fresh();
         self.types.push((text, n));
+        n
+    }
+
+    /// A struct type with named members, and a pointer to it. A record is held
+    /// by pointer, so a debugger needs both to print `r` as its fields.
+    pub fn record_type(
+        &mut self,
+        name: &str,
+        size_bits: u64,
+        members: &[(String, usize, u64, u64)],
+    ) -> usize {
+        let key = format!("record {name}");
+        if let Some((_, n)) = self.types.iter().find(|(t, _)| *t == key) {
+            return *n;
+        }
+        // Reserve the composite's number first: a member names it as its scope.
+        let composite = self.fresh();
+        self.types.push((key, composite));
+        let mut member_nodes = Vec::new();
+        for (mname, ty, bits, offset) in members {
+            let n = self.fresh();
+            self.extra.push(format!(
+                "!{n} = !DIDerivedType(tag: DW_TAG_member, name: \"{mname}\", scope: !{composite}, \
+                 file: !{FILE}, baseType: !{ty}, size: {bits}, offset: {offset})"
+            ));
+            member_nodes.push(n);
+        }
+        let list = self.fresh();
+        self.extra.push(format!(
+            "!{list} = !{{{}}}",
+            member_nodes
+                .iter()
+                .map(|n| format!("!{n}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        self.extra.push(format!(
+            "!{composite} = distinct !DICompositeType(tag: DW_TAG_structure_type, \
+             name: \"{name}\", file: !{FILE}, size: {size_bits}, elements: !{list})"
+        ));
+        self.described = true;
+        composite
+    }
+
+    /// A pointer to an already-described type.
+    pub fn pointer_to(&mut self, base: usize) -> usize {
+        let key = format!("ptr to {base}");
+        if let Some((_, n)) = self.types.iter().find(|(t, _)| *t == key) {
+            return *n;
+        }
+        let n = self.fresh();
+        self.types.push((key, n));
+        self.extra.push(format!(
+            "!{n} = !DIDerivedType(tag: DW_TAG_pointer_type, baseType: !{base}, size: 64)"
+        ));
         n
     }
 
@@ -187,7 +245,14 @@ impl Debug {
             .unwrap();
         }
         for (text, n) in &self.types {
-            writeln!(out, "!{n} = {text}").unwrap();
+            // A composite or pointer records its own text in `extra`; the
+            // entries here are the basic types, whose key is their text.
+            if text.starts_with("!DI") {
+                writeln!(out, "!{n} = {text}").unwrap();
+            }
+        }
+        for text in &self.extra {
+            writeln!(out, "{text}").unwrap();
         }
         for v in &self.variables {
             writeln!(out, "{v}").unwrap();

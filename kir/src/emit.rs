@@ -321,12 +321,49 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                 })
                 .collect();
             for (i, name, ty, arg, line) in described {
+                // A record is described by its fields, so a debugger prints it
+                // as `{W = 3, H = 4}` rather than as an address.
+                let record: Option<(String, u64, Vec<(String, String, u32, &'static str, u64)>)> =
+                    match *self.tt().kind(ty) {
+                        TyKind::Record(rid) => {
+                            let rec = self.e.m.record(rid);
+                            match &rec.layout {
+                                Layout::C { size, offsets, .. } => {
+                                    let members = rec
+                                        .fields
+                                        .iter()
+                                        .zip(offsets.iter())
+                                        .map(|(f, off)| {
+                                            let (tn, bits, enc) = describe_ty(self.tt(), f.ty);
+                                            (f.name.clone(), tn, bits, enc, *off as u64 * 8)
+                                        })
+                                        .collect();
+                                    Some((rec.name.clone(), *size as u64 * 8, members))
+                                }
+                                Layout::Managed => None,
+                            }
+                        }
+                        _ => None,
+                    };
                 let (tname, bits, enc) = describe_ty(self.tt(), ty);
                 let (var, loc) = {
                     let Some(d) = self.e.debug.as_mut() else {
                         break;
                     };
-                    let tn = d.basic_type(&tname, bits, enc);
+                    let tn = match record {
+                        Some((rname, size_bits, members)) => {
+                            let described_members: Vec<(String, usize, u64, u64)> = members
+                                .into_iter()
+                                .map(|(mname, tn, mbits, menc, off)| {
+                                    let node = d.basic_type(&tn, mbits, menc);
+                                    (mname, node, mbits as u64, off)
+                                })
+                                .collect();
+                            let composite = d.record_type(&rname, size_bits, &described_members);
+                            d.pointer_to(composite)
+                        }
+                        None => d.basic_type(&tname, bits, enc),
+                    };
                     let var = d.local(&name, scope, line, tn, arg);
                     let loc = d.location(line, scope);
                     (var, loc)
