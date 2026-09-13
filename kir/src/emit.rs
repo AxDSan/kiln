@@ -296,6 +296,50 @@ impl<'a, 'b> FnEmit<'a, 'b> {
             }
         }
 
+        // Describe each named local against the slot that holds it, so a
+        // debugger can print it. Compiler-invented names carry a `$` and are
+        // left out: they are machinery, not the user's variables.
+        if let Some(scope) = self.scope {
+            let described: Vec<(usize, String, TyId, Option<usize>, usize)> = self
+                .f
+                .locals
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| !l.name.starts_with('$') && !l.name.is_empty())
+                .map(|(i, l)| {
+                    (
+                        i,
+                        l.name.clone(),
+                        l.ty,
+                        l.is_arg.map(|a| a + 1),
+                        if l.span.line > 0 {
+                            l.span.line
+                        } else {
+                            self.f.line
+                        },
+                    )
+                })
+                .collect();
+            for (i, name, ty, arg, line) in described {
+                let (tname, bits, enc) = describe_ty(self.tt(), ty);
+                let (var, loc) = {
+                    let Some(d) = self.e.debug.as_mut() else {
+                        break;
+                    };
+                    let tn = d.basic_type(&tname, bits, enc);
+                    let var = d.local(&name, scope, line, tn, arg);
+                    let loc = d.location(line, scope);
+                    (var, loc)
+                };
+                writeln!(
+                    self.head,
+                    "    #dbg_declare(ptr {}, !{var}, !DIExpression(), !{loc})",
+                    self.local_ptr(LocalId(i as u32))
+                )
+                .unwrap();
+            }
+        }
+
         let fell_through = self.stmts(&self.f.body.clone());
         // A function that runs off the end needs a terminator.
         if fell_through {
@@ -1308,6 +1352,26 @@ impl<'a, 'b> FnEmit<'a, 'b> {
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────
+
+/// How a value's type is described to a debugger: its name, its width in bits,
+/// and its DWARF encoding. Anything held by pointer is described as one.
+fn describe_ty(tt: &TyTable, ty: TyId) -> (String, u32, &'static str) {
+    match tt.kind(ty) {
+        TyKind::Bool => ("bool".into(), 8, "DW_ATE_boolean"),
+        TyKind::I8 => ("sbyte".into(), 8, "DW_ATE_signed"),
+        TyKind::U8 => ("byte".into(), 8, "DW_ATE_unsigned"),
+        TyKind::I16 => ("short".into(), 16, "DW_ATE_signed"),
+        TyKind::U16 => ("ushort".into(), 16, "DW_ATE_unsigned"),
+        TyKind::I32 => ("int".into(), 32, "DW_ATE_signed"),
+        TyKind::U32 => ("uint".into(), 32, "DW_ATE_unsigned"),
+        TyKind::Char => ("char".into(), 32, "DW_ATE_unsigned"),
+        TyKind::I64 | TyKind::Nint => ("long".into(), 64, "DW_ATE_signed"),
+        TyKind::U64 | TyKind::Nuint => ("ulong".into(), 64, "DW_ATE_unsigned"),
+        TyKind::F32 => ("float".into(), 32, "DW_ATE_float"),
+        TyKind::F64 => ("double".into(), 64, "DW_ATE_float"),
+        _ => ("ptr".into(), 64, "pointer"),
+    }
+}
 
 fn cmp_pred(op: BinOp, float: bool, uns: bool) -> &'static str {
     match (op, float) {

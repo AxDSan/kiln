@@ -69,8 +69,10 @@ clang and checks stdout):
 - **Debug information**: a K2 binary carries a DWARF line table — a compile
   unit naming the source, a subprogram per function, and a location on every
   instruction — so `gdb` breaks on a K2 line, steps from one to the next, and
-  prints a backtrace naming both frames. `LineTablesOnly`, so a debugger is
-  told exactly what it is given; variables and types come later
+  prints a backtrace naming both frames. **Variables are described too**: each
+  named local and parameter is declared against the slot that holds it, so
+  `info args` and `info locals` print them by name and value. Compiler-invented
+  names are left out — they are machinery, not the user's variables
 - **Editor grammars**: the VS Code and Kate definitions highlight K2 — `//` and
   `/* */` comments, the keyword and type sets, `[Attributes]`, `$"…{x}…"`
   interpolation — while still highlighting 1.x, since both share `.kiln` during
@@ -178,7 +180,7 @@ clang and checks stdout):
 5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
 6. binding the generated SQL to `libs/db` and returning rows (the statement text is generated; execution needs the runtime)
 7. ABI v5 proper: a handler that captures a *local*; Studio itself calling `kiln edit` (the command exists; the C++ side still splices 1.x text)
-8. variables and types in the debugger (the line table is emitted); hover and completion still read the 1.x index
+8. a record's fields in the debugger (scalars and parameters are described; an aggregate shows as a pointer); hover and completion still read the 1.x index
 
 ## Milestone: the RAD half runs
 

@@ -27,6 +27,13 @@ pub struct Debug {
     /// `(line, scope)` → its location node.
     locations: HashMap<(usize, usize), usize>,
     producer: String,
+    /// Type descriptors, by their rendered text.
+    types: Vec<(String, usize)>,
+    /// Local variables: their rendered text, in order.
+    variables: Vec<String>,
+    /// Whether any variable was described, which is what turns the compile unit
+    /// from a line table into full debug information.
+    described: bool,
 }
 
 impl Debug {
@@ -48,6 +55,9 @@ impl Debug {
             subprograms: Vec::new(),
             locations: HashMap::new(),
             producer: producer.to_string(),
+            types: Vec::new(),
+            variables: Vec::new(),
+            described: false,
         }
     }
 
@@ -79,6 +89,48 @@ impl Debug {
         n
     }
 
+    /// A type descriptor for a value of the given shape.
+    ///
+    /// Aggregates are described as an opaque pointer: a debugger can show the
+    /// address and the program is steppable, which is the point. Describing a
+    /// record's fields comes with the type graph.
+    pub fn basic_type(&mut self, name: &str, bits: u32, encoding: &str) -> usize {
+        let text = if encoding == "pointer" {
+            format!("!DIDerivedType(tag: DW_TAG_pointer_type, baseType: null, size: 64)")
+        } else {
+            format!("!DIBasicType(name: \"{name}\", size: {bits}, encoding: {encoding})")
+        };
+        if let Some((_, n)) = self.types.iter().find(|(t, _)| *t == text) {
+            return *n;
+        }
+        let n = self.fresh();
+        self.types.push((text, n));
+        n
+    }
+
+    /// Describe a local variable, or a parameter when `arg` is its 1-based
+    /// position. Returns the node to name in a `#dbg_declare`.
+    pub fn local(
+        &mut self,
+        name: &str,
+        scope: usize,
+        line: usize,
+        ty: usize,
+        arg: Option<usize>,
+    ) -> usize {
+        let n = self.fresh();
+        let argpart = match arg {
+            Some(i) => format!("arg: {i}, "),
+            None => String::new(),
+        };
+        self.variables.push(format!(
+            "!{n} = !DILocalVariable(name: \"{name}\", {argpart}scope: !{scope}, \
+             file: !{FILE}, line: {line}, type: !{ty})"
+        ));
+        self.described = true;
+        n
+    }
+
     pub fn is_empty(&self) -> bool {
         self.subprograms.is_empty()
     }
@@ -99,8 +151,13 @@ impl Debug {
             out,
             "!{CU} = distinct !DICompileUnit(language: DW_LANG_C99, file: !{FILE}, \
              producer: \"{}\", isOptimized: false, runtimeVersion: 0, \
-             emissionKind: LineTablesOnly)",
-            self.producer
+             emissionKind: {})",
+            self.producer,
+            if self.described {
+                "FullDebug"
+            } else {
+                "LineTablesOnly"
+            }
         )
         .unwrap();
         writeln!(
@@ -128,6 +185,12 @@ impl Debug {
                  spFlags: DISPFlagDefinition, unit: !{CU})"
             )
             .unwrap();
+        }
+        for (text, n) in &self.types {
+            writeln!(out, "!{n} = {text}").unwrap();
+        }
+        for v in &self.variables {
+            writeln!(out, "{v}").unwrap();
         }
         let mut locs: Vec<_> = self.locations.iter().collect();
         locs.sort_by_key(|(_, n)| **n);
