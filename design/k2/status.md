@@ -52,6 +52,10 @@ clang and checks stdout):
 - **`List<T>`**: `new List<T>()`, `.Add(x)` (buffer grows 4 → 8 → 16 …),
   `.Count`, 1-based indexing `xs[1]`, and `foreach` over one. KIR gained real
   indexed element access for this
+- **`[Dll]` interop**: `[Dll("c")] public static extern int abs(int n);` calls a
+  C function directly, with `Entry = "..."` to rename and
+  `Convention = CallConv.StdCall` for Win32. Attributes parse on types and
+  members generally
 - **`Dictionary<K,V>`**: `new Dictionary<K,V>()`, `d[k] = v` (updates in place
   or appends), `.Get(k)` → `V?`, `.ContainsKey(k)`, `.Count`. String keys
   compare by content. Lookup is a linear scan for now
@@ -78,7 +82,7 @@ clang and checks stdout):
 3. generic *types* (`class Cache<K,V>`) and generic instance methods — only generic static methods are built
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)
 5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
-6. compile-time attributes: `[Table]`, `Query<T>`, `[Packed]`, `[Dll]`
+6. the generating attributes: `[Table]`, `Query<T>`, `[Packed]` (`[Dll]` is done)
 7. forms + events + ABI v5
 8. LSP, `kiln migrate`, folding K2 into `kiln build`/`run` with runtime linking
 

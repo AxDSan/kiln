@@ -99,6 +99,7 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
         results: HashMap::new(),
         lists: HashMap::new(),
         dicts: HashMap::new(),
+        dlls: HashMap::new(),
         pending: Vec::new(),
     };
 
@@ -159,6 +160,56 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
                 } else {
                     Some(cx.record_ty(&td.name))
                 };
+                // `[Dll]` extern: a foreign function, not a body to lower.
+                if m.is_extern {
+                    let dll = m.attrs.iter().find(|a| a.name == "Dll");
+                    let Some(dll) = dll else {
+                        return Err(format!(
+                            "`{}` is extern but has no [Dll(\"library\")] attribute",
+                            m.name
+                        ));
+                    };
+                    let library = match dll.args.first().map(|e| &e.kind) {
+                        Some(ast::ExprKind::Str(s)) => s.clone(),
+                        _ => return Err("[Dll] needs a library name".into()),
+                    };
+                    let symbol = dll
+                        .named
+                        .iter()
+                        .find(|(k, _)| k == "Entry")
+                        .and_then(|(_, v)| match &v.kind {
+                            ast::ExprKind::Str(s) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| m.name.clone());
+                    let conv = dll
+                        .named
+                        .iter()
+                        .find(|(k, _)| k == "Convention")
+                        .map(|(_, v)| match &v.kind {
+                            ast::ExprKind::Member(_, n) if n == "StdCall" => CallConv::Stdcall,
+                            ast::ExprKind::Member(_, n) if n == "System" => CallConv::System,
+                            _ => CallConv::Cdecl,
+                        })
+                        .unwrap_or(CallConv::Cdecl);
+                    let params: Vec<TyId> = m
+                        .params
+                        .iter()
+                        .map(|p| cx.resolve(&p.ty))
+                        .collect::<Result<_, String>>()?;
+                    let ret = cx.resolve(&m.ret)?;
+                    let sig = DllSig {
+                        library,
+                        symbol,
+                        conv,
+                        params,
+                        ret,
+                    };
+                    cx.dlls
+                        .insert(format!("{}.{}", td.name, m.name), sig.clone());
+                    cx.dlls.entry(m.name.clone()).or_insert(sig);
+                    continue;
+                }
                 // A generic method is a template: nothing is emitted until a
                 // call site fixes its type arguments.
                 if !m.type_params.is_empty() {
@@ -206,7 +257,7 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
     for item in &p.items {
         if let ast::Item::Type(td) = item {
             for m in &td.methods {
-                if !m.type_params.is_empty() {
+                if !m.type_params.is_empty() || m.is_extern {
                     continue;
                 }
                 let sig = cx.methods[&format!("{}.{}", td.name, m.name)].clone();
@@ -242,6 +293,16 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
 struct Sig {
     fid: FuncId,
     this: bool,
+    params: Vec<TyId>,
+    ret: TyId,
+}
+
+/// A foreign function declared with `[Dll]`.
+#[derive(Clone)]
+struct DllSig {
+    library: String,
+    symbol: String,
+    conv: CallConv,
     params: Vec<TyId>,
     ret: TyId,
 }
@@ -310,6 +371,8 @@ struct Cx {
     lists: HashMap<TyId, RecordId>,
     /// `Dictionary<K,V>` per key/value pair: `{len, cap, keys, values}`.
     dicts: HashMap<(TyId, TyId), RecordId>,
+    /// `[Dll]` externs, by `Type.Name` and bare `Name`.
+    dlls: HashMap<String, DllSig>,
     pending: Vec<Pending>,
 }
 
@@ -1844,7 +1907,8 @@ impl<'a> FnLower<'a> {
                 if let ast::ExprKind::Ident(obj) = &recv.kind {
                     let qualified = format!("{obj}.{name}");
                     if (self.cx.methods.contains_key(&qualified)
-                        || self.cx.generics.contains_key(&qualified))
+                        || self.cx.generics.contains_key(&qualified)
+                        || self.cx.dlls.contains_key(&qualified))
                         && self.is_type_name(obj)
                     {
                         (qualified, None)
@@ -1860,6 +1924,32 @@ impl<'a> FnLower<'a> {
             }
             _ => return Err("unsupported call target".into()),
         };
+        // A `[Dll]` extern call.
+        if let Some(d) = self.cx.dlls.get(&key).cloned() {
+            if args.len() != d.params.len() {
+                return Err(format!(
+                    "`{key}` expects {} argument(s), got {}",
+                    d.params.len(),
+                    args.len()
+                ));
+            }
+            let mut kargs = Vec::new();
+            for (a, pty) in args.iter().zip(d.params.iter()) {
+                kargs.push(self.expr(a, Some(*pty))?.0);
+            }
+            return Ok((
+                Expr::Call(Box::new(Call::Dll {
+                    library: d.library,
+                    symbol: d.symbol,
+                    conv: d.conv,
+                    args: kargs,
+                    arg_tys: d.params.clone(),
+                    ret: d.ret,
+                    varargs: false,
+                })),
+                d.ret,
+            ));
+        }
         // A generic method: lower the arguments first (their types are what the
         // type parameters are inferred from), then instantiate.
         if self.cx.generics.contains_key(&key) {
@@ -2467,6 +2557,8 @@ impl<'a> FnLower<'a> {
 
         // Queue the body; `this` binds parameter 0, the (unused) env pointer.
         let method = ast::Method {
+            attrs: Vec::new(),
+            is_extern: false,
             vis: ast::Vis::Private,
             is_static: true,
             name: sym.clone(),

@@ -95,8 +95,20 @@ pub struct Param {
     pub span: Span,
 }
 
+/// `[Name(arg, Named = value)]` on a declaration.
+#[derive(Clone, Debug)]
+pub struct Attribute {
+    pub name: String,
+    pub args: Vec<Expr>,
+    pub named: Vec<(String, Expr)>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Method {
+    /// Attributes written above the method.
+    pub attrs: Vec<Attribute>,
+    /// `extern` — declared here, defined elsewhere (see `[Dll]`).
+    pub is_extern: bool,
     pub vis: Vis,
     pub is_static: bool,
     pub name: String,

@@ -646,3 +646,35 @@ public static class P
 "#;
     assert_eq!(run_k2(src), "3\n3\n37\n-1\n1\n0\n10 81\n");
 }
+
+#[test]
+fn dll_extern_calls_a_c_function() {
+    // [Dll] + extern is how K2 reaches C. Tested against libc so it needs no
+    // platform library; the same shape declares a Win32 import.
+    let src = r#"
+namespace I;
+
+public static class Libc
+{
+    [Dll("c")]
+    public static extern int abs(int n);
+
+    [Dll("c", Entry = "strlen")]
+    public static extern long Length(string s);
+
+    [Dll("c")]
+    public static extern int puts(string s);
+}
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine($"{Libc.abs(-42)}");
+        Console.WriteLine($"{Libc.Length("kiln")}");
+        Libc.puts("straight through libc");
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "42\n4\nstraight through libc\n");
+}

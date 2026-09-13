@@ -111,6 +111,7 @@ impl Parser {
                     self.bump();
                     break;
                 }
+                Tok::LBracket => items.push(self.item()?),
                 _ if self.starts_type_decl() => items.push(self.item()?),
                 _ => top_level.push(self.stmt()?),
             }
@@ -206,6 +207,7 @@ impl Parser {
 
     fn item(&mut self) -> Result<Item, ParseError> {
         let doc = self.doc();
+        let _attrs = self.attributes()?;
         let span = self.span();
         let (vis, is_static) = self.modifiers();
         match self.bump() {
@@ -339,6 +341,41 @@ impl Parser {
         })
     }
 
+    /// `[Name(args)]` sequences before a declaration.
+    fn attributes(&mut self) -> Result<Vec<Attribute>, ParseError> {
+        let mut out = Vec::new();
+        while self.peek() == &Tok::LBracket {
+            self.bump();
+            loop {
+                let name = self.ident()?;
+                let mut args = Vec::new();
+                let mut named = Vec::new();
+                if self.peek() == &Tok::LParen {
+                    self.bump();
+                    while self.peek() != &Tok::RParen {
+                        if matches!(self.peek(), Tok::Ident(_)) && self.peek_at(1) == &Tok::Eq {
+                            let k = self.ident()?;
+                            self.expect(&Tok::Eq)?;
+                            named.push((k, self.expr()?));
+                        } else {
+                            args.push(self.expr()?);
+                        }
+                        if !self.eat(&Tok::Comma) {
+                            break;
+                        }
+                    }
+                    self.expect(&Tok::RParen)?;
+                }
+                out.push(Attribute { name, args, named });
+                if !self.eat(&Tok::Comma) {
+                    break;
+                }
+            }
+            self.expect(&Tok::RBracket)?;
+        }
+        Ok(out)
+    }
+
     fn member(
         &mut self,
         fields: &mut Vec<Field>,
@@ -346,8 +383,21 @@ impl Parser {
         methods: &mut Vec<Method>,
     ) -> Result<(), ParseError> {
         let doc = self.doc();
+        let attrs = self.attributes()?;
         let span = self.span();
         let (vis, is_static) = self.modifiers();
+        let is_extern = if self.peek() == &Tok::Ident("extern".into()) {
+            self.bump();
+            true
+        } else {
+            false
+        };
+        let (vis, is_static) = if is_extern {
+            let (v2, s2) = self.modifiers();
+            (if v2 == Vis::Internal { vis } else { v2 }, is_static || s2)
+        } else {
+            (vis, is_static)
+        };
         let is_const = self.eat_kw(Kw::Const);
         let is_readonly = if !is_const {
             // `readonly` is a contextual ident in our lexer
@@ -369,8 +419,15 @@ impl Parser {
         if self.peek() == &Tok::LParen {
             let params = self.params()?;
             self.opt_where_clause()?;
-            let (body, expr_body) = self.method_body()?;
+            let (body, expr_body) = if is_extern {
+                self.expect(&Tok::Semi)?;
+                (Vec::new(), None)
+            } else {
+                self.method_body()?
+            };
             methods.push(Method {
+                attrs,
+                is_extern,
                 vis,
                 is_static,
                 name,
