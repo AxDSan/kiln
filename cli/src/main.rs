@@ -78,6 +78,7 @@ fn run(args: &[String]) -> i32 {
     match cmd.as_str() {
         "build" => cmd_build(rest, false),
         "run" => cmd_build(rest, true),
+        "k2" => cmd_k2(rest),
         "emit" => cmd_emit(rest),
         "inspect" => cmd_inspect(rest),
         "dap" => dap::run(),
@@ -448,6 +449,110 @@ fn parse_io_args(rest: &[String]) -> Result<Io, String> {
         header,
         project_output: None,
     })
+}
+
+/// Compile a Kiln 2 source file to a native binary (and optionally run it).
+///
+/// A first, self-contained K2 path: parse → lower → KIR → LLVM → `clang`. It
+/// links only libc (the subset that runs today uses `printf`), so it does not
+/// touch the 1.x runtime-linking path in `cmd_build`. `--emit-ir` prints the
+/// LLVM instead of building. The K2 front end and the 1.x front end share the
+/// same backend IR (KIR); this is where a K2 program becomes an executable.
+fn cmd_k2(rest: &[String]) -> i32 {
+    let mut input = None;
+    let mut output = None;
+    let mut run = false;
+    let mut emit_ir = false;
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--run" => run = true,
+            "--emit-ir" => emit_ir = true,
+            "-o" => output = it.next().cloned(),
+            _ if a.starts_with('-') => {
+                eprintln!("kiln k2: unknown option `{a}`");
+                return 2;
+            }
+            _ => input = Some(a.clone()),
+        }
+    }
+    let Some(input) = input else {
+        eprintln!("usage: kiln k2 <in.kiln> [-o out] [--run] [--emit-ir]");
+        return 2;
+    };
+    let src = match std::fs::read_to_string(&input) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("kiln k2: cannot read {input}: {e}");
+            return 1;
+        }
+    };
+    let ll = match kiln_k2::compile_to_llvm(&src) {
+        Ok(ll) => ll,
+        Err(e) => {
+            eprintln!("kiln k2: {input}:{e}");
+            return 1;
+        }
+    };
+    if emit_ir {
+        print!("{ll}");
+        return 0;
+    }
+    let stem = std::path::Path::new(&input)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("a");
+    let out = output.unwrap_or_else(|| stem.to_string());
+    let ll_path = std::env::temp_dir().join(format!("{stem}.k2.ll"));
+    if let Err(e) = std::fs::write(&ll_path, &ll) {
+        eprintln!("kiln k2: {e}");
+        return 1;
+    }
+    // The K2 entry is `ECodeStart` (as 1.x); the runtime normally supplies the
+    // C `main` that calls it. Until the K2 path links the runtime, a one-line
+    // shim provides it so the subset links against libc alone.
+    let shim_path = std::env::temp_dir().join(format!("{stem}.k2.shim.c"));
+    if let Err(e) = std::fs::write(
+        &shim_path,
+        "extern int ECodeStart(void); int main(void){return ECodeStart();}\n",
+    ) {
+        eprintln!("kiln k2: {e}");
+        return 1;
+    }
+    let status = std::process::Command::new("clang")
+        .arg("-Wno-override-module")
+        .arg(ll_path.to_str().unwrap())
+        .arg(shim_path.to_str().unwrap())
+        .arg("-o")
+        .arg(&out)
+        .status();
+    match status {
+        Ok(s) if s.success() => {}
+        Ok(_) => {
+            eprintln!("kiln k2: clang failed");
+            return 1;
+        }
+        Err(e) => {
+            eprintln!("kiln k2: could not run clang: {e}");
+            return 1;
+        }
+    }
+    if run {
+        let abs = std::path::Path::new(&out);
+        let run_path = if abs.is_absolute() {
+            abs.to_path_buf()
+        } else {
+            std::env::current_dir().unwrap_or_default().join(&out)
+        };
+        match std::process::Command::new(run_path).status() {
+            Ok(s) => return s.code().unwrap_or(0),
+            Err(e) => {
+                eprintln!("kiln k2: could not run {out}: {e}");
+                return 1;
+            }
+        }
+    }
+    0
 }
 
 fn cmd_emit(rest: &[String]) -> i32 {

@@ -1,0 +1,41 @@
+// A first Kiln 2 program. Build it with:  kiln k2 examples/k2/demo.kiln --run
+namespace Demo;
+
+public enum Profession : byte { Warrior, Champion, Mage, Priest }
+
+public record Rect(int W, int H)
+{
+    public int Area() => W * H;
+}
+
+public static class Program
+{
+    // Each class's level-one weapon, by profession — a switch-style chain.
+    public static uint WeaponFor(int p)
+    {
+        if (p == 0) return 1000;   // Short Sword
+        if (p == 1) return 1400;   // Spear
+        if (p == 2) return 1700;   // Short Wand
+        return 1800;               // Long Staff
+    }
+
+    public static void Main()
+    {
+        var r = new Rect(3, 4);
+        Console.WriteLine($"rect {r.W}x{r.H} has area {r.Area()}");
+
+        foreach (var i in 1..15)
+        {
+            if (i % 15 == 0)
+                Console.WriteLine("FizzBuzz");
+            else if (i % 3 == 0)
+                Console.WriteLine("Fizz");
+            else if (i % 5 == 0)
+                Console.WriteLine("Buzz");
+            else
+                Console.WriteLine($"{i}");
+        }
+
+        Console.WriteLine($"a mage wields weapon {WeaponFor(2)}");
+    }
+}
