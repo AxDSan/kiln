@@ -2110,6 +2110,18 @@ impl<'a> FnLower<'a> {
                         return Ok((Expr::MakeOptional(inner, Some(Box::new(v))), want));
                     }
                 }
+                // A library command reports failure through the error slot. Where
+                // a `Result<T>` is expected, the call is wrapped: the value is
+                // held, the slot is read, and the two become Ok or Err. This is
+                // the spec's §9 lowering — only a Result that is stored, passed
+                // or returned is materialised.
+                if let Some((rid, vt)) = self.cx.as_result(want) {
+                    if vt == ty
+                        && matches!(&v, Expr::Call(c) if matches!(**c, Call::Command { .. }))
+                    {
+                        return self.wrap_error_slot(v, ty, rid, vt);
+                    }
+                }
                 // A concrete type becomes an interface value: the object plus
                 // one function pointer per interface method.
                 if let Some(iface) = self.cx.as_interface(want) {
@@ -2290,6 +2302,18 @@ impl<'a> FnLower<'a> {
             ast::ExprKind::Ternary(c, a, b) => self.ternary(c, a, b, hint),
             ast::ExprKind::NullCoalesce(a, b) => {
                 let (v, vty) = self.expr_raw(a, None)?;
+                // `command(...) ?? fallback` — the call reports failure through
+                // the error slot, so it becomes a Result first. This is 1.x's
+                // `otherwise`, spelled the way C# spells a fallback.
+                let (v, vty) = if self.cx.as_result(vty).is_none()
+                    && !matches!(self.tt().kind(vty), TyKind::Optional(_))
+                    && matches!(&v, Expr::Call(c) if matches!(**c, Call::Command { .. }))
+                {
+                    let rid = self.cx.result_record(vty);
+                    self.wrap_error_slot(v, vty, rid, vty)?
+                } else {
+                    (v, vty)
+                };
                 // `T? ?? fallback`
                 if let TyKind::Optional(inner) = *self.tt().kind(vty) {
                     let held = self.new_local("$coalesce", vty);
@@ -3202,6 +3226,72 @@ impl<'a> FnLower<'a> {
             })),
             sig.ret,
         ))
+    }
+
+    /// Turn a command call into a `Result<T>` by reading the error slot it
+    /// writes. The value is evaluated once, whatever the verdict.
+    fn wrap_error_slot(
+        &mut self,
+        call: Expr,
+        vty: TyId,
+        rid: RecordId,
+        result_vt: TyId,
+    ) -> Result<(Expr, TyId), String> {
+        let held = self.new_local("$called", vty);
+        self.push(Stmt::Let {
+            local: held,
+            value: call,
+        });
+        let code = self.error_slot("last_error_code", TyTable::I32)?;
+        let failed = Expr::Bin(
+            BinOp::Ne,
+            Box::new(code),
+            Box::new(Expr::Int(0, TyTable::I32)),
+            TyTable::I32,
+        );
+        let rty = self.cx.b.m.types.intern(TyKind::Record(rid));
+        let out = self.new_local("$result", rty);
+        let text = self.error_slot("last_error_text", TyTable::STR)?;
+        self.push(Stmt::If {
+            cond: failed,
+            then: vec![Stmt::Assign {
+                place: Place::Local(out),
+                value: Expr::MakeRecord(
+                    rid,
+                    vec![Expr::Bool(false), zero_of(self.tt(), result_vt), text],
+                ),
+            }],
+            els: vec![Stmt::Assign {
+                place: Place::Local(out),
+                value: Expr::MakeRecord(
+                    rid,
+                    vec![
+                        Expr::Bool(true),
+                        Expr::Local(held),
+                        Expr::Str(String::new()),
+                    ],
+                ),
+            }],
+        });
+        Ok((Expr::Local(out), rty))
+    }
+
+    /// A no-argument command that reads the error slot.
+    fn error_slot(&mut self, name: &str, ret: TyId) -> Result<Expr, String> {
+        let reg = self
+            .cx
+            .registry
+            .as_ref()
+            .ok_or_else(|| format!("`{name}` needs the standard library"))?;
+        let cmd = reg
+            .get(name)
+            .ok_or_else(|| format!("the runtime does not provide `{name}`"))?;
+        Ok(Expr::Call(Box::new(Call::Command {
+            symbol: cmd.symbol.clone(),
+            args: Vec::new(),
+            arg_slots: Vec::new(),
+            ret,
+        })))
     }
 
     /// The type an already-lowered expression carries, for the few places that

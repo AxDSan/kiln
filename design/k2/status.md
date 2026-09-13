@@ -113,7 +113,11 @@ clang and checks stdout):
   command set is reachable rather than a hand-written handful. A command whose
   first parameter is the receiver is written as a member: `length(s)` is
   `s.Length`, `uppercase(s)` is `s.Uppercase()`. A name in scope is a value, so
-  `s.Uppercase()` is never mistaken for a static call
+  `s.Uppercase()` is never mistaken for a static call. **A command's failure
+  becomes a `Result`**: where a `Result<T>` is expected — or under `??` — the
+  call is wrapped by reading the error slot it writes, so a missing file is a
+  value rather than a sentinel. Only a Result that is stored, passed or
+  returned is materialised, as the spec's §9 lowering has it
 - **The Kiln runtime, opt-in**: `kiln k2 --runtime` links the runtime and
   support libraries exactly as a 1.x build does; `Console.WriteLine` becomes
   the `print_text` command over the slot ABI, and **every allocation comes from

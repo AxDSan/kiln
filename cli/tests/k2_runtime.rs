@@ -154,3 +154,30 @@ fn a_command_can_be_reached_as_an_instance_member() {
                }\n";
     assert_eq!(build_and_run("instance", src), "8\nKILN TWO\n");
 }
+
+#[test]
+fn a_command_failure_becomes_a_result() {
+    // A library command reports failure through the error slot. Asking for a
+    // Result turns that into a value; `??` does the same inline, which is what
+    // 1.x spelled `otherwise`.
+    let ok = tmp("result-ok.txt");
+    let p = ok.to_str().unwrap();
+    let src = format!(
+        "namespace Res;\n\
+         using Kiln.File;\n\
+         public static class P\n\
+         {{\n\
+         \x20   public static void Main()\n\
+         \x20   {{\n\
+         \x20       File.WriteText(\"{p}\", \"here\");\n\
+         \x20       Result<string> good = File.ReadText(\"{p}\");\n\
+         \x20       Console.WriteLine($\"ok={{good.IsOk}} value={{good.Value}}\");\n\
+         \x20       Result<string> bad = File.ReadText(\"/tmp/definitely-not-here-xyz\");\n\
+         \x20       Console.WriteLine($\"ok={{bad.IsOk}}\");\n\
+         \x20       Console.WriteLine(File.ReadText(\"/tmp/definitely-not-here-xyz\") ?? \"(missing)\");\n\
+         \x20   }}\n\
+         }}\n"
+    );
+    let out = build_and_run("result", &src);
+    assert_eq!(out, "ok=1 value=here\nok=0\n(missing)\n", "{out}");
+}
