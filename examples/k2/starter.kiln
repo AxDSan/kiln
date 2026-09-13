@@ -1,0 +1,92 @@
+// The starter kit that motivated Kiln 2.
+//
+// In Kiln 1.x this was a dictionary keyed by stringified indexes and a SQL
+// statement built by concatenating int_to_text() calls. Here it is a record, a
+// list, a switch expression and a lambda.
+//
+//   kiln k2 examples/k2/starter.kiln --run
+namespace Game.Server;
+
+public enum Profession { Warrior, Champion, Mage, Priest }
+
+/// One row of the kit: which bag slot, which template, and the two words the
+/// client reads off the row.
+public record KitRow(int Slot, uint Template, uint ClassValue, uint Flags);
+
+/// An item as it is stored against a character.
+public record CharacterItem(
+    uint CharacterId,
+    int Slot,
+    uint TemplateId,
+    uint ClassValue,
+    uint Flags)
+{
+    public string Describe() => $"slot {Slot}: template {TemplateId} flags {Flags}";
+}
+
+public static class StarterInventory
+{
+    // Stated rather than defaulted: a zero flags word is the shape the client
+    // holds and moves but refuses to equip.
+    const uint EggFlags        = 0x0101_0107;
+    const uint PlainFlags      = 0x0101_0101;
+    const uint ConsumableFlags = 0x0201_0101;
+    const uint SackFlags       = 0x0301_0101;
+
+    /// The kit, by bag slot. Copied from a real character, not invented.
+    public static List<KitRow> Kit()
+    {
+        var kit = new List<KitRow>();
+        kit.Add(new KitRow(0, 10157, 1747, EggFlags));         // Ghost Egg
+        kit.Add(new KitRow(1, 10154, 1747, EggFlags));         // Easter Bunny Egg
+        kit.Add(new KitRow(2, 4199, 1459, SackFlags));         // Giant Gold Sack
+        kit.Add(new KitRow(3, 4103, 2207, PlainFlags));        // Parcel Stone
+        kit.Add(new KitRow(4, 4535, 2207, ConsumableFlags));   // Exp Potion
+        kit.Add(new KitRow(5, 4538, 2207, ConsumableFlags));   // TP Potion
+        kit.Add(new KitRow(6, 4533, 2207, ConsumableFlags));   // Pet Exp Potion
+        kit.Add(new KitRow(7, 4469, 2207, ConsumableFlags));   // Golden Leaf
+        kit.Add(new KitRow(8, 3922, 2207, PlainFlags));        // Training Bag
+        kit.Add(new KitRow(9, 4151, 2207, ConsumableFlags));   // Money Bag
+        kit.Add(new KitRow(10, 3875, 2207, PlainFlags));       // Lost Book
+        kit.Add(new KitRow(11, 3875, 2207, PlainFlags));       // Lost Book
+        kit.Add(new KitRow(12, 3875, 2207, PlainFlags));       // Lost Book
+        return kit;
+    }
+
+    /// The kit for one character — the whole point of the rewrite.
+    public static List<CharacterItem> KitFor(uint characterId) =>
+        Kit().Select(k => new CharacterItem(
+            characterId, k.Slot, k.Template, k.ClassValue, k.Flags));
+
+    /// Each class's level-one weapon. Every character used to start with the
+    /// Spear, which is Champion-only, so three classes arrived unable to equip
+    /// the weapon they were holding.
+    public static uint WeaponFor(Profession p) => p switch
+    {
+        Profession.Warrior  => 1000,   // Short Sword
+        Profession.Champion => 1400,   // Spear
+        Profession.Mage     => 1700,   // Short Wand
+        _                   => 1800,   // Long Staff
+    };
+
+    /// A class with no weapon of its own is dressed without one.
+    public static int DressPieces(Profession p) => WeaponFor(p) > 0 ? 3 : 2;
+}
+
+public static class Program
+{
+    public static void Main()
+    {
+        var items = StarterInventory.KitFor(7);
+        Console.WriteLine($"{items.Count} items for character 7");
+        Console.WriteLine(items[1].Describe());
+        Console.WriteLine(items[3].Describe());
+
+        // The consumables, picked out with a predicate.
+        var consumables = items.Where(i => i.Flags == 0x0201_0101);
+        Console.WriteLine($"{consumables.Count} consumables");
+
+        Console.WriteLine($"a mage wields {StarterInventory.WeaponFor(Profession.Mage)}");
+        Console.WriteLine($"dressed in {StarterInventory.DressPieces(Profession.Priest)} pieces");
+    }
+}

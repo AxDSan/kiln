@@ -83,6 +83,7 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
         b,
         type_ids,
         enums,
+        enum_backing: HashMap::new(),
         consts: HashMap::new(),
         methods: HashMap::new(),
         type_names,
@@ -93,6 +94,17 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
         lists: HashMap::new(),
         pending: Vec::new(),
     };
+
+    // An enum's backing type, so it can be written as a parameter or field.
+    for item in &p.items {
+        if let ast::Item::Enum(ed) = item {
+            let ty = match &ed.backing {
+                Some(t) => cx.resolve(t)?,
+                None => TyTable::I32,
+            };
+            cx.enum_backing.insert(ed.name.clone(), ty);
+        }
+    }
 
     // Pass 2: fill record fields and compute C layout.
     for item in &p.items {
@@ -275,6 +287,8 @@ struct Cx {
     /// so `Type.Member` can be told from `value.Member`.
     type_names: std::collections::HashSet<String>,
     enums: HashMap<String, HashMap<String, i128>>,
+    /// An enum used as a type is its backing integer (`int` unless declared).
+    enum_backing: HashMap<String, TyId>,
     consts: HashMap<String, (TyId, ast::Expr)>,
     methods: HashMap<String, Sig>,
     /// Generic method templates, by `Type.Name` and by bare `Name`.
@@ -327,6 +341,8 @@ impl Cx {
                 other => {
                     if self.type_ids.contains_key(other) {
                         self.record_ty(other)
+                    } else if let Some(t) = self.enum_backing.get(other) {
+                        *t
                     } else {
                         return Err(format!("unknown type `{other}`"));
                     }

@@ -589,3 +589,26 @@ public static class P
 "#;
     assert_eq!(run_k2(src), "5\n2 4 6 8 10 \n1 100\nn9\nn10\n");
 }
+
+#[test]
+fn the_starter_kit_example_compiles_and_runs() {
+    // examples/k2/starter.kiln — the program that motivated K2. Kept as a test
+    // so the features it leans on (records, List, Select, switch over an enum,
+    // hex literals, unsigned fields) cannot regress together.
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("examples/k2/starter.kiln"),
+    )
+    .expect("examples/k2/starter.kiln");
+    assert_eq!(
+        run_k2(&src),
+        "13 items for character 7\n\
+         slot 0: template 10157 flags 16843015\n\
+         slot 2: template 4199 flags 50397441\n\
+         5 consumables\n\
+         a mage wields 1700\n\
+         dressed in 3 pieces\n"
+    );
+}

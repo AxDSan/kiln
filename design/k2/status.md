@@ -18,7 +18,8 @@ Updated 2026-09-13. Tracks what of the [spec](spec.md) is actually built, so the
 clang and checks stdout):
 
 - `namespace` (file-scoped and block), `using` (parsed)
-- `static class`, `class`, `record` (positional + body), `enum` (with backing type)
+- `static class`, `class`, `record` (positional + body), `enum` (with backing
+  type) — usable as a type, resolving to its backing integer
 - methods: static and instance (implicit `this`), expression-bodied `=>`
 - primitive types: `int/uint/long/ulong/short/ushort/byte/sbyte/nint/nuint/float/double/bool/char/string`
 - `var`/`let`/typed locals; fields; `const` (literal, inlined)
@@ -77,6 +78,13 @@ clang and checks stdout):
 6. compile-time attributes: `[Table]`, `Query<T>`, `[Packed]`, `[Dll]`
 7. forms + events + ABI v5
 8. LSP, `kiln migrate`, folding K2 into `kiln build`/`run` with runtime linking
+
+## Milestone
+
+`examples/k2/starter.kiln` — the program that motivated Kiln 2 — compiles and
+runs, and is covered by a test. In 1.x it was a dictionary keyed by stringified
+indexes and SQL built by concatenating `int_to_text()` calls; in K2 it is a
+record, a `List<T>`, a `Select` lambda and a `switch` over an enum.
 
 ## Known shortcuts to revisit
 
