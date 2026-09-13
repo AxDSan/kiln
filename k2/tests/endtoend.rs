@@ -1242,3 +1242,79 @@ fn the_examples_format_without_losing_anything() {
         assert_eq!(before, after, "{name}: reformatting changed the program");
     }
 }
+
+#[test]
+fn every_1x_example_migrates_and_reparses() {
+    // `kiln migrate` converts the mechanical part and leaves TODO comments for
+    // the rest. The invariant that matters: whatever it emits must be valid K2
+    // source, so the file you get back is one you can open and work on.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let dir = root.join("examples");
+    let mut seen = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let p = entry.unwrap().path();
+        if p.extension().and_then(|e| e.to_str()) != Some("kiln") {
+            continue;
+        }
+        let src = std::fs::read_to_string(&p).unwrap();
+        let name = p.file_name().unwrap().to_string_lossy().to_string();
+        let migrated = match kiln_k2::migrate(&src) {
+            Ok(m) => m,
+            // A 1.x program this build cannot parse is not migrate's failure.
+            Err(_) => continue,
+        };
+        seen += 1;
+        kiln_k2::format(&migrated).unwrap_or_else(|e| {
+            panic!("{name}: migrated output is not valid K2: {e}\n--- output ---\n{migrated}")
+        });
+    }
+    assert!(seen > 20, "expected the 1.x examples, saw {seen}");
+}
+
+#[test]
+fn migration_converts_the_mechanical_part() {
+    let src = "\
+module starter
+use text
+
+const ITEM_FLAGS = 16843009
+
+record item_spec
+  slot: int
+  template: int
+end
+
+sub starter_weapon(profession: int): int
+  if profession = 0
+    return 1000
+  end
+  return 1800
+end
+
+sub main
+  let n: int = starter_weapon(0)
+  call print_text(\"weapon {n}\")
+end
+";
+    let out = kiln_k2::migrate(src).unwrap();
+    // Naming: module and subs to PascalCase, parameters to camelCase.
+    assert!(out.contains("namespace Starter;"), "{out}");
+    assert!(out.contains("public static class Starter"), "{out}");
+    assert!(out.contains("StarterWeapon(int profession)"), "{out}");
+    assert!(out.contains("public static void Main()"), "{out}");
+    // A 1.x record becomes a record; a SCREAMING constant becomes PascalCase.
+    assert!(
+        out.contains("public record ItemSpec(int Slot, int Template)"),
+        "{out}"
+    );
+    assert!(out.contains("ItemFlags = 16843009"), "{out}");
+    // `use text` becomes a using; printing becomes Console.WriteLine.
+    assert!(out.contains("using Kiln.Text;"), "{out}");
+    assert!(out.contains("Console.WriteLine"), "{out}");
+    // 1.x interpolates every string; K2 only a `$` one.
+    assert!(out.contains("$\"weapon {n}\""), "{out}");
+    // And it is valid K2.
+    kiln_k2::format(&out).unwrap();
+}

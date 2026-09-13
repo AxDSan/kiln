@@ -130,6 +130,12 @@ pub enum Kw {
 }
 
 impl Kw {
+    /// Whether a name is a keyword, and so needs `@` to be used as an
+    /// identifier.
+    pub fn is_keyword(s: &str) -> bool {
+        Kw::from_ident(s).is_some()
+    }
+
     fn from_ident(s: &str) -> Option<Kw> {
         Some(match s {
             "namespace" => Kw::Namespace,
@@ -376,6 +382,16 @@ impl Lexer<'_> {
         let c = self.peek();
         if c == b'_' || c.is_ascii_alphabetic() {
             return Ok(self.ident());
+        }
+        // `@name` uses a keyword as an ordinary name (spec §2). The `@` is not
+        // part of the identity, so `@out` and a non-keyword `out` are one name.
+        if c == b'@' {
+            self.bump();
+            let mut s = String::new();
+            while self.peek() == b'_' || self.peek().is_ascii_alphanumeric() {
+                s.push(self.bump() as char);
+            }
+            return Ok(Tok::Ident(s));
         }
         if c.is_ascii_digit() {
             return self.number();

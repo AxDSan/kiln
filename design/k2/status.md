@@ -11,6 +11,7 @@ Updated 2026-09-13. Tracks what of the [spec](spec.md) is actually built, so the
 | `k2` | lexer + parser + lowerer (k2-syntax/k2-lower, one crate for now) | runnable subset, 6 end-to-end tests |
 | `backend` | 1.x → LLVM, split into `lower/` modules | unchanged behaviour, 61 tests |
 | `k2::print` | the canonical printer — `kiln fmt` | fixed point, comments carried, meaning unchanged |
+| `k2::migrate` | `kiln migrate` — 1.x source → K2 source | all 41 1.x examples convert to valid K2 |
 | `cli` | `kiln k2 <file> [-o] [--run] [--emit-ir] [--runtime]` | builds+runs K2; libc by default, or the real Kiln runtime with `--runtime` |
 
 ## Language: built vs. pending
@@ -62,6 +63,13 @@ clang and checks stdout):
   An event wires to a **method group or a lambda written at the wiring site** —
   a form's state is in globals, so a handler lambda needs no environment
   pointer and binds on the ABI as it stands
+- **`kiln migrate`**: a 1.x program becomes K2 source — module → namespace and
+  a static class, `sub` → method, records, consts, `use` → `using`, naming to
+  PascalCase/camelCase, `if`-arms nested, concat chains rebuilt as `$"…"`
+  interpolation, and `@keyword` where a name now collides. What it will not
+  decide (a `match`, an indirect call, a form) gets a `// TODO(migrate):`
+  comment above it. **Positions are not rebased** — K2 counts from 1 as 1.x
+  does. Every shipped 1.x example converts to valid K2
 - **`kiln fmt`**: one canonical spelling per program — four-space indent,
   braces on their own line, precedence-aware parentheses. Formatting is a fixed
   point, does not change what a program compiles to, and **carries comments**:

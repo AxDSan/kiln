@@ -80,6 +80,7 @@ fn run(args: &[String]) -> i32 {
         "run" => cmd_build(rest, true),
         "k2" => cmd_k2(rest),
         "fmt" => cmd_fmt(rest),
+        "migrate" => cmd_migrate(rest),
         "emit" => cmd_emit(rest),
         "inspect" => cmd_inspect(rest),
         "dap" => dap::run(),
@@ -450,6 +451,55 @@ fn parse_io_args(rest: &[String]) -> Result<Io, String> {
         header,
         project_output: None,
     })
+}
+
+/// Convert a Kiln 1.x program to Kiln 2 source.
+///
+/// It converts the mechanical part and leaves a `// TODO(migrate):` comment
+/// above anything it will not decide for you, so a converted file says where to
+/// look. Writes to standard output unless `-o` names a file.
+fn cmd_migrate(rest: &[String]) -> i32 {
+    let mut input = None;
+    let mut output = None;
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "-o" => output = it.next().cloned(),
+            _ if a.starts_with('-') => {
+                eprintln!("kiln migrate: unknown option `{a}`");
+                return 2;
+            }
+            _ => input = Some(a.clone()),
+        }
+    }
+    let Some(input) = input else {
+        eprintln!("usage: kiln migrate <in.kiln> [-o out.kiln]");
+        return 2;
+    };
+    let src = match std::fs::read_to_string(&input) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("kiln migrate: cannot read {input}: {e}");
+            return 1;
+        }
+    };
+    let out = match kiln_k2::migrate(&src) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("kiln migrate: {input}: {e}");
+            return 1;
+        }
+    };
+    match output {
+        Some(p) => {
+            if let Err(e) = std::fs::write(&p, &out) {
+                eprintln!("kiln migrate: cannot write {p}: {e}");
+                return 1;
+            }
+        }
+        None => print!("{out}"),
+    }
+    0
 }
 
 /// Print a Kiln 2 source file in its canonical spelling.

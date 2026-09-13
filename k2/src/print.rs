@@ -98,6 +98,15 @@ impl Out {
     }
 }
 
+/// An identifier, escaped with `@` when it collides with a keyword.
+fn name(s: &str) -> String {
+    if crate::lexer::Kw::is_keyword(s) {
+        format!("@{s}")
+    } else {
+        s.to_string()
+    }
+}
+
 fn vis(v: Vis) -> &'static str {
     match v {
         Vis::Public => "public ",
@@ -255,10 +264,15 @@ fn field(o: &mut Out, f: &Field) {
             "{}{ro}{} {} = {};",
             vis(f.vis),
             ty(&f.ty),
-            f.name,
+            name(&f.name),
             expr(d)
         )),
-        None => o.line(&format!("{}{ro}{} {};", vis(f.vis), ty(&f.ty), f.name)),
+        None => o.line(&format!(
+            "{}{ro}{} {};",
+            vis(f.vis),
+            ty(&f.ty),
+            name(&f.name)
+        )),
     }
 }
 
@@ -309,7 +323,7 @@ fn method(o: &mut Out, m: &Method) {
 
 fn params(ps: &[Param]) -> String {
     ps.iter()
-        .map(|p| format!("{} {}", ty(&p.ty), p.name))
+        .map(|p| format!("{} {}", ty(&p.ty), name(&p.name)))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -351,7 +365,7 @@ fn stmt(o: &mut Out, s: &Stmt) {
                 None if *mutable => "var".into(),
                 None => "let".into(),
             };
-            o.line(&format!("{head} {name} = {};", expr(value)));
+            o.line(&format!("{head} {} = {};", self::name(name), expr(value)));
         }
         StmtKind::Assign { target, op, value } => {
             let sym = match op {
@@ -454,7 +468,7 @@ fn stmt(o: &mut Out, s: &Stmt) {
 }
 
 fn lambda(l: &Lambda) -> String {
-    let ps: Vec<String> = l.params.iter().map(|(n, _)| n.clone()).collect();
+    let ps: Vec<String> = l.params.iter().map(|(n, _)| name(n)).collect();
     let head = if ps.len() == 1 {
         ps[0].clone()
     } else {
@@ -494,8 +508,8 @@ pub fn expr(e: &Expr) -> String {
         ExprKind::Str(s) => format!("\"{}\"", escape(s)),
         ExprKind::Char(c) => format!("'{}'", escape(&c.to_string())),
         ExprKind::Null => "null".into(),
-        ExprKind::Ident(n) => n.clone(),
-        ExprKind::Member(b, n) => format!("{}.{n}", expr(b)),
+        ExprKind::Ident(n) => name(n),
+        ExprKind::Member(b, n) => format!("{}.{}", expr(b), name(n)),
         ExprKind::Call(c, args) => {
             let a: Vec<String> = args.iter().map(expr).collect();
             format!("{}({})", expr(c), a.join(", "))

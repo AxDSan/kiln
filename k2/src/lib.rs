@@ -13,10 +13,16 @@
 pub mod ast;
 pub mod lexer;
 pub mod lower;
+pub mod migrate;
 pub mod parser;
 pub mod print;
 
 pub use kiln_kir::ModuleKind;
+
+/// Convert a Kiln 1.x program to Kiln 2 source — `kiln migrate`.
+pub fn migrate(src: &str) -> Result<String, String> {
+    migrate::migrate(src)
+}
 
 /// Parse and re-print K2 source in its canonical spelling — `kiln fmt`.
 pub fn format(src: &str) -> Result<String, String> {
