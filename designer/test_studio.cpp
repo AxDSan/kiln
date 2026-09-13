@@ -795,6 +795,29 @@ static void test_sessions(const std::string& kiln, const std::string& designer) 
 /// Each session gets its own XDG_DATA_HOME so a test never reads or writes the
 /// settings file a person sees, and so one test's value cannot leak into the
 /// next one's assertions.
+/* A Kiln 2 form opens in the designer.
+ *
+ * Studio never parses a project file itself — `kiln inspect` is its whole
+ * knowledge of one — so a K2 form should need nothing of Studio at all. This
+ * is the check that it needs nothing: the same verbs, on a K2 file, and the
+ * components are there to select. */
+static void test_kiln2_form(const std::string& kiln, const std::string& designer) {
+    std::printf("kiln 2\n");
+    const std::string form = "examples/k2/counter.kiln";
+
+    // Selecting a component and asking the inspector what it holds: a form
+    // that did not load has nothing to select, and the Events tab is where the
+    // wiring shows. `Click += OnAdd` must reach the designer as the same
+    // `click`/`on_add` pair a 1.x form gives, since that is all it knows.
+    const std::string out = session(designer, kiln, form, "select:add;click:segevents;events");
+    check("a K2 form loads at all", !has(out, "cannot load"));
+    check("a K2 handler reaches the Events tab", has(out, "click=on_add"));
+
+    // The other button, so this is about the file and not about one lucky row.
+    const std::string other = session(designer, kiln, form, "select:reset;click:segevents;events");
+    check("a second K2 handler is there too", has(other, "click=on_reset"));
+}
+
 static void test_settings(const std::string& kiln, const std::string& designer) {
     std::printf("settings\n");
     static int n = 0;
@@ -1109,7 +1132,8 @@ int main(int argc, char** argv) {
     test_catalog();
     if (::access(designer.c_str(), X_OK) == 0) {
         test_sessions(kiln, designer);
-        test_settings(kiln, designer);
+        test_kiln2_form(kiln, designer);
+    test_settings(kiln, designer);
         test_build_artifacts(kiln, designer);
         test_debugging(kiln, designer);
         test_help(kiln, designer);

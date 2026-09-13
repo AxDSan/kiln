@@ -1161,7 +1161,7 @@ fn inspect_k2(src: &str) -> i32 {
         match item {
             Item::Type(t) => {
                 for m in &t.methods {
-                    println!("sub: {}", m.name);
+                    println!("sub: {}", k2_snake(&m.name));
                     if !m.params.is_empty() || !matches!(m.ret, TypeRef::Void) {
                         let ps: Vec<String> = m
                             .params
@@ -1170,7 +1170,7 @@ fn inspect_k2(src: &str) -> i32 {
                             .collect();
                         println!(
                             "subsig: {} ({}) {}",
-                            m.name,
+                            k2_snake(&m.name),
                             ps.join(", "),
                             match &m.ret {
                                 TypeRef::Void => "-".to_string(),
@@ -1182,7 +1182,7 @@ fn inspect_k2(src: &str) -> i32 {
             }
             Item::Form(f) => {
                 for m in &f.methods {
-                    println!("sub: {}", m.name);
+                    println!("sub: {}", k2_snake(&m.name));
                 }
             }
             _ => {}
@@ -1207,30 +1207,61 @@ fn inspect_k2(src: &str) -> i32 {
         let halves: Vec<&&FormDecl> = forms.iter().filter(|o| o.name == f.name).collect();
         let first = halves.first().unwrap();
         let last = halves.last().unwrap();
+        let form_id = k2_snake(&f.name);
         println!(
-            "form: {} span={}..{}",
-            f.name, first.span.line, last.span.line
+            "form: {form_id} span={}..{}",
+            first.span.line, last.span.line
         );
         for h in &halves {
             for (name, value) in &h.properties {
-                println!("prop: {} {name} {}", f.name, escape_value(&k2_value(value)));
+                println!(
+                    "prop: {form_id} {} {}",
+                    k2_snake(name),
+                    escape_value(&k2_value(value))
+                );
             }
         }
         for h in &halves {
             for c in &h.components {
-                println!("component: {} {}", c.id, c.type_name);
+                let id = k2_snake(&c.id);
+                println!("component: {id} {}", k2_snake(&c.type_name));
                 for (name, value) in &c.properties {
-                    println!("prop: {} {name} {}", c.id, escape_value(&k2_value(value)));
+                    println!(
+                        "prop: {id} {} {}",
+                        k2_snake(name),
+                        escape_value(&k2_value(value))
+                    );
                 }
                 for (event, href) in &c.handlers {
                     if let HandlerRef::Method(m) = href {
-                        println!("handler: {} {event} {m}", c.id);
+                        println!("handler: {id} {} {}", k2_snake(event), k2_snake(m));
                     }
                 }
             }
         }
     }
     0
+}
+
+/// PascalCase to the spelling the toolchain uses everywhere else.
+///
+/// The registry's component is `label` and its property is `background_color`;
+/// K2 writes `Label` and `BackgroundColor`. That is the same rule the spec
+/// gives for commands (`File.ReadText` is `file_read_text`), applied to the
+/// designer's lines so a descriptor is found by the name it is filed under.
+fn k2_snake(name: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in name.chars().enumerate() {
+        if c.is_uppercase() {
+            if i > 0 {
+                out.push('_');
+            }
+            out.extend(c.to_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// A property's value as the designer wants to see it: the text of a literal,

@@ -92,7 +92,13 @@ clang and checks stdout):
 - **`kiln inspect` reads a K2 file**, in exactly the lines it gives for 1.x —
   `module:`, `use:`, `sub:`, `form:`, `component:`, `prop:`, `handler:` — so
   Studio reads a K2 form without a second parser and without being changed. A
-  `partial form` reports once, with a span covering both halves
+  `partial form` reports once, with a span covering both halves, and names are
+  reported in the spelling the toolchain files things under (`Label` is
+  `label`, `BackgroundColor` is `background_color`) so a descriptor is found
+- **Studio opens a Kiln 2 form**: the window, its components and their handler
+  wiring all render, and the Events tab shows `click`/`on_add` as it would for
+  1.x — verified by dumping a frame and looking at it, and pinned by a scripted
+  session in the designer's own tests. Reading is done; saving is not
 - **`kiln edit`**: `set`, `add`, `remove`, `rename`, `on` change a form's
   designer block **through the tree**, not as text — so comments, the code half
   and everything else survive. This is what Studio calls: the CLI has always

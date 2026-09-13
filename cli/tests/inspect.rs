@@ -188,20 +188,23 @@ public partial form MainWindow
     let out = kiln(&dir, &["inspect", "counter.kiln"]);
 
     assert!(out.contains("module: Counter"), "{out}");
-    assert!(out.contains("sub: OnAdd"), "{out}");
+    // Names are reported in the spelling the toolchain files things under:
+    // the registry's component is `label`, not `Label`, and the designer looks
+    // a descriptor up by that name. Same rule the spec gives for commands.
+    assert!(out.contains("sub: on_add"), "{out}");
     // One form, though it is written in two halves.
     assert_eq!(
         out.lines().filter(|l| l.starts_with("form: ")).count(),
         1,
         "a partial form must report once:\n{out}"
     );
-    assert!(out.contains("form: MainWindow span="), "{out}");
-    assert!(out.contains("prop: MainWindow Title Counter"), "{out}");
-    assert!(out.contains("prop: MainWindow Width 320"), "{out}");
-    assert!(out.contains("component: count Label"), "{out}");
-    assert!(out.contains("component: add Button"), "{out}");
-    assert!(out.contains("prop: add Text Add one"), "{out}");
-    assert!(out.contains("handler: add Click OnAdd"), "{out}");
+    assert!(out.contains("form: main_window span="), "{out}");
+    assert!(out.contains("prop: main_window title Counter"), "{out}");
+    assert!(out.contains("prop: main_window width 320"), "{out}");
+    assert!(out.contains("component: count label"), "{out}");
+    assert!(out.contains("component: add button"), "{out}");
+    assert!(out.contains("prop: add text Add one"), "{out}");
+    assert!(out.contains("handler: add click on_add"), "{out}");
 }
 
 #[test]
