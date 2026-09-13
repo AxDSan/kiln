@@ -207,7 +207,7 @@ impl Parser {
 
     fn item(&mut self) -> Result<Item, ParseError> {
         let doc = self.doc();
-        let _attrs = self.attributes()?;
+        let attrs = self.attributes()?;
         let span = self.span();
         let (vis, is_static) = self.modifiers();
         match self.bump() {
@@ -220,7 +220,7 @@ impl Parser {
                     (Kw::Struct, _) => TypeKind::Struct,
                     _ => unreachable!(),
                 };
-                Ok(Item::Type(self.type_decl(kind, vis, doc, span)?))
+                Ok(Item::Type(self.type_decl(kind, vis, doc, span, attrs)?))
             }
             other => {
                 self.i -= 1;
@@ -272,6 +272,7 @@ impl Parser {
         vis: Vis,
         doc: Option<String>,
         span: Span,
+        attrs: Vec<Attribute>,
     ) -> Result<TypeDecl, ParseError> {
         let name = self.ident()?;
         // positional record params
@@ -312,6 +313,7 @@ impl Parser {
         // A record with only positional params may end in `;`.
         if self.eat(&Tok::Semi) {
             return Ok(TypeDecl {
+                attrs: attrs.clone(),
                 kind,
                 vis,
                 name,
@@ -329,6 +331,7 @@ impl Parser {
         }
         self.expect(&Tok::RBrace)?;
         Ok(TypeDecl {
+            attrs,
             kind,
             vis,
             name,

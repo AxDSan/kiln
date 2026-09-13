@@ -543,6 +543,11 @@ pub enum Expr {
         env: Box<Expr>,
     },
 
+    /// The address of an element of an array-like buffer, as a `Ptr`. Lets a
+    /// front end compute an offset into a buffer without a pointer-arithmetic
+    /// node of its own.
+    ElemPtr(Box<Expr>, Box<Expr>),
+
     Call(Box<Call>),
 }
 

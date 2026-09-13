@@ -52,6 +52,10 @@ clang and checks stdout):
 - **`List<T>`**: `new List<T>()`, `.Add(x)` (buffer grows 4 → 8 → 16 …),
   `.Count`, 1-based indexing `xs[1]`, and `foreach` over one. KIR gained real
   indexed element access for this
+- **`[Packed]`**: a record laid out with no padding, plus generated
+  `T.Size`, `T.Read(bytes, offset)` and `r.Write(bytes, offset)` over a
+  `Bytes` buffer (`Bytes.Alloc(n)`, `buf[i]`) — an exact binary layout, which
+  is what protocol work needs
 - **`[Dll]` interop**: `[Dll("c")] public static extern int abs(int n);` calls a
   C function directly, with `Entry = "..."` to rename and
   `Convention = CallConv.StdCall` for Win32. Attributes parse on types and
@@ -82,7 +86,7 @@ clang and checks stdout):
 3. generic *types* (`class Cache<K,V>`) and generic instance methods — only generic static methods are built
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)
 5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
-6. the generating attributes: `[Table]`, `Query<T>`, `[Packed]` (`[Dll]` is done)
+6. the database attributes: `[Table]`, `Query<T>` (`[Dll]` and `[Packed]` are done)
 7. forms + events + ABI v5
 8. LSP, `kiln migrate`, folding K2 into `kiln build`/`run` with runtime linking
 

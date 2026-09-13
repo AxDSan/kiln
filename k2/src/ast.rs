@@ -45,6 +45,8 @@ pub enum TypeKind {
 
 #[derive(Clone, Debug)]
 pub struct TypeDecl {
+    /// Attributes written above the type (`[Packed]`, `[Table(...)]`).
+    pub attrs: Vec<Attribute>,
     pub kind: TypeKind,
     pub vis: Vis,
     pub name: String,

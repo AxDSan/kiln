@@ -602,6 +602,19 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                 .unwrap();
                 V { op: t, ty: inner }
             }
+            Expr::ElemPtr(base, idx) => {
+                let b = self.expr(base);
+                let i = self.expr(idx);
+                let elem = match self.tt().kind(b.ty) {
+                    TyKind::Array(e) => *e,
+                    k => panic!("ElemPtr on non-array {k:?}"),
+                };
+                let p = self.elem_ptr(&b, &i, elem);
+                V {
+                    op: p,
+                    ty: TyTable::PTR,
+                }
+            }
             Expr::MakeClosure { func, env } => self.make_closure(*func, env),
             Expr::Call(c) => self.call(c).expect("call in value position returns void"),
         }

@@ -678,3 +678,41 @@ public static class P
 "#;
     assert_eq!(run_k2(src), "42\n4\nstraight through libc\n");
 }
+
+#[test]
+fn packed_records_read_and_write_bytes() {
+    // [Packed] is what protocol work needs: an exact byte layout with no
+    // padding, written into and read back out of a buffer.
+    let src = r#"
+namespace Pk;
+
+[Packed]
+public record Header(ushort Opcode, ushort Length, uint Sequence);
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine($"size {Header.Size}");
+
+        var buf = Bytes.Alloc(64);
+        var h = new Header(0x1234, 40, 7);
+        h.Write(buf, 0);
+
+        // A second header further along the same buffer.
+        var h2 = new Header(0x5678, 12, 9);
+        h2.Write(buf, Header.Size);
+
+        var back = Header.Read(buf, 0);
+        Console.WriteLine($"{back.Opcode} {back.Length} {back.Sequence}");
+        var back2 = Header.Read(buf, Header.Size);
+        Console.WriteLine($"{back2.Opcode} {back2.Length} {back2.Sequence}");
+
+        // Little-endian on this target: the low byte of 0x1234 comes first.
+        Console.WriteLine($"{buf[0]} {buf[1]}");
+    }
+}
+"#;
+    // 2 + 2 + 4 = 8 bytes, no padding. 0x1234 = 4660, low byte 0x34 = 52.
+    assert_eq!(run_k2(src), "size 8\n4660 40 7\n22136 12 9\n52 18\n");
+}

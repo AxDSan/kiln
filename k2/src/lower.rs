@@ -85,6 +85,8 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
         }
     }
 
+    // `Bytes` is addressed as a buffer of u8; intern that once up front.
+    let _ = b.m.types.intern(TyKind::Array(TyTable::U8));
     let mut cx = Cx {
         b,
         type_ids,
@@ -100,8 +102,18 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
         lists: HashMap::new(),
         dicts: HashMap::new(),
         dlls: HashMap::new(),
+        packed: std::collections::HashSet::new(),
         pending: Vec::new(),
     };
+
+    // `[Packed]` records lay out with no padding.
+    for item in &p.items {
+        if let ast::Item::Type(td) = item {
+            if td.attrs.iter().any(|a| a.name == "Packed") {
+                cx.packed.insert(td.name.clone());
+            }
+        }
+    }
 
     // An enum's backing type, so it can be written as a parameter or field.
     for item in &p.items {
@@ -129,7 +141,17 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
                     ty,
                 });
             }
-            let (size, align, offsets) = cx.c_layout(&fields);
+            let (size, align, offsets) = if cx.packed.contains(&td.name) {
+                let mut off = 0i64;
+                let mut offs = Vec::new();
+                for f in &fields {
+                    offs.push(off);
+                    off += cx.scalar_size(f.ty);
+                }
+                (off, 1, offs)
+            } else {
+                cx.c_layout(&fields)
+            };
             cx.b.m.records[rid.0 as usize].fields = fields;
             cx.b.m.records[rid.0 as usize].layout = Layout::C {
                 size,
@@ -373,6 +395,9 @@ struct Cx {
     dicts: HashMap<(TyId, TyId), RecordId>,
     /// `[Dll]` externs, by `Type.Name` and bare `Name`.
     dlls: HashMap<String, DllSig>,
+    /// Records declared `[Packed]`: laid out with no padding, and given
+    /// generated Read/Write over a byte buffer.
+    packed: std::collections::HashSet<String>,
     pending: Vec<Pending>,
 }
 
@@ -1510,6 +1535,20 @@ impl<'a> FnLower<'a> {
             }
             ast::ExprKind::Index(base, idx) => {
                 let (b, bty) = self.expr(base, None)?;
+                if bty == TyTable::BYTES {
+                    let (i, _) = self.expr(idx, Some(TyTable::I32))?;
+                    let u8arr = self.cx.b.m.types.intern(TyKind::Array(TyTable::U8));
+                    return Ok((
+                        Expr::Index(
+                            Box::new(Expr::Cast {
+                                value: Box::new(b),
+                                to: u8arr,
+                            }),
+                            Box::new(i),
+                        ),
+                        TyTable::U8,
+                    ));
+                }
                 if self.cx.as_dict(bty).is_some() {
                     return Err(
                         "read a Dictionary with `.Get(k)`, which yields a `V?` — there is no \
@@ -1733,6 +1772,17 @@ impl<'a> FnLower<'a> {
     }
 
     fn member(&mut self, recv: &ast::Expr, member: &str) -> Result<(Expr, TyId), String> {
+        // `T.Size` on a [Packed] record.
+        if let ast::ExprKind::Ident(obj) = &recv.kind {
+            if member == "Size" && self.cx.packed.contains(obj) {
+                let rty = self.cx.record_ty(obj);
+                if let TyKind::Record(rid) = *self.tt().kind(rty) {
+                    if let Layout::C { size, .. } = self.cx.b.m.record(rid).layout {
+                        return Ok((Expr::Int(size as i128, TyTable::I32), TyTable::I32));
+                    }
+                }
+            }
+        }
         // Enum member: Type.Member
         if let ast::ExprKind::Ident(obj) = &recv.kind {
             if let Some(members) = self.cx.enums.get(obj) {
@@ -1840,6 +1890,97 @@ impl<'a> FnLower<'a> {
                     });
                     self.list_add(holder, lty, val);
                     return Ok((Expr::Int(0, TyTable::VOID), TyTable::VOID));
+                }
+            }
+            // `T.Read(bytes, offset)` on a [Packed] record, and `Bytes.Alloc(n)`.
+            if let ast::ExprKind::Ident(obj) = &recv.kind {
+                if obj == "Bytes" && name == "Alloc" {
+                    if args.len() != 1 {
+                        return Err("Bytes.Alloc takes a length".into());
+                    }
+                    let (n, _) = self.expr(&args[0], Some(TyTable::I32))?;
+                    return Ok((
+                        Expr::Call(Box::new(Call::Dll {
+                            library: "c".into(),
+                            symbol: "calloc".into(),
+                            conv: CallConv::Cdecl,
+                            args: vec![
+                                Expr::Cast {
+                                    value: Box::new(n),
+                                    to: TyTable::I64,
+                                },
+                                Expr::Int(1, TyTable::I64),
+                            ],
+                            arg_tys: vec![TyTable::I64, TyTable::I64],
+                            ret: TyTable::BYTES,
+                            varargs: false,
+                        })),
+                        TyTable::BYTES,
+                    ));
+                }
+                if name == "Read" && self.cx.packed.contains(obj) {
+                    if args.len() != 2 {
+                        return Err(format!("{obj}.Read takes a buffer and an offset"));
+                    }
+                    let rty = self.cx.record_ty(obj);
+                    let TyKind::Record(rid) = *self.tt().kind(rty) else {
+                        unreachable!()
+                    };
+                    let size = match &self.cx.b.m.record(rid).layout {
+                        Layout::C { size, .. } => *size,
+                        _ => return Err("a [Packed] record needs a C layout".into()),
+                    };
+                    let (buf, _) = self.expr(&args[0], Some(TyTable::BYTES))?;
+                    let (off, _) = self.expr(&args[1], Some(TyTable::I32))?;
+                    let dst = self.new_local("$read", rty);
+                    self.push(Stmt::Let {
+                        local: dst,
+                        value: Expr::Call(Box::new(Call::Dll {
+                            library: "c".into(),
+                            symbol: "malloc".into(),
+                            conv: CallConv::Cdecl,
+                            args: vec![Expr::Int(size as i128, TyTable::I64)],
+                            arg_tys: vec![TyTable::I64],
+                            ret: rty,
+                            varargs: false,
+                        })),
+                    });
+                    self.push(Stmt::Expr(self.memcpy(
+                        Expr::Cast {
+                            value: Box::new(Expr::Local(dst)),
+                            to: TyTable::PTR,
+                        },
+                        self.byte_ptr(buf, off),
+                        size,
+                    )));
+                    return Ok((Expr::Local(dst), rty));
+                }
+            }
+            // `record.Write(bytes, offset)` on a [Packed] record.
+            if name == "Write" {
+                let (rv, rty) = self.expr_raw(recv, None)?;
+                if let TyKind::Record(rid) = *self.tt().kind(rty) {
+                    let rname = self.cx.b.m.record(rid).name.clone();
+                    if self.cx.packed.contains(&rname) {
+                        if args.len() != 2 {
+                            return Err("Write takes a buffer and an offset".into());
+                        }
+                        let size = match &self.cx.b.m.record(rid).layout {
+                            Layout::C { size, .. } => *size,
+                            _ => return Err("a [Packed] record needs a C layout".into()),
+                        };
+                        let (buf, _) = self.expr(&args[0], Some(TyTable::BYTES))?;
+                        let (off, _) = self.expr(&args[1], Some(TyTable::I32))?;
+                        self.push(Stmt::Expr(self.memcpy(
+                            self.byte_ptr(buf, off),
+                            Expr::Cast {
+                                value: Box::new(rv),
+                                to: TyTable::PTR,
+                            },
+                            size,
+                        )));
+                        return Ok((Expr::Int(0, TyTable::VOID), TyTable::VOID));
+                    }
                 }
             }
             // `dict.ContainsKey(k)` / `dict.Get(k)`
@@ -2079,6 +2220,37 @@ impl<'a> FnLower<'a> {
                 TyTable::I32,
             ),
         });
+    }
+
+    /// `memcpy(dst, src, n)`.
+    fn memcpy(&self, dst: Expr, src: Expr, n: i64) -> Expr {
+        Expr::Call(Box::new(Call::Dll {
+            library: "c".into(),
+            symbol: "memcpy".into(),
+            conv: CallConv::Cdecl,
+            args: vec![dst, src, Expr::Int(n as i128, TyTable::I64)],
+            arg_tys: vec![TyTable::PTR, TyTable::PTR, TyTable::I64],
+            ret: TyTable::PTR,
+            varargs: false,
+        }))
+    }
+
+    /// The address of byte `offset` in a buffer (offsets are 0-based).
+    fn byte_ptr(&self, buf: Expr, offset: Expr) -> Expr {
+        let u8arr = self
+            .cx
+            .b
+            .m
+            .types
+            .find(&TyKind::Array(TyTable::U8))
+            .expect("u8 buffer type");
+        Expr::ElemPtr(
+            Box::new(Expr::Cast {
+                value: Box::new(buf),
+                to: u8arr,
+            }),
+            Box::new(offset),
+        )
     }
 
     /// Are two keys equal? Strings compare by content through libc `strcmp`;
