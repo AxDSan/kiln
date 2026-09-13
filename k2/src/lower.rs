@@ -553,6 +553,17 @@ struct FnLower<'a> {
     /// captured, which is safe and costs one indirection).
     captured: std::collections::HashSet<String>,
     blocks: Vec<Vec<Stmt>>,
+    /// Deferred work, one frame per lexical block; each frame holds one group
+    /// per `defer` (a single `defer` can lower to several statements). KIR has
+    /// no `defer`, so a frame is copied to every edge that leaves its block:
+    /// the groups unwind in reverse, the statements inside a group do not.
+    defers: Vec<Vec<Vec<Stmt>>>,
+    /// `defers.len()` on entry to each enclosing loop body, so `break` and
+    /// `continue` know which frames they are leaving.
+    loop_frames: Vec<usize>,
+    /// The step of each enclosing loop (a `for`'s increment, a `foreach`'s
+    /// counter bump). `continue` must run it, or the loop never advances.
+    loop_steps: Vec<Vec<Stmt>>,
 }
 
 impl<'a> FnLower<'a> {
@@ -565,6 +576,23 @@ impl<'a> FnLower<'a> {
             cells: HashMap::new(),
             captured: std::collections::HashSet::new(),
             blocks: vec![Vec::new()],
+            defers: vec![Vec::new()],
+            loop_frames: Vec::new(),
+            loop_steps: Vec::new(),
+        }
+    }
+
+    /// Copy deferred statements from the innermost frame down to `floor`,
+    /// innermost first and in reverse declaration order — the unwinding order.
+    fn emit_defers_to(&mut self, floor: usize) {
+        let mut out = Vec::new();
+        for frame in self.defers[floor..].iter().rev() {
+            for group in frame.iter().rev() {
+                out.extend(group.iter().cloned());
+            }
+        }
+        for s in out {
+            self.push(s);
         }
     }
 
@@ -573,6 +601,7 @@ impl<'a> FnLower<'a> {
     }
 
     fn finish(mut self) -> Vec<Stmt> {
+        self.emit_defers_to(0);
         self.blocks.pop().unwrap()
     }
 
@@ -632,9 +661,14 @@ impl<'a> FnLower<'a> {
 
     fn lower_body(&mut self, stmts: &[ast::Stmt]) -> Result<Vec<Stmt>, String> {
         self.blocks.push(Vec::new());
+        self.defers.push(Vec::new());
         for s in stmts {
             self.stmt(s)?;
         }
+        // Leaving the block by falling off its end also runs its defers.
+        let floor = self.defers.len() - 1;
+        self.emit_defers_to(floor);
+        self.defers.pop();
         Ok(self.blocks.pop().unwrap())
     }
 
@@ -684,7 +718,10 @@ impl<'a> FnLower<'a> {
                 }
             }
             ast::StmtKind::Return(v) => match v {
-                None => self.push(Stmt::Return(None)),
+                None => {
+                    self.emit_defers_to(0);
+                    self.push(Stmt::Return(None))
+                }
                 Some(e) => {
                     let (val, vty) = self.expr(e, Some(self.ret))?;
                     // `return x;` from a Result-returning method is `Ok(x)`
@@ -696,6 +733,7 @@ impl<'a> FnLower<'a> {
                         ),
                         _ => val,
                     };
+                    self.emit_defers_to(0);
                     self.push(Stmt::Return(Some(val)));
                 }
             },
@@ -717,8 +755,12 @@ impl<'a> FnLower<'a> {
                     then: vec![Stmt::Break],
                     els: vec![],
                 }];
-                let body_b = self.lower_body(body)?;
-                inner.extend(body_b);
+                self.loop_frames.push(self.defers.len());
+                self.loop_steps.push(Vec::new());
+                let body_b = self.lower_body(body);
+                self.loop_steps.pop();
+                self.loop_frames.pop();
+                inner.extend(body_b?);
                 self.push(Stmt::Loop { body: inner });
             }
             ast::StmtKind::For {
@@ -739,28 +781,54 @@ impl<'a> FnLower<'a> {
                     then: vec![Stmt::Break],
                     els: vec![],
                 }];
-                inner.extend(self.lower_body(body)?);
-                if let Some(step) = step.as_ref() {
-                    self.blocks.push(Vec::new());
-                    self.stmt(step)?;
-                    let step_b = self.blocks.pop().unwrap();
-                    inner.extend(step_b);
-                }
+                let step_b = match step.as_ref() {
+                    Some(step) => {
+                        self.blocks.push(Vec::new());
+                        self.stmt(step)?;
+                        self.blocks.pop().unwrap()
+                    }
+                    None => Vec::new(),
+                };
+                self.loop_frames.push(self.defers.len());
+                self.loop_steps.push(step_b.clone());
+                let body_b = self.lower_body(body);
+                self.loop_steps.pop();
+                self.loop_frames.pop();
+                inner.extend(body_b?);
+                inner.extend(step_b);
                 self.push(Stmt::Loop { body: inner });
             }
             ast::StmtKind::ForEach { var, coll, body } => {
                 self.lower_foreach(var, coll, body)?;
             }
-            ast::StmtKind::Break => self.push(Stmt::Break),
-            ast::StmtKind::Continue => self.push(Stmt::Continue),
+            ast::StmtKind::Break => {
+                let floor = self.loop_frames.last().copied().unwrap_or(0);
+                self.emit_defers_to(floor);
+                self.push(Stmt::Break)
+            }
+            ast::StmtKind::Continue => {
+                let floor = self.loop_frames.last().copied().unwrap_or(0);
+                self.emit_defers_to(floor);
+                // The step runs on `continue` too — otherwise a counted loop
+                // that continues never advances.
+                if let Some(step) = self.loop_steps.last().cloned() {
+                    for st in step {
+                        self.push(st);
+                    }
+                }
+                self.push(Stmt::Continue)
+            }
             ast::StmtKind::Block(b) => {
                 let body = self.lower_body(b)?;
                 for s in body {
                     self.push(s);
                 }
             }
-            ast::StmtKind::Defer(_) => {
-                return Err("`defer` is not yet lowered".into());
+            ast::StmtKind::Defer(inner) => {
+                self.blocks.push(Vec::new());
+                self.stmt(inner)?;
+                let lowered = self.blocks.pop().unwrap();
+                self.defers.last_mut().unwrap().push(lowered);
             }
         }
         Ok(())
@@ -800,8 +868,7 @@ impl<'a> FnLower<'a> {
             then: vec![Stmt::Break],
             els: vec![],
         }];
-        inner.extend(self.lower_body(body)?);
-        inner.push(Stmt::Assign {
+        let step = vec![Stmt::Assign {
             place: Place::Local(iv),
             value: Expr::Bin(
                 BinOp::Add,
@@ -809,7 +876,14 @@ impl<'a> FnLower<'a> {
                 Box::new(Expr::Int(1, ity)),
                 ity,
             ),
-        });
+        }];
+        self.loop_frames.push(self.defers.len());
+        self.loop_steps.push(step.clone());
+        let body_b = self.lower_body(body);
+        self.loop_steps.pop();
+        self.loop_frames.pop();
+        inner.extend(body_b?);
+        inner.extend(step);
         self.push(Stmt::Loop { body: inner });
         Ok(())
     }

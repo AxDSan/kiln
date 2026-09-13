@@ -335,3 +335,87 @@ public static class P
     // 84/2=42; 7 is odd -> failure; 40 -> 20 -> 10; 6 -> 3 -> odd, propagated.
     assert_eq!(run_k2(src), "42\n0\nnot even\n-1\n5\n10\n0 not even\n");
 }
+
+#[test]
+fn defer_runs_on_every_exit() {
+    let src = r#"
+namespace D;
+public static class P
+{
+    public static int Attempt(int n)
+    {
+        Console.WriteLine("open");
+        defer Console.WriteLine("close");
+        if (n == 1)
+            return 10;
+        Console.WriteLine("work");
+        return 20;
+    }
+
+    public static void Main()
+    {
+        Console.WriteLine($"{Attempt(1)}");
+        Console.WriteLine($"{Attempt(2)}");
+
+        // Several defers in one block unwind in reverse order.
+        Console.WriteLine("a");
+        defer Console.WriteLine("first-declared-runs-last");
+        defer Console.WriteLine("last-declared-runs-first");
+        Console.WriteLine("b");
+    }
+}
+"#;
+    assert_eq!(
+        run_k2(src),
+        "open\nclose\n10\nopen\nwork\nclose\n20\na\nb\nlast-declared-runs-first\nfirst-declared-runs-last\n"
+    );
+}
+
+#[test]
+fn defer_runs_when_a_loop_body_is_left() {
+    let src = r#"
+namespace D2;
+public static class P
+{
+    public static void Main()
+    {
+        foreach (var i in 1..3)
+        {
+            defer Console.WriteLine($"leave {i}");
+            if (i == 2)
+                continue;
+            Console.WriteLine($"body {i}");
+        }
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "body 1\nleave 1\nleave 2\nbody 3\nleave 3\n");
+}
+
+#[test]
+fn continue_advances_a_counted_loop() {
+    // Regression: `continue` jumps to the loop top, so the step has to run on
+    // that edge too — otherwise the loop never advances and spins forever.
+    let src = r#"
+namespace K;
+public static class P
+{
+    public static void Main()
+    {
+        foreach (var i in 1..5)
+        {
+            if (i % 2 == 0)
+                continue;
+            Console.WriteLine($"{i}");
+        }
+        for (var j = 1; j <= 5; j++)
+        {
+            if (j == 3)
+                continue;
+            Console.WriteLine($"j{j}");
+        }
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "1\n3\n5\nj1\nj2\nj4\nj5\n");
+}

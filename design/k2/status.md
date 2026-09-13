@@ -43,17 +43,20 @@ clang and checks stdout):
   `return x;` is an implicit `Ok`, `Error("…")` a failure, `?` propagates out of
   a Result-returning method, `??` supplies a fallback, and `.IsOk`/`.IsErr`/
   `.Value`/`.Error` read it. No exceptions anywhere
+- **`defer`**: runs when its block is left — falling off the end, `return`,
+  `break` or `continue` — with several defers in a block unwinding in reverse
+  declaration order
 
 **Parsed but not yet lowered** (parser accepts; lowering errors clearly):
 
-- `T?` (optionals) and `defer`; `??`/`?` are built for `Result`, not yet for `T?`
+- `T?` (optionals); `??`/`?` are built for `Result`, not yet for `T?`
 - generic type arguments (`List<T>` maps to an array type; others rejected)
 - interface bases (`: I` parsed and ignored)
 
 **Not yet built** (next phases, in rough order):
 
 1. `List<T>`/`Dictionary<K,V>` against the real Kiln runtime (currently only the array *type* exists; no element ops link a runtime)
-2. `T?` optionals with flow checking, and `defer`
+2. `T?` optionals with flow checking
 3. generic *types* (`class Cache<K,V>`) and generic instance methods — only generic static methods are built
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)
 5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
