@@ -364,14 +364,17 @@ impl Parser {
         let ty = self.type_ref()?;
         let name = self.ident()?;
 
-        // method?
+        // method? (optionally generic: `Name<T, U>(...)`)
+        let type_params = self.opt_type_params()?;
         if self.peek() == &Tok::LParen {
             let params = self.params()?;
+            self.opt_where_clause()?;
             let (body, expr_body) = self.method_body()?;
             methods.push(Method {
                 vis,
                 is_static,
                 name,
+                type_params,
                 params,
                 ret: ty,
                 body,
@@ -412,6 +415,60 @@ impl Parser {
             is_const: false,
             span,
         });
+        Ok(())
+    }
+
+    /// `<T, U>` after a method name, or nothing.
+    fn opt_type_params(&mut self) -> Result<Vec<String>, ParseError> {
+        if self.peek() != &Tok::Lt {
+            return Ok(Vec::new());
+        }
+        self.bump();
+        let mut out = Vec::new();
+        loop {
+            out.push(self.ident()?);
+            if self.eat(&Tok::Comma) {
+                continue;
+            }
+            break;
+        }
+        self.close_generic()?;
+        Ok(out)
+    }
+
+    /// `where T : I1, U : I2` — parsed and dropped (constraints are not yet enforced).
+    fn opt_where_clause(&mut self) -> Result<(), ParseError> {
+        if self.peek() != &Tok::Ident("where".into()) {
+            return Ok(());
+        }
+        self.bump();
+        loop {
+            self.ident()?; // type param
+            self.expect(&Tok::Colon)?;
+            loop {
+                self.type_ref()?;
+                if !self.eat(&Tok::Comma) {
+                    break;
+                }
+                // a comma may separate constraints or the next `T :` clause;
+                // if the next token is an ident followed by `:`, it's a new clause
+                if matches!(self.peek(), Tok::Ident(_)) && self.peek_at(1) == &Tok::Colon {
+                    break;
+                }
+            }
+            if self.peek() == &Tok::LBrace || self.peek() == &Tok::FatArrow {
+                break;
+            }
+            if self.peek() == &Tok::Ident("where".into()) {
+                self.bump();
+                continue;
+            }
+            // another `T :` clause without a `where` keyword repeat
+            if matches!(self.peek(), Tok::Ident(_)) && self.peek_at(1) == &Tok::Colon {
+                continue;
+            }
+            break;
+        }
         Ok(())
     }
 

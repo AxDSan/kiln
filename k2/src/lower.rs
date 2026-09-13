@@ -64,6 +64,10 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
         enums,
         consts: HashMap::new(),
         methods: HashMap::new(),
+        generics: HashMap::new(),
+        mono: HashMap::new(),
+        tvars: HashMap::new(),
+        pending: Vec::new(),
     };
 
     // Pass 2: fill record fields and compute C layout.
@@ -112,6 +116,19 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
                 } else {
                     Some(cx.record_ty(&td.name))
                 };
+                // A generic method is a template: nothing is emitted until a
+                // call site fixes its type arguments.
+                if !m.type_params.is_empty() {
+                    let t = Template {
+                        owner: td.name.clone(),
+                        method: m.clone(),
+                        this: this.is_some(),
+                    };
+                    cx.generics
+                        .insert(format!("{}.{}", td.name, m.name), t.clone());
+                    cx.generics.entry(m.name.clone()).or_insert(t);
+                    continue;
+                }
                 let mut params = Vec::new();
                 if let Some(t) = this {
                     params.push(("this", t));
@@ -141,15 +158,20 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
         }
     }
 
-    // Pass 4: lower method bodies.
+    // Pass 4: lower method bodies (generic templates are skipped — their
+    // instances are lowered from the pending queue below).
     for item in &p.items {
         if let ast::Item::Type(td) = item {
             for m in &td.methods {
+                if !m.type_params.is_empty() {
+                    continue;
+                }
                 let sig = cx.methods[&format!("{}.{}", td.name, m.name)].clone();
                 cx.lower_method(td, m, &sig)?;
             }
         }
     }
+    cx.drain_pending()?;
 
     // Top-level statements become Main.
     if !p.top_level.is_empty() {
@@ -182,12 +204,37 @@ struct Sig {
     ret: TyId,
 }
 
+/// A generic method awaiting instantiation.
+#[derive(Clone)]
+struct Template {
+    owner: String,
+    method: ast::Method,
+    this: bool,
+}
+
+/// A monomorphic instance whose body still has to be lowered. Body lowering is
+/// deferred to the driver so it never runs inside another function's lowering
+/// (which already holds the one mutable borrow of `Cx`).
+struct Pending {
+    fid: FuncId,
+    method: ast::Method,
+    tvars: HashMap<String, TyId>,
+    this: bool,
+}
+
 struct Cx {
     b: ModuleBuilder,
     type_ids: HashMap<String, RecordId>,
     enums: HashMap<String, HashMap<String, i128>>,
     consts: HashMap<String, (TyId, ast::Expr)>,
     methods: HashMap<String, Sig>,
+    /// Generic method templates, by `Type.Name` and by bare `Name`.
+    generics: HashMap<String, Template>,
+    /// Instantiation cache: (template key, concrete type arguments) → instance.
+    mono: HashMap<(String, Vec<TyId>), Sig>,
+    /// Type parameters bound while lowering one instance.
+    tvars: HashMap<String, TyId>,
+    pending: Vec<Pending>,
 }
 
 impl Cx {
@@ -197,6 +244,13 @@ impl Cx {
     }
 
     fn resolve(&mut self, t: &ast::TypeRef) -> Result<TyId, String> {
+        // A bound type parameter wins: inside a monomorphic instance, `T` is
+        // whatever this instantiation bound it to.
+        if let ast::TypeRef::Named(n) = t {
+            if let Some(&bound) = self.tvars.get(n.as_str()) {
+                return Ok(bound);
+            }
+        }
         Ok(match t {
             ast::TypeRef::Void => TyTable::VOID,
             ast::TypeRef::Named(n) => match n.as_str() {
@@ -274,21 +328,27 @@ impl Cx {
         m: &ast::Method,
         sig: &Sig,
     ) -> Result<(), String> {
-        let mut fl = FnLower::new(self, sig.fid, sig.ret);
-        // bind `this`
-        if sig.this {
-            fl.scope
-                .insert("this".into(), (LocalId(0), fl_self_this_ty(&fl)));
+        let _ = td;
+        self.lower_into(sig.fid, m, sig.this)
+    }
+
+    /// Lower a method body into an already-declared function. Parameter types
+    /// come from the declared function, so this serves plain methods and
+    /// monomorphic instances alike.
+    fn lower_into(&mut self, fid: FuncId, m: &ast::Method, this: bool) -> Result<(), String> {
+        let ret = self.b.m.func(fid).ret;
+        let ptys: Vec<TyId> = self.b.m.func(fid).params.iter().map(|p| p.ty).collect();
+        let mut fl = FnLower::new(self, fid, ret);
+        if this {
+            fl.scope.insert("this".into(), (LocalId(0), ptys[0]));
         }
-        // parameters are the leading locals
-        let base = if sig.this { 1 } else { 0 };
+        let base = if this { 1 } else { 0 };
         for (i, p) in m.params.iter().enumerate() {
-            let lid = LocalId((base + i) as u32);
-            let ty = fl.cx.methods[&format!("{}.{}", td.name, m.name)].params[i];
-            fl.scope.insert(p.name.clone(), (lid, ty));
+            fl.scope
+                .insert(p.name.clone(), (LocalId((base + i) as u32), ptys[base + i]));
         }
         if let Some(e) = &m.expr_body {
-            let (val, _) = fl.expr(e, Some(sig.ret))?;
+            let (val, _) = fl.expr(e, Some(ret))?;
             fl.push(Stmt::Return(Some(val)));
         } else {
             for s in &m.body {
@@ -296,13 +356,21 @@ impl Cx {
             }
         }
         let body = fl.finish();
-        self.b.set_body(sig.fid, body);
+        self.b.set_body(fid, body);
         Ok(())
     }
-}
 
-fn fl_self_this_ty(fl: &FnLower) -> TyId {
-    fl.cx.b.m.func(fl.fid).params[0].ty
+    /// Lower every queued monomorphic instance. Lowering one may queue more
+    /// (a generic calling another generic), so this runs to a fixed point.
+    fn drain_pending(&mut self) -> Result<(), String> {
+        while let Some(p) = self.pending.pop() {
+            let saved = std::mem::replace(&mut self.tvars, p.tvars);
+            let r = self.lower_into(p.fid, &p.method, p.this);
+            self.tvars = saved;
+            r?;
+        }
+        Ok(())
+    }
 }
 
 fn round_up(x: i64, align: i64) -> i64 {
@@ -798,6 +866,29 @@ impl<'a> FnLower<'a> {
             }
             _ => return Err("unsupported call target".into()),
         };
+        // A generic method: lower the arguments first (their types are what the
+        // type parameters are inferred from), then instantiate.
+        if self.cx.generics.contains_key(&key) {
+            if this_arg.is_some() {
+                return Err(format!(
+                    "generic instance method `{key}` is not supported yet — make it static"
+                ));
+            }
+            let mut lowered = Vec::new();
+            for a in args {
+                lowered.push(self.expr(a, None)?);
+            }
+            let sig = self.instantiate(&key, &lowered)?;
+            let kargs = lowered.into_iter().map(|(e, _)| e).collect();
+            return Ok((
+                Expr::Call(Box::new(Call::Direct {
+                    func: sig.fid,
+                    args: kargs,
+                })),
+                sig.ret,
+            ));
+        }
+
         let sig = self
             .cx
             .methods
@@ -818,6 +909,82 @@ impl<'a> FnLower<'a> {
             })),
             sig.ret,
         ))
+    }
+
+    /// Monomorphise a generic method for the argument types at this call site.
+    ///
+    /// Type parameters are inferred by matching each declared parameter type
+    /// against the lowered argument's type; the instance is cached, so the same
+    /// type arguments produce one function with one mangled symbol.
+    fn instantiate(&mut self, key: &str, args: &[(Expr, TyId)]) -> Result<Sig, String> {
+        let t = self.cx.generics[key].clone();
+        let m = &t.method;
+        if args.len() != m.params.len() {
+            return Err(format!(
+                "`{key}` expects {} argument(s), got {}",
+                m.params.len(),
+                args.len()
+            ));
+        }
+        // Infer.
+        let mut tvars: HashMap<String, TyId> = HashMap::new();
+        for (p, (_, aty)) in m.params.iter().zip(args.iter()) {
+            unify(&p.ty, *aty, &m.type_params, &self.cx.b.m.types, &mut tvars)?;
+        }
+        let mut targs = Vec::new();
+        for tp in &m.type_params {
+            match tvars.get(tp) {
+                Some(t) => targs.push(*t),
+                None => {
+                    return Err(format!(
+                        "cannot infer type parameter `{tp}` of `{key}` from the arguments"
+                    ))
+                }
+            }
+        }
+        let cache_key = (key.to_string(), targs.clone());
+        if let Some(sig) = self.cx.mono.get(&cache_key) {
+            return Ok(sig.clone());
+        }
+
+        // Declare the instance with the type parameters bound.
+        let saved = std::mem::replace(&mut self.cx.tvars, tvars.clone());
+        let result = (|| -> Result<Sig, String> {
+            let ptys: Vec<TyId> = m
+                .params
+                .iter()
+                .map(|p| self.cx.resolve(&p.ty))
+                .collect::<Result<_, String>>()?;
+            let ret = self.cx.resolve(&m.ret)?;
+            let suffix: Vec<String> = targs.iter().map(|t| format!("{}", t.0)).collect();
+            let sym = format!("{}_{}${}", t.owner, m.name, suffix.join("_"));
+            let params: Vec<(&str, TyId)> = m
+                .params
+                .iter()
+                .zip(ptys.iter())
+                .map(|(p, t)| (p.name.as_str(), *t))
+                .collect();
+            let fid = self.cx.b.declare_func(&sym, params, ret);
+            Ok(Sig {
+                fid,
+                this: false,
+                params: ptys,
+                ret,
+            })
+        })();
+        self.cx.tvars = saved;
+        let sig = result?;
+
+        self.cx.mono.insert(cache_key, sig.clone());
+        // The body is lowered by the driver, not here: this call is already
+        // inside one function's lowering.
+        self.cx.pending.push(Pending {
+            fid: sig.fid,
+            method: t.method.clone(),
+            tvars,
+            this: false,
+        });
+        Ok(sig)
     }
 
     fn is_type_name(&self, name: &str) -> bool {
@@ -1003,6 +1170,52 @@ impl<'a> FnLower<'a> {
 
     fn place_ty(&mut self, e: &ast::Expr) -> Result<TyId, String> {
         Ok(self.expr(e, None)?.1)
+    }
+}
+
+/// Match a declared parameter type against a concrete argument type, binding
+/// any type parameter it names. Concrete positions are not checked here — the
+/// instance body is type-checked when it is lowered.
+fn unify(
+    decl: &ast::TypeRef,
+    actual: TyId,
+    type_params: &[String],
+    tt: &TyTable,
+    out: &mut HashMap<String, TyId>,
+) -> Result<(), String> {
+    match decl {
+        ast::TypeRef::Named(n) if type_params.iter().any(|p| p == n) => {
+            match out.get(n) {
+                Some(prev) if *prev != actual => {
+                    return Err(format!("conflicting types inferred for `{n}`"))
+                }
+                _ => {
+                    out.insert(n.clone(), actual);
+                }
+            }
+            Ok(())
+        }
+        ast::TypeRef::Array(_) | ast::TypeRef::Generic(_, _)
+            if matches!(tt.kind(actual), TyKind::Array(_)) =>
+        {
+            let elem = match tt.kind(actual) {
+                TyKind::Array(e) => *e,
+                _ => unreachable!(),
+            };
+            let decl_elem = match decl {
+                ast::TypeRef::Array(inner) => inner.as_ref(),
+                ast::TypeRef::Generic(_, args) if !args.is_empty() => &args[0],
+                _ => return Ok(()),
+            };
+            unify(decl_elem, elem, type_params, tt, out)
+        }
+        ast::TypeRef::Optional(inner) => {
+            if let TyKind::Optional(t) = tt.kind(actual) {
+                return unify(inner, *t, type_params, tt, out);
+            }
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }
 

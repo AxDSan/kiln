@@ -136,3 +136,48 @@ Console.WriteLine($"{count}");
     // /2=1000000000 (not >1e9) → 2 iterations. Unsigned matters: 4e9 > 2^31.
     assert_eq!(run_k2(src), "2\n");
 }
+
+#[test]
+fn generic_method_monomorphises() {
+    let src = r#"
+namespace G;
+
+public static class Program
+{
+    public static T Max<T>(T a, T b) where T : IComparable<T> => a >= b ? a : b;
+
+    public static void Main()
+    {
+        Console.WriteLine($"{Max(3, 9)}");
+        Console.WriteLine($"{Max(2.5, 1.5)}");
+        Console.WriteLine($"{Max(10, 4)}");
+    }
+}
+"#;
+    // int and double instances; the two int calls share one instantiation.
+    assert_eq!(run_k2(src), "9\n2.5\n10\n");
+}
+
+#[test]
+fn generic_instances_get_distinct_symbols() {
+    let src = r#"
+namespace G2;
+public static class P
+{
+    public static T Id<T>(T x) => x;
+    public static void Main()
+    {
+        Console.WriteLine($"{Id(7)}");
+        Console.WriteLine($"{Id(1.5)}");
+    }
+}
+"#;
+    let ll = kiln_k2::compile_to_llvm(src).unwrap();
+    let n = ll.matches("define internal").filter(|_| true).count();
+    assert!(n >= 3, "expected Main + two Id instances, got {n}:\n{ll}");
+    assert!(
+        ll.contains("@P_Id$"),
+        "mangled instance symbols missing:\n{ll}"
+    );
+    assert_eq!(run_k2(src), "7\n1.5\n");
+}

@@ -100,6 +100,8 @@ pub struct Method {
     pub vis: Vis,
     pub is_static: bool,
     pub name: String,
+    /// Generic type parameters (`Max<T>`), empty for a non-generic method.
+    pub type_params: Vec<String>,
     pub params: Vec<Param>,
     pub ret: TypeRef,
     pub body: Vec<Stmt>,
