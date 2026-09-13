@@ -773,3 +773,41 @@ public static class P
     let err = kiln_k2::compile_to_llvm(src).unwrap_err();
     assert!(err.contains("cannot be translated to SQL"), "got: {err}");
 }
+
+#[test]
+fn the_kiln_runtime_lowering_emits_slot_abi_commands() {
+    // With the Kiln runtime, printing is the `print_text` command over the slot
+    // ABI rather than printf. Linking it needs the runtime sources, which the
+    // CLI does (`kiln k2 --runtime`); here we check the IR takes that path.
+    let src = r#"
+namespace Rt;
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine("hello");
+        var n = 6 * 7;
+        Console.WriteLine($"answer {n}");
+    }
+}
+"#;
+    let ll = kiln_k2::compile_to_llvm_with(src, kiln_k2::Runtime::Kiln).unwrap();
+    assert!(
+        ll.contains("declare void @kn_print_text(ptr, i32, ptr)"),
+        "the runtime command should be declared:\n{ll}"
+    );
+    assert!(
+        ll.contains("call void @kn_print_text(ptr %s"),
+        "printing should go through the slot ABI:\n{ll}"
+    );
+    assert!(
+        !ll.contains("@printf"),
+        "printf should not be used with the Kiln runtime:\n{ll}"
+    );
+    // The interpolated line is built once and printed once.
+    assert_eq!(ll.matches("@kn_print_text(ptr %s").count(), 2, "{ll}");
+
+    // The libc lowering of the same source still uses printf.
+    let libc = kiln_k2::compile_to_llvm(src).unwrap();
+    assert!(libc.contains("@printf"));
+}

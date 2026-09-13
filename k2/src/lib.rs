@@ -15,6 +15,21 @@ pub mod lexer;
 pub mod lower;
 pub mod parser;
 
+pub use lower::Runtime;
+
+/// Parse and lower K2 source to a KIR module, choosing what it links against.
+pub fn compile_with(src: &str, runtime: Runtime) -> Result<kiln_kir::Module, String> {
+    let toks = lexer::lex(src).map_err(|e| format!("{}:{}: {}", e.line, e.col, e.msg))?;
+    let program =
+        parser::parse(toks).map_err(|e| format!("{}:{}: {}", e.span.line, e.span.col, e.msg))?;
+    lower::lower_with(&program, runtime)
+}
+
+/// Parse and lower to textual LLVM IR for a chosen runtime.
+pub fn compile_to_llvm_with(src: &str, runtime: Runtime) -> Result<String, String> {
+    Ok(kiln_kir::emit::emit(&compile_with(src, runtime)?))
+}
+
 /// Parse and lower K2 source to a KIR module.
 pub fn compile(src: &str) -> Result<kiln_kir::Module, String> {
     let toks = lexer::lex(src).map_err(|e| format!("{}:{}: {}", e.line, e.col, e.msg))?;

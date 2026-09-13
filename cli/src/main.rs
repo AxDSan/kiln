@@ -463,11 +463,13 @@ fn cmd_k2(rest: &[String]) -> i32 {
     let mut output = None;
     let mut run = false;
     let mut emit_ir = false;
+    let mut use_runtime = false;
     let mut it = rest.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--run" => run = true,
             "--emit-ir" => emit_ir = true,
+            "--runtime" => use_runtime = true,
             "-o" => output = it.next().cloned(),
             _ if a.starts_with('-') => {
                 eprintln!("kiln k2: unknown option `{a}`");
@@ -487,7 +489,12 @@ fn cmd_k2(rest: &[String]) -> i32 {
             return 1;
         }
     };
-    let ll = match kiln_k2::compile_to_llvm(&src) {
+    let runtime = if use_runtime {
+        kiln_k2::Runtime::Kiln
+    } else {
+        kiln_k2::Runtime::Libc
+    };
+    let ll = match kiln_k2::compile_to_llvm_with(&src, runtime) {
         Ok(ll) => ll,
         Err(e) => {
             eprintln!("kiln k2: {input}:{e}");
@@ -508,9 +515,54 @@ fn cmd_k2(rest: &[String]) -> i32 {
         eprintln!("kiln k2: {e}");
         return 1;
     }
-    // The K2 entry is `ECodeStart` (as 1.x); the runtime normally supplies the
-    // C `main` that calls it. Until the K2 path links the runtime, a one-line
-    // shim provides it so the subset links against libc alone.
+    // With `--runtime`, link the Kiln runtime exactly as a 1.x build does: it
+    // supplies the C `main` that calls `ECodeStart`, the collector, and the
+    // support libraries behind the slot ABI.
+    if use_runtime {
+        let Some(root) = find_repo_root() else {
+            eprintln!("kiln k2: --runtime needs the Kiln runtime sources");
+            return 1;
+        };
+        let plan = match libload::load(&root, &[]) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("kiln k2: {e}");
+                return 1;
+            }
+        };
+        let out_path = std::path::PathBuf::from(&out);
+        if clang_link(
+            &ll_path,
+            &root,
+            &plan,
+            &out_path,
+            Target::Console,
+            Os::Linux,
+            Arch::host(),
+            false,
+        )
+        .is_err()
+        {
+            return 1;
+        }
+        if run {
+            let run_path = if out_path.is_absolute() {
+                out_path.clone()
+            } else {
+                std::env::current_dir().unwrap_or_default().join(&out_path)
+            };
+            return match std::process::Command::new(run_path).status() {
+                Ok(s) => s.code().unwrap_or(0),
+                Err(e) => {
+                    eprintln!("kiln k2: could not run {out}: {e}");
+                    1
+                }
+            };
+        }
+        return 0;
+    }
+
+    // Without it, a one-line shim provides `main` so the libc-only subset links.
     let shim_path = std::env::temp_dir().join(format!("{stem}.k2.shim.c"));
     if let Err(e) = std::fs::write(
         &shim_path,

@@ -10,7 +10,7 @@ Updated 2026-09-13. Tracks what of the [spec](spec.md) is actually built, so the
 | `kir` | the typed middle IR + LLVM emitter | types, emitter, 5 tests (4 exit fixtures + slot-ABI) |
 | `k2` | lexer + parser + lowerer (k2-syntax/k2-lower, one crate for now) | runnable subset, 6 end-to-end tests |
 | `backend` | 1.x → LLVM, split into `lower/` modules | unchanged behaviour, 61 tests |
-| `cli` | `kiln k2 <file> [-o] [--run] [--emit-ir]` | builds+runs K2 via clang, libc only |
+| `cli` | `kiln k2 <file> [-o] [--run] [--emit-ir] [--runtime]` | builds+runs K2; libc by default, or the real Kiln runtime with `--runtime` |
 
 ## Language: built vs. pending
 
@@ -52,6 +52,10 @@ clang and checks stdout):
 - **`List<T>`**: `new List<T>()`, `.Add(x)` (buffer grows 4 → 8 → 16 …),
   `.Count`, 1-based indexing `xs[1]`, and `foreach` over one. KIR gained real
   indexed element access for this
+- **The Kiln runtime, opt-in**: `kiln k2 --runtime` links the runtime and
+  support libraries exactly as a 1.x build does, and `Console.WriteLine`
+  becomes the `print_text` command over the slot ABI instead of `printf` —
+  the first K2 program to reach the real runtime
 - **`[Table]` with compile-time SQL**: `[Table("...")]`, `[Column("...")]`,
   `[Auto]` on a record give `T.InsertSql()` and `T.SelectSql(x => ...)`, where
   the predicate is translated to a parameterised `where` clause **at compile
@@ -87,7 +91,7 @@ clang and checks stdout):
 
 **Not yet built** (next phases, in rough order):
 
-1. `HashSet<T>`; hashing for `Dictionary` (lookup is a linear scan); moving strings, lists and dictionaries off libc onto the Kiln runtime and collector
+1. `HashSet<T>`; hashing for `Dictionary` (lookup is a linear scan); moving strings, lists and dictionaries onto the runtime's own text/array commands and the collector (the link path now exists; the data structures still use libc)
 2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
 3. generic *types* (`class Cache<K,V>`) and generic instance methods — only generic static methods are built
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)

@@ -27,7 +27,22 @@ const LIST_LEN: usize = 0;
 const LIST_CAP: usize = 1;
 const LIST_DATA: usize = 2;
 
+/// How a K2 program reaches the outside world.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Runtime {
+    /// libc only: printing is `printf`. Self-contained, links nothing else.
+    #[default]
+    Libc,
+    /// The Kiln runtime: printing is the `print_text` command over the slot
+    /// ABI, exactly as a 1.x program reaches it.
+    Kiln,
+}
+
 pub fn lower(p: &ast::Program) -> Result<Module, String> {
+    lower_with(p, Runtime::Libc)
+}
+
+pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> {
     let mut b = ModuleBuilder::new(
         p.namespace.as_deref().unwrap_or("program"),
         ModuleKind::Console,
@@ -88,6 +103,7 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
     // `Bytes` is addressed as a buffer of u8; intern that once up front.
     let _ = b.m.types.intern(TyKind::Array(TyTable::U8));
     let mut cx = Cx {
+        runtime,
         b,
         type_ids,
         enums,
@@ -403,6 +419,7 @@ struct Cell {
 }
 
 struct Cx {
+    runtime: Runtime,
     b: ModuleBuilder,
     type_ids: HashMap<String, RecordId>,
     /// Every declared type name — records, classes, static classes and enums —
@@ -1270,36 +1287,68 @@ impl<'a> FnLower<'a> {
             return Ok(None);
         }
         let newline = method == "WriteLine";
-        if args.is_empty() {
-            if newline {
-                self.emit_print_str("\n");
-            }
-            return Ok(Some(()));
-        }
-        // Interpolation: print each segment, then a newline.
-        if let ast::ExprKind::Interp(segs) = &args[0].kind {
-            for seg in segs {
-                match seg {
-                    ast::InterpSeg::Lit(s) => self.emit_print_str(s),
-                    ast::InterpSeg::Expr(inner) => {
-                        let (v, ty) = self.expr(inner, None)?;
-                        self.emit_print_value(v, ty)?;
+
+        // Gather the line as literal chunks and values, whichever form the
+        // argument took.
+        let mut parts: Vec<(String, Option<(Expr, TyId)>)> = Vec::new();
+        if let Some(arg) = args.first() {
+            match &arg.kind {
+                ast::ExprKind::Interp(segs) => {
+                    for seg in segs {
+                        match seg {
+                            ast::InterpSeg::Lit(l) => parts.push((l.clone(), None)),
+                            ast::InterpSeg::Expr(x) => {
+                                let (v, t) = self.expr(x, None)?;
+                                parts.push((String::new(), Some((v, t))));
+                            }
+                        }
                     }
                 }
+                _ => {
+                    let (v, t) = self.expr(arg, None)?;
+                    parts.push((String::new(), Some((v, t))));
+                }
             }
-            if newline {
-                self.emit_print_str("\n");
+        }
+
+        if self.cx.runtime == Runtime::Kiln {
+            // `print_text` writes a whole line, so the line is built first.
+            if !newline {
+                return Err(
+                    "Console.Write is not available against the Kiln runtime yet — \
+                     print_text writes a whole line"
+                        .into(),
+                );
             }
+            if parts.is_empty() {
+                self.emit_command_print(Expr::Str(String::new()));
+                return Ok(Some(()));
+            }
+            let only_literal = parts.len() == 1 && parts[0].1.is_none();
+            let s = if only_literal {
+                Expr::Str(parts[0].0.clone())
+            } else {
+                self.build_string(parts).0
+            };
+            self.emit_command_print(s);
             return Ok(Some(()));
         }
-        let (v, ty) = self.expr(&args[0], None)?;
-        if ty == TyTable::STR {
-            self.emit_printf(if newline { "%s\n" } else { "%s" }, vec![(v, TyTable::STR)]);
-        } else {
-            self.emit_print_value(v, ty)?;
-            if newline {
-                self.emit_print_str("\n");
+
+        // libc: one printf per chunk, then the newline.
+        for (lit, val) in parts {
+            if !lit.is_empty() {
+                self.emit_print_str(&lit);
             }
+            if let Some((v, t)) = val {
+                if t == TyTable::STR {
+                    self.emit_printf("%s", vec![(v, TyTable::STR)]);
+                } else {
+                    self.emit_print_value(v, t)?;
+                }
+            }
+        }
+        if newline {
+            self.emit_print_str("\n");
         }
         Ok(Some(()))
     }
@@ -1473,10 +1522,20 @@ impl<'a> FnLower<'a> {
         Ok(())
     }
 
+    /// Print a string through the Kiln runtime's `print_text` command.
+    fn emit_command_print(&mut self, s: Expr) {
+        self.push(Stmt::Expr(Expr::Call(Box::new(Call::Command {
+            symbol: "kn_print_text".into(),
+            args: vec![s],
+            arg_slots: vec![SlotTy {
+                tag: 9, // KN_SDT_TEXT
+                ty: TyTable::STR,
+            }],
+            ret: TyTable::VOID,
+        }))));
+    }
+
     fn emit_printf(&mut self, fmt: &str, extra: Vec<(Expr, TyId)>) {
-        // Only the format string is a fixed parameter of `printf`; every value
-        // is variadic. Keeping `arg_tys` at just `[STR]` means one uniform
-        // `declare i32 @printf(ptr, ...)` however printf is called.
         let mut args = vec![Expr::Str(fmt.to_string())];
         for (e, _) in extra {
             args.push(e);
