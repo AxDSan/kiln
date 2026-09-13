@@ -332,3 +332,78 @@ fn console_write_interleaves_with_the_runtimes_own_printing() {
     );
     assert_eq!(out, "start\n1 2 3 end\nab\n", "{out}");
 }
+
+#[test]
+fn a_table_record_inserts_and_queries() {
+    // Phase 7's point: the statement is built while compiling — no reflection
+    // reaches the binary — and then actually runs. A captured value is bound as
+    // a parameter, never pasted into the SQL, and each column is read back with
+    // the reader its declared type asks for.
+    let src = "\
+namespace DbRt;
+using Kiln.Db;
+
+[Table(\"items\")]
+public record Item(
+    [Auto] long Id,
+    int OwnerId,
+    string Name);
+
+public static class P
+{
+    public static void Main()
+    {
+        var h = Db.Open(\"sqlite::memory:\");
+        Db.Exec(h, \"create table items (id integer primary key, owner_id int, name text)\", []);
+
+        Item.Insert(h, new Item(0, 7, \"sword\"));
+        Item.Insert(h, new Item(0, 7, \"shield\"));
+        Item.Insert(h, new Item(0, 9, \"hat\"));
+
+        var wanted = 7;
+        var mine = Item.Select(h, i => i.OwnerId == wanted);
+        Console.WriteLine($\"{mine.Count} rows\");
+        foreach (var it in mine)
+            Console.WriteLine($\"{it.Id} {it.OwnerId} {it.Name}\");
+
+        // No predicate: every row.
+        Console.WriteLine($\"{Item.Select(h).Count} total\");
+    }
+}
+";
+    let out = build_and_run("table", src);
+    assert_eq!(
+        out, "2 rows\n1 7 sword\n2 7 shield\n3 total\n",
+        "{out}"
+    );
+}
+
+#[test]
+fn a_quoted_value_is_bound_not_pasted() {
+    // The reason a query is parameterised at all: a value that looks like SQL
+    // is data. Pasted in, this ends the statement and drops the table.
+    let src = "\
+namespace DbInj;
+using Kiln.Db;
+
+[Table(\"notes\")]
+public record Note(int Id, string Body);
+
+public static class P
+{
+    public static void Main()
+    {
+        var h = Db.Open(\"sqlite::memory:\");
+        Db.Exec(h, \"create table notes (id int, body text)\", []);
+        Db.Exec(h, \"insert into notes values (1, 'safe')\", []);
+        Db.Exec(h, \"insert into notes values (2, ?)\", [\"'; drop table notes; --\"]);
+
+        var nasty = \"'; drop table notes; --\";
+        var found = Note.Select(h, n => n.Body == nasty);
+        Console.WriteLine($\"{found.Count} matched\");
+        Console.WriteLine($\"{Note.Select(h).Count} rows survive\");
+    }
+}
+";
+    assert_eq!(build_and_run("inject", src), "1 matched\n2 rows survive\n");
+}

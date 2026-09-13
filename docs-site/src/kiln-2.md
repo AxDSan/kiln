@@ -392,27 +392,43 @@ SQL **while compiling** — no reflection reaches the binary.
 ```k2
 namespace Data;
 
-[Table("character_items")]
-public record CharacterItem(
-    [Auto] ulong Id,
-    uint CharacterId,
-    int Slot,
-    [Column("flags")] uint Flags);
+using Kiln.Db;
+
+[Table("items")]
+public record Item(
+    [Auto] long Id,
+    int OwnerId,
+    [Column("name")] string Name);
 
 public static class P
 {
     public static void Main()
     {
-        Console.WriteLine(CharacterItem.InsertSql());
+        var h = Db.Open("sqlite::memory:");
+        Db.Exec(h, "create table items (id integer primary key, owner_id int, name text)", []);
+
+        Item.Insert(h, new Item(0, 7, "sword"));
+        Item.Insert(h, new Item(0, 9, "hat"));
+
         var wanted = 7;
-        Console.WriteLine(CharacterItem.SelectSql(i => i.CharacterId == wanted && i.Slot < 10));
+        foreach (var it in Item.Select(h, i => i.OwnerId == wanted))
+            Console.WriteLine($"{it.Id} {it.Name}");
+
+        // The statement itself, if you want to see or log it.
+        Console.WriteLine(Item.InsertSql());
     }
 }
 ```
 
+`Insert` and `Select` run the statement; `InsertSql` and `SelectSql` answer
+with its text. Both build the same SQL while compiling, so nothing about the
+row's shape reaches the binary — which column is read with which `db_` reader
+is decided here, from the record's declared types.
+
 Anything a database cannot evaluate is a compile error naming it, so a query
 never half-runs in the wrong place. A captured value becomes a `?` parameter
-rather than being pasted into the statement.
+rather than being pasted into the statement: a value that looks like SQL is
+data, and stays data.
 
 ## The standard library
 

@@ -313,6 +313,9 @@ pub enum ExprKind {
     Lambda(Lambda),
     /// `subject switch { pattern => value, _ => value }`
     Switch(Box<Expr>, Vec<SwitchArm>),
+    /// A collection expression: `[]`, `[a, b, c]`. Target-typed — today that
+    /// means an array, which is what a command taking a list of values wants.
+    Collection(Vec<Expr>),
 }
 
 #[derive(Clone, Debug)]

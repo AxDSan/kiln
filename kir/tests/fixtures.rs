@@ -328,3 +328,61 @@ fn a_bool_widens_to_one_not_minus_one() {
     b.set_entry(main);
     assert_eq!(run(&b.build()), "1\n0\n");
 }
+
+// 7 ─ A runtime array must carry the tag and length the runtime expects.
+//
+// `kn_ary_new(tag, len)` takes the tag first. Swapped, an empty literal asks
+// for an array of `tag` elements with no element type — and the failure lands
+// far away, in whatever command reads it. This checks the emitted call rather
+// than running it, since the array lives in the runtime and these fixtures
+// link libc alone.
+#[test]
+fn an_array_is_built_with_the_tag_first_and_one_based_positions() {
+    let mut b = ModuleBuilder::new("arylit", ModuleKind::Console, Target::X86_64_LINUX);
+    let main = b.declare_func("main_", vec![], TyTable::VOID);
+    let arr = Expr::MakeArray(
+        TyTable::I32,
+        vec![Expr::Int(10, TyTable::I32), Expr::Int(20, TyTable::I32)],
+    );
+    let ty = b.m.types.intern(TyKind::Array(TyTable::I32));
+    let l = b.add_local(main, "a", ty);
+    b.set_body(main, vec![Stmt::Let { local: l, value: arr }, Stmt::Return(None)]);
+    b.set_entry(main);
+    let ll = kiln_kir::emit::emit(&b.build());
+    // Tag 3 is KN_SDT_INT; the length is 2.
+    assert!(
+        ll.contains("@kn_ary_new(i32 3, i32 2)"),
+        "the tag must come first:\n{ll}"
+    );
+    // And positions count from 1, as everywhere else in Kiln. The values
+    // themselves go through temporaries, so only the position is asserted.
+    assert!(ll.contains("@kn_ary_set(ptr %t0, i32 1,"), "{ll}");
+    assert!(ll.contains("@kn_ary_set(ptr %t0, i32 2,"), "{ll}");
+    assert!(
+        !ll.contains("@kn_ary_set(ptr %t0, i32 0,"),
+        "a zero-based store:\n{ll}"
+    );
+}
+
+// 8 ─ An empty array is length 0, not length `tag`.
+#[test]
+fn an_empty_array_has_no_elements() {
+    let mut b = ModuleBuilder::new("aryempty", ModuleKind::Console, Target::X86_64_LINUX);
+    let main = b.declare_func("main_", vec![], TyTable::VOID);
+    let ty = b.m.types.intern(TyKind::Array(TyTable::STR));
+    let l = b.add_local(main, "a", ty);
+    b.set_body(
+        main,
+        vec![
+            Stmt::Let {
+                local: l,
+                value: Expr::MakeArray(TyTable::STR, vec![]),
+            },
+            Stmt::Return(None),
+        ],
+    );
+    b.set_entry(main);
+    let ll = kiln_kir::emit::emit(&b.build());
+    // Tag 9 is KN_SDT_TEXT.
+    assert!(ll.contains("@kn_ary_new(i32 9, i32 0)"), "{ll}");
+}

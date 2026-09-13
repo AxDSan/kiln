@@ -493,6 +493,10 @@ fn lambda(l: &Lambda) -> String {
 /// so the result always re-parses to the same tree.
 pub fn expr(e: &Expr) -> String {
     match &e.kind {
+        ExprKind::Collection(items) => {
+            let parts: Vec<String> = items.iter().map(expr).collect();
+            format!("[{}]", parts.join(", "))
+        }
         ExprKind::Int(v) => v.to_string(),
         ExprKind::Float(v, f32) => {
             if *f32 {

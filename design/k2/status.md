@@ -175,6 +175,13 @@ clang and checks stdout):
 
 - `x!` (null-forgiving) and `x?.M`; `??` covers both `Result` and `T?`
 - generic type arguments (`List<T>` maps to an array type; others rejected)
+- **`[Table]` runs**: `T.Insert(h, row)` and `T.Select(h, x => pred)` build the
+  statement at compile time and execute it through `libs/db` — the predicate
+  becomes parameterised SQL, captured values bind rather than being pasted, and
+  each column is read back with the reader its declared type asks for, into a
+  `List<T>`. `InsertSql`/`SelectSql` still answer with the text alone
+- collection expressions `[a, b, c]` and `[]`, target-typed to an array — what
+  a command taking a list of values (`db_exec`'s parameters) expects
 - interface bases (`: I` parsed and ignored)
 - closures over a `foreach` variable: each turn binds its own cell, so a lambda
   made in a loop holds that turn's value (C#'s post-5.0 rule), while a write
@@ -186,9 +193,8 @@ clang and checks stdout):
 2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
 3. constraints beyond interfaces (`where T : class`, `new()`) are parsed and ignored
 4. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
-5. binding the generated SQL to `libs/db` and returning rows (the statement text is generated; execution needs the runtime)
-6. ABI v5 proper: a handler that captures a *local*; Studio itself calling `kiln edit` (the command exists; the C++ side still splices 1.x text)
-7. Studio's code view still uses its own C++ highlighting rather than the language server
+5. ABI v5 proper: a handler that captures a *local*; Studio itself calling `kiln edit` (the command exists; the C++ side still splices 1.x text)
+6. Studio's code view still uses its own C++ highlighting rather than the language server
 
 ## Milestone: the RAD half runs
 

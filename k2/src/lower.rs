@@ -211,6 +211,7 @@ pub fn lower_full(
                     _ => snake_case(&td.name),
                 };
                 let mut columns = Vec::new();
+                let mut types = Vec::new();
                 for f in td.record_params.iter().chain(td.fields.iter()) {
                     let col = f
                         .attrs
@@ -223,9 +224,16 @@ pub fn lower_full(
                         .unwrap_or_else(|| snake_case(&f.name));
                     let auto = f.attrs.iter().any(|a| a.name == "Auto");
                     columns.push((f.name.clone(), col, auto));
+                    types.push(f.ty.clone());
                 }
-                cx.tables
-                    .insert(td.name.clone(), TableInfo { table, columns });
+                cx.tables.insert(
+                    td.name.clone(),
+                    TableInfo {
+                        table,
+                        columns,
+                        types,
+                    },
+                );
             }
         }
     }
@@ -538,6 +546,9 @@ struct TableInfo {
     table: String,
     /// `(field name, column name, is_auto)` in declaration order.
     columns: Vec<(String, String, bool)>,
+    /// Each column's declared type, so a row can be read back into a record
+    /// with the right `db_*` reader rather than everything as text.
+    types: Vec<ast::TypeRef>,
 }
 
 /// A foreign function declared with `[Dll]`.
@@ -2195,6 +2206,25 @@ impl<'a> FnLower<'a> {
 
     fn expr_raw(&mut self, e: &ast::Expr, hint: Option<TyId>) -> Result<(Expr, TyId), String> {
         match &e.kind {
+            // `[a, b, c]` — an array, which is the shape a command taking a
+            // list of values expects. The element type comes from the hint, or
+            // from the first element when there is none.
+            ast::ExprKind::Collection(items) => {
+                let elem = match hint.map(|h| self.tt().kind(h).clone()) {
+                    Some(TyKind::Array(e)) => e,
+                    _ => match items.first() {
+                        Some(first) => self.expr(first, None)?.1,
+                        None => TyTable::STR,
+                    },
+                };
+                let mut vals = Vec::new();
+                for it in items {
+                    let (v, _) = self.expr(it, Some(elem))?;
+                    vals.push(v);
+                }
+                let ty = self.cx.b.m.types.intern(TyKind::Array(elem));
+                Ok((Expr::MakeArray(elem, vals), ty))
+            }
             ast::ExprKind::Int(v) => {
                 let ty = hint
                     .filter(|t| is_int_ty(self.tt(), *t))
@@ -2706,6 +2736,15 @@ impl<'a> FnLower<'a> {
             // the binary, only the string these produce.
             if let ast::ExprKind::Ident(obj) = &recv.kind {
                 if let Some(info) = self.cx.tables.get(obj).cloned() {
+                    // The `*Sql` pair answer with the statement text; these two
+                    // run it. Both build the same SQL at compile time — the
+                    // difference is only whether the database is touched.
+                    if name == "Insert" {
+                        return self.table_insert(&info, args);
+                    }
+                    if name == "Select" {
+                        return self.table_select(obj, &info, args);
+                    }
                     if name == "InsertSql" {
                         let cols: Vec<&str> = info
                             .columns
@@ -2737,7 +2776,8 @@ impl<'a> FnLower<'a> {
                         };
                         let param = l.params.first().map(|(n, _)| n.clone()).unwrap_or_default();
                         let mut where_sql = String::new();
-                        self.query_sql(body, &param, &info, &mut where_sql)?;
+                        let mut binds = Vec::new();
+                        self.query_sql(body, &param, &info, &mut where_sql, &mut binds)?;
                         return Ok((Expr::Str(format!("{head} where {where_sql}")), TyTable::STR));
                     }
                 }
@@ -3132,12 +3172,16 @@ impl<'a> FnLower<'a> {
     /// `&&`/`||`/`!`, a column of the row, and constants. Anything else is a
     /// compile error naming the unsupported piece, rather than something that
     /// silently runs in the wrong place.
+    /// Translate a query predicate to SQL, collecting into `binds` every value
+    /// that becomes a `?`. A captured value is never pasted into the statement:
+    /// it is bound, so a query cannot be built wrong by its own data.
     fn query_sql(
         &mut self,
         e: &ast::Expr,
         param: &str,
         info: &TableInfo,
         out: &mut String,
+        binds: &mut Vec<ast::Expr>,
     ) -> Result<(), String> {
         use ast::ExprKind as E;
         match &e.kind {
@@ -3156,15 +3200,15 @@ impl<'a> FnLower<'a> {
                     }
                 };
                 out.push('(');
-                self.query_sql(a, param, info, out)?;
+                self.query_sql(a, param, info, out, binds)?;
                 out.push_str(&format!(" {sym} "));
-                self.query_sql(b, param, info, out)?;
+                self.query_sql(b, param, info, out, binds)?;
                 out.push(')');
                 Ok(())
             }
             E::Unary(ast::UnOp::Not, inner) => {
                 out.push_str("not ");
-                self.query_sql(inner, param, info, out)
+                self.query_sql(inner, param, info, out, binds)
             }
             // `x.Column` — the row's column.
             E::Member(recv, field) => {
@@ -3192,15 +3236,16 @@ impl<'a> FnLower<'a> {
                 out.push_str(if *b { "1" } else { "0" });
                 Ok(())
             }
-            E::Str(s) => {
+            E::Str(_) => {
                 // A literal string is still parameterised, never interpolated.
-                let _ = s;
                 out.push('?');
+                binds.push(e.clone());
                 Ok(())
             }
             // Anything captured from outside becomes a bound parameter.
             E::Ident(_) => {
                 out.push('?');
+                binds.push(e.clone());
                 Ok(())
             }
             other => Err(format!("this cannot be translated to SQL: {other:?}")),
@@ -3338,6 +3383,239 @@ impl<'a> FnLower<'a> {
             }],
         });
         Ok((Expr::Local(out), rty))
+    }
+
+    /// Call a `libs/db` command by its Kiln name, with the slot tags its
+    /// declared signature asks for.
+    fn db_call(
+        &mut self,
+        name: &str,
+        args: Vec<(Expr, TyId)>,
+        ret: TyId,
+    ) -> Result<Expr, String> {
+        let reg = self.cx.registry.as_ref().ok_or_else(|| {
+            format!("`{name}` needs the `db` library — add `using Kiln.Db;`")
+        })?;
+        let cmd = reg
+            .get(name)
+            .ok_or_else(|| format!("the `db` library does not provide `{name}`"))?;
+        let symbol = cmd.symbol.clone();
+        let mut slots = Vec::new();
+        let mut vals = Vec::new();
+        for (v, t) in args {
+            slots.push(SlotTy {
+                tag: self.cx.b.m.types.sdt_tag(t),
+                ty: t,
+            });
+            vals.push(v);
+        }
+        Ok(Expr::Call(Box::new(Call::Command {
+            symbol,
+            args: vals,
+            arg_slots: slots,
+            ret,
+        })))
+    }
+
+    /// A value as text, which is how `db_exec`/`db_query` bind parameters:
+    /// their parameter list is an array of text.
+    fn as_text(&mut self, v: Expr, ty: TyId) -> Expr {
+        if ty == TyTable::STR {
+            return v;
+        }
+        self.build_string(vec![(String::new(), Some((v, ty)))]).0
+    }
+
+    /// `T.Insert(handle, row)` — the statement built at compile time, the
+    /// values bound at run time. An `[Auto]` column is left to the database.
+    fn table_insert(
+        &mut self,
+        info: &TableInfo,
+        args: &[ast::Expr],
+    ) -> Result<(Expr, TyId), String> {
+        if args.len() != 2 {
+            return Err("Insert takes a database handle and a row".into());
+        }
+        let (h, _) = self.expr(&args[0], Some(TyTable::I32))?;
+        let (row, row_ty) = self.expr(&args[1], None)?;
+        let held = self.new_local("$row", row_ty);
+        self.push(Stmt::Let {
+            local: held,
+            value: row,
+        });
+
+        let cols: Vec<&str> = info
+            .columns
+            .iter()
+            .filter(|(_, _, auto)| !auto)
+            .map(|(_, c, _)| c.as_str())
+            .collect();
+        let sql = format!(
+            "insert into {} ({}) values ({})",
+            info.table,
+            cols.join(", "),
+            vec!["?"; cols.len()].join(", ")
+        );
+
+        // Each non-auto field, in declaration order, as text.
+        let mut binds = Vec::new();
+        for (i, (_, _, auto)) in info.columns.iter().enumerate() {
+            if *auto {
+                continue;
+            }
+            let fty = self.cx.resolve(&info.types[i])?;
+            let v = Expr::Field(Box::new(Expr::Local(held)), i);
+            binds.push(self.as_text(v, fty));
+        }
+        let arr_ty = self.cx.b.m.types.intern(TyKind::Array(TyTable::STR));
+        let params = Expr::MakeArray(TyTable::STR, binds);
+        let call = self.db_call(
+            "db_exec",
+            vec![
+                (h, TyTable::I32),
+                (Expr::Str(sql), TyTable::STR),
+                (params, arr_ty),
+            ],
+            TyTable::I32,
+        )?;
+        Ok((call, TyTable::I32))
+    }
+
+    /// `T.Select(handle, x => predicate)` — the query built at compile time,
+    /// run, and every row read back into a `List<T>`.
+    ///
+    /// Nothing about the row's shape reaches the binary: which `db_*` reader
+    /// each column uses is decided here, from the record's declared types.
+    fn table_select(
+        &mut self,
+        type_name: &str,
+        info: &TableInfo,
+        args: &[ast::Expr],
+    ) -> Result<(Expr, TyId), String> {
+        if args.is_empty() {
+            return Err("Select takes a database handle".into());
+        }
+        let (h, _) = self.expr(&args[0], Some(TyTable::I32))?;
+
+        let cols: Vec<&str> = info.columns.iter().map(|(_, c, _)| c.as_str()).collect();
+        let mut sql = format!("select {} from {}", cols.join(", "), info.table);
+        let mut bind_exprs: Vec<ast::Expr> = Vec::new();
+        if let Some(pred) = args.get(1) {
+            let ast::ExprKind::Lambda(l) = &pred.kind else {
+                return Err("Select takes a predicate lambda".into());
+            };
+            let ast::LambdaBody::Expr(body) = &l.body else {
+                return Err("a query predicate must be an expression".into());
+            };
+            let param = l.params.first().map(|(n, _)| n.clone()).unwrap_or_default();
+            let mut where_sql = String::new();
+            self.query_sql(body, &param, info, &mut where_sql, &mut bind_exprs)?;
+            sql = format!("{sql} where {where_sql}");
+        }
+        let mut binds = Vec::new();
+        for b in &bind_exprs {
+            let (v, t) = self.expr(b, None)?;
+            binds.push(self.as_text(v, t));
+        }
+        let arr_ty = self.cx.b.m.types.intern(TyKind::Array(TyTable::STR));
+        let query = self.db_call(
+            "db_query",
+            vec![
+                (h, TyTable::I32),
+                (Expr::Str(sql), TyTable::STR),
+                (Expr::MakeArray(TyTable::STR, binds), arr_ty),
+            ],
+            TyTable::I32,
+        )?;
+        let rows = self.new_local("$rows", TyTable::I32);
+        self.push(Stmt::Let {
+            local: rows,
+            value: query,
+        });
+
+        // The list this answers with.
+        let rid = *self
+            .cx
+            .type_ids
+            .get(type_name)
+            .ok_or_else(|| format!("`{type_name}` is not a record"))?;
+        let elem = self.cx.b.m.types.intern(TyKind::Record(rid));
+        let lrid = self.cx.list_record(elem);
+        let lty = self.cx.b.m.types.intern(TyKind::Record(lrid));
+        let data_ty = self.cx.b.m.record(lrid).fields[LIST_DATA].ty;
+        let out = self.new_local("$rowsout", lty);
+        self.push(Stmt::Let {
+            local: out,
+            value: Expr::MakeRecord(
+                lrid,
+                vec![
+                    Expr::Int(0, TyTable::I32),
+                    Expr::Int(0, TyTable::I32),
+                    Expr::Null(data_ty),
+                ],
+            ),
+        });
+
+        // while db_next(rows) { out.Add(new T(col 1, col 2, …)) }
+        let next = self.db_call("db_next", vec![(Expr::Local(rows), TyTable::I32)], TyTable::BOOL)?;
+        let mut body = vec![Stmt::If {
+            cond: Expr::Not(Box::new(next)),
+            then: vec![Stmt::Break],
+            els: vec![],
+        }];
+        let mut fields = Vec::new();
+        for (i, ty_ref) in info.types.iter().enumerate() {
+            let fty = self.cx.resolve(ty_ref)?;
+            // Columns are counted from 1, as every position in Kiln is.
+            let reader = match self.cx.b.m.types.kind(fty) {
+                TyKind::Str => "db_text",
+                TyKind::F32 | TyKind::F64 => "db_double",
+                TyKind::Bool => "db_bool",
+                TyKind::I64 | TyKind::U64 | TyKind::Nint | TyKind::Nuint => "db_int64",
+                _ => "db_int",
+            };
+            let raw_ty = match reader {
+                "db_text" => TyTable::STR,
+                "db_double" => TyTable::F64,
+                "db_bool" => TyTable::BOOL,
+                "db_int64" => TyTable::I64,
+                _ => TyTable::I32,
+            };
+            let read = self.db_call(
+                reader,
+                vec![
+                    (Expr::Local(rows), TyTable::I32),
+                    (Expr::Int(i as i128 + 1, TyTable::I32), TyTable::I32),
+                ],
+                raw_ty,
+            )?;
+            fields.push(if raw_ty == fty {
+                read
+            } else {
+                Expr::Cast {
+                    value: Box::new(read),
+                    to: fty,
+                }
+            });
+        }
+        let item = self.new_local("$row", elem);
+        body.push(Stmt::Let {
+            local: item,
+            value: Expr::MakeRecord(rid, fields),
+        });
+        self.blocks.push(Vec::new());
+        self.list_add(out, lty, Expr::Local(item));
+        let add = self.blocks.pop().unwrap();
+        body.extend(add);
+        self.push(Stmt::Loop { body });
+
+        let close = self.db_call(
+            "db_result_close",
+            vec![(Expr::Local(rows), TyTable::I32)],
+            TyTable::BOOL,
+        )?;
+        self.push(Stmt::Expr(close));
+        Ok((Expr::Local(out), lty))
     }
 
     /// A no-argument command that reads the error slot.
@@ -5106,6 +5384,11 @@ fn captured_names(
 fn collect_lambdas_expr(e: &ast::Expr, out: &mut Vec<ast::Lambda>) {
     use ast::ExprKind as E;
     match &e.kind {
+        E::Collection(items) => {
+            for i in items {
+                collect_lambdas_expr(i, out);
+            }
+        }
         E::Lambda(l) => {
             out.push(l.clone());
             // a nested lambda's captures matter to this function too
@@ -5238,6 +5521,11 @@ fn collect_idents_lambda(l: &ast::Lambda, out: &mut Vec<String>) {
 fn collect_idents_expr(e: &ast::Expr, out: &mut Vec<String>) {
     use ast::ExprKind as E;
     match &e.kind {
+        E::Collection(items) => {
+            for i in items {
+                collect_idents_expr(i, out);
+            }
+        }
         E::Ident(n) => out.push(n.clone()),
         E::Member(b, _) => collect_idents_expr(b, out),
         E::Call(c, args) => {

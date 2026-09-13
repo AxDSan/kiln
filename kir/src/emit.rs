@@ -977,18 +977,24 @@ impl<'a, 'b> FnEmit<'a, 'b> {
             .insert("declare void @kn_ary_set(ptr, i32, i64)".into());
         let tag = self.tt().sdt_tag(elem);
         let base = self.fresh();
+        // `kn_ary_new(tag, len)` — the tag comes first. Swapped, an empty
+        // literal asks for an array of `tag` elements with no element type,
+        // which fails far from here: a command reading it binds nine
+        // uninitialised parameters and blames its own arguments.
         writeln!(
             self.body,
-            "  {base} = call ptr @kn_ary_new(i32 {}, i32 {tag})",
+            "  {base} = call ptr @kn_ary_new(i32 {tag}, i32 {})",
             items.len()
         )
         .unwrap();
         for (i, it) in items.iter().enumerate() {
             let v = self.expr(it);
             let raw = self.to_i64(&v);
+            // Positions count from 1, as everywhere else in Kiln.
+            let pos = i + 1;
             writeln!(
                 self.body,
-                "  call void @kn_ary_set(ptr {base}, i32 {i}, i64 {raw})"
+                "  call void @kn_ary_set(ptr {base}, i32 {pos}, i64 {raw})"
             )
             .unwrap();
         }

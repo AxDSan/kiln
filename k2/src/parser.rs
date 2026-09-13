@@ -1431,6 +1431,20 @@ impl Parser {
                 return Ok(e);
             }
             Tok::Keyword(Kw::New) => return self.new_expr(span),
+            // A collection expression: `[]` or `[a, b, c]`.
+            Tok::LBracket => {
+                let mut items = Vec::new();
+                while self.peek() != &Tok::RBracket {
+                    items.push(self.expr()?);
+                    if self.peek() == &Tok::Comma {
+                        self.bump();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(&Tok::RBracket)?;
+                ExprKind::Collection(items)
+            }
             other => {
                 self.i -= 1;
                 return self.err(format!("expected an expression, found {other:?}"));
