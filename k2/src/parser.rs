@@ -1054,6 +1054,39 @@ impl Parser {
         }))
     }
 
+    /// `subject switch { pat => value, … }`, if it follows.
+    fn opt_switch(&mut self, subject: Expr) -> Result<Expr, ParseError> {
+        if self.peek() != &Tok::Keyword(Kw::Switch) {
+            return Ok(subject);
+        }
+        let span = subject.span;
+        self.bump();
+        self.expect(&Tok::LBrace)?;
+        let mut arms = Vec::new();
+        while self.peek() != &Tok::RBrace {
+            let pat = if self.peek() == &Tok::Ident("_".into()) {
+                self.bump();
+                SwitchPat::Discard
+            } else if let Some((op, _)) = relational_pat(self.peek()) {
+                self.bump();
+                SwitchPat::Relational(op, self.expr()?)
+            } else {
+                SwitchPat::Const(self.expr()?)
+            };
+            self.expect(&Tok::FatArrow)?;
+            let value = self.expr()?;
+            arms.push(SwitchArm { pat, value });
+            if !self.eat(&Tok::Comma) {
+                break;
+            }
+        }
+        self.expect(&Tok::RBrace)?;
+        Ok(Expr {
+            kind: ExprKind::Switch(Box::new(subject), arms),
+            span,
+        })
+    }
+
     fn postfix(&mut self) -> Result<Expr, ParseError> {
         let mut e = self.primary()?;
         loop {
@@ -1103,7 +1136,7 @@ impl Parser {
                 _ => break,
             }
         }
-        Ok(e)
+        self.opt_switch(e)
     }
 
     fn call_args(&mut self) -> Result<Vec<Expr>, ParseError> {
@@ -1201,6 +1234,17 @@ impl Parser {
             span,
         })
     }
+}
+
+/// A leading comparison in a pattern position: `> 0`, `<= 10`.
+fn relational_pat(t: &Tok) -> Option<(BinOp, u8)> {
+    Some(match t {
+        Tok::Lt => (BinOp::Lt, 0),
+        Tok::Le => (BinOp::Le, 0),
+        Tok::Gt => (BinOp::Gt, 0),
+        Tok::Ge => (BinOp::Ge, 0),
+        _ => return None,
+    })
 }
 
 fn bin_op(t: &Tok) -> Option<(BinOp, u8)> {

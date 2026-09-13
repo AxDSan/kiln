@@ -451,3 +451,42 @@ public static class P
 "#;
     assert_eq!(run_k2(src), "42\nno value\n-1\n5\n0\n");
 }
+
+#[test]
+fn switch_expressions() {
+    let src = r#"
+namespace S;
+
+public enum Profession { Warrior, Champion, Mage, Priest }
+
+public static class P
+{
+    public static uint WeaponFor(int p) => p switch
+    {
+        0 => 1000,
+        1 => 1400,
+        2 => 1700,
+        _ => 1800,
+    };
+
+    public static string Size(int n) => n switch
+    {
+        <= 0 => "none",
+        < 10 => "small",
+        < 100 => "medium",
+        _ => "large",
+    };
+
+    public static void Main()
+    {
+        Console.WriteLine($"{WeaponFor(2)}");
+        Console.WriteLine($"{WeaponFor(9)}");
+        Console.WriteLine(Size(0));
+        Console.WriteLine(Size(5));
+        Console.WriteLine(Size(50));
+        Console.WriteLine(Size(500));
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "1700\n1800\nnone\nsmall\nmedium\nlarge\n");
+}

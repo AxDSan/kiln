@@ -46,6 +46,8 @@ clang and checks stdout):
 - **`T?` optionals**: `return null;`, implicit `T` → `T?` wrapping, `x != null` /
   `x == null` as presence tests that **narrow** the variable in the proven
   branch (so it reads as `T`), `??` fallback, `.HasValue` / `.Value`
+- **`switch` expressions**: `x switch { 1 => …, < 10 => …, _ => … }` with
+  constant and relational patterns, lowered to an if-chain into one temporary
 - **`defer`**: runs when its block is left — falling off the end, `return`,
   `break` or `continue` — with several defers in a block unwinding in reverse
   declaration order

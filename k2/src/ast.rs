@@ -227,6 +227,24 @@ pub enum ExprKind {
     Try(Box<Expr>),
     /// `x => e`, `(a, b) => e`, `() => { ... }`
     Lambda(Lambda),
+    /// `subject switch { pattern => value, _ => value }`
+    Switch(Box<Expr>, Vec<SwitchArm>),
+}
+
+#[derive(Clone, Debug)]
+pub struct SwitchArm {
+    pub pat: SwitchPat,
+    pub value: Expr,
+}
+
+#[derive(Clone, Debug)]
+pub enum SwitchPat {
+    /// A constant to compare against: `1`, `"a"`, `Profession.Mage`.
+    Const(Expr),
+    /// A relational pattern: `> 0`, `<= 10`.
+    Relational(BinOp, Expr),
+    /// `_`
+    Discard,
 }
 
 #[derive(Clone, Debug)]

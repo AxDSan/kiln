@@ -1239,6 +1239,7 @@ impl<'a> FnLower<'a> {
             ast::ExprKind::Interp(_) => {
                 Err("string interpolation is only supported in Console.WriteLine for now".into())
             }
+            ast::ExprKind::Switch(subject, arms) => self.switch(subject, arms, hint),
             ast::ExprKind::Lambda(l) => {
                 let want = hint.ok_or_else(|| {
                     "a lambda needs a target type — assign it to a `Func<...>`/`Action<...>` \
@@ -1419,6 +1420,95 @@ impl<'a> FnLower<'a> {
             })),
             sig.ret,
         ))
+    }
+
+    /// A `switch` expression: the subject is held once, then the arms become an
+    /// if-chain assigning into one temporary.
+    fn switch(
+        &mut self,
+        subject: &ast::Expr,
+        arms: &[ast::SwitchArm],
+        hint: Option<TyId>,
+    ) -> Result<(Expr, TyId), String> {
+        if arms.is_empty() {
+            return Err("a `switch` expression needs at least one arm".into());
+        }
+        let (subj, sty) = self.expr(subject, None)?;
+        let held = self.new_local("$switch", sty);
+        self.push(Stmt::Let {
+            local: held,
+            value: subj,
+        });
+        // The result type comes from the first arm (or the caller's hint).
+        let (first_val, rty) = {
+            let saved = self.blocks.len();
+            self.blocks.push(Vec::new());
+            let r = self.expr(&arms[0].value, hint);
+            self.blocks.truncate(saved);
+            r?
+        };
+        let _ = first_val;
+        let out = self.new_local("$case", rty);
+
+        // Build the chain from the last arm backwards.
+        let mut chain: Vec<Stmt> = Vec::new();
+        let mut have_default = false;
+        for arm in arms.iter().rev() {
+            self.blocks.push(Vec::new());
+            let val = self.expr(&arm.value, Some(rty));
+            let mut body = self.blocks.pop().unwrap();
+            let val = val?.0;
+            body.push(Stmt::Assign {
+                place: Place::Local(out),
+                value: val,
+            });
+            match &arm.pat {
+                ast::SwitchPat::Discard => {
+                    have_default = true;
+                    chain = body;
+                }
+                ast::SwitchPat::Const(c) => {
+                    self.blocks.push(Vec::new());
+                    let cv = self.expr(c, Some(sty));
+                    let pre = self.blocks.pop().unwrap();
+                    let cv = cv?.0;
+                    let mut stmts = pre;
+                    stmts.push(Stmt::If {
+                        cond: Expr::Bin(BinOp::Eq, Box::new(Expr::Local(held)), Box::new(cv), sty),
+                        then: body,
+                        els: std::mem::take(&mut chain),
+                    });
+                    chain = stmts;
+                }
+                ast::SwitchPat::Relational(op, c) => {
+                    self.blocks.push(Vec::new());
+                    let cv = self.expr(c, Some(sty));
+                    let pre = self.blocks.pop().unwrap();
+                    let cv = cv?.0;
+                    let kop = match op {
+                        ast::BinOp::Lt => BinOp::Lt,
+                        ast::BinOp::Le => BinOp::Le,
+                        ast::BinOp::Gt => BinOp::Gt,
+                        ast::BinOp::Ge => BinOp::Ge,
+                        _ => return Err("unsupported relational pattern".into()),
+                    };
+                    let mut stmts = pre;
+                    stmts.push(Stmt::If {
+                        cond: Expr::Bin(kop, Box::new(Expr::Local(held)), Box::new(cv), sty),
+                        then: body,
+                        els: std::mem::take(&mut chain),
+                    });
+                    chain = stmts;
+                }
+            }
+        }
+        if !have_default {
+            return Err("a `switch` expression needs a `_` arm".into());
+        }
+        for st in chain {
+            self.push(st);
+        }
+        Ok((Expr::Local(out), rty))
     }
 
     /// Lift a lambda to its own function and build a closure value.
@@ -1895,6 +1985,12 @@ fn collect_lambdas_expr(e: &ast::Expr, out: &mut Vec<ast::Lambda>) {
                 }
             }
         }
+        E::Switch(subj, arms) => {
+            collect_lambdas_expr(subj, out);
+            for a in arms {
+                collect_lambdas_expr(&a.value, out);
+            }
+        }
         E::Int(_)
         | E::Float(_, _)
         | E::Bool(_)
@@ -2019,6 +2115,15 @@ fn collect_idents_expr(e: &ast::Expr, out: &mut Vec<String>) {
             }
         }
         E::Lambda(inner) => collect_idents_lambda(inner, out),
+        E::Switch(subj, arms) => {
+            collect_idents_expr(subj, out);
+            for a in arms {
+                if let ast::SwitchPat::Const(c) | ast::SwitchPat::Relational(_, c) = &a.pat {
+                    collect_idents_expr(c, out);
+                }
+                collect_idents_expr(&a.value, out);
+            }
+        }
         E::Int(_) | E::Float(_, _) | E::Bool(_) | E::Str(_) | E::Char(_) | E::Null => {}
     }
 }
