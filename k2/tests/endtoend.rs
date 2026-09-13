@@ -294,3 +294,44 @@ public static class P
     // `seed` is captured by reference, so the call sees 6, not 2.
     assert_eq!(run_k2(src), "42\n");
 }
+
+#[test]
+fn result_propagates_and_falls_back() {
+    let src = r#"
+namespace R;
+public static class P
+{
+    public static Result<int> Half(int n)
+    {
+        if (n % 2 != 0) return Error("not even");
+        return n / 2;
+    }
+
+    // `?` propagates a failure out of this method.
+    public static Result<int> QuarterOf(int n)
+    {
+        var half = Half(n)?;
+        var quarter = Half(half)?;
+        return quarter;
+    }
+
+    public static void Main()
+    {
+        Console.WriteLine($"{Half(84).Value}");
+        Console.WriteLine($"{Half(7).IsOk}");
+        Console.WriteLine($"{Half(7).Error}");
+
+        // `??` supplies the value a failure did not.
+        Console.WriteLine($"{Half(7) ?? -1}");
+        Console.WriteLine($"{Half(10) ?? -1}");
+
+        var q = QuarterOf(40);
+        Console.WriteLine($"{q.Value}");
+        var bad = QuarterOf(6);
+        Console.WriteLine($"{bad.IsOk} {bad.Error}");
+    }
+}
+"#;
+    // 84/2=42; 7 is odd -> failure; 40 -> 20 -> 10; 6 -> 3 -> odd, propagated.
+    assert_eq!(run_k2(src), "42\n0\nnot even\n-1\n5\n10\n0 not even\n");
+}

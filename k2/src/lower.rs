@@ -11,6 +11,11 @@ use kiln_kir::build::ModuleBuilder;
 use kiln_kir::*;
 use std::collections::HashMap;
 
+/// Field indices of a synthesised `Result` record.
+const RESULT_OK: usize = 0;
+const RESULT_VALUE: usize = 1;
+const RESULT_ERR: usize = 2;
+
 pub fn lower(p: &ast::Program) -> Result<Module, String> {
     let mut b = ModuleBuilder::new(
         p.namespace.as_deref().unwrap_or("program"),
@@ -79,6 +84,7 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
         generics: HashMap::new(),
         mono: HashMap::new(),
         tvars: HashMap::new(),
+        results: HashMap::new(),
         pending: Vec::new(),
     };
 
@@ -271,6 +277,8 @@ struct Cx {
     mono: HashMap<(String, Vec<TyId>), Sig>,
     /// Type parameters bound while lowering one instance.
     tvars: HashMap<String, TyId>,
+    /// `Result<T>` is synthesised per value type: a record `{ok, value, err}`.
+    results: HashMap<TyId, RecordId>,
     pending: Vec<Pending>,
 }
 
@@ -338,6 +346,15 @@ impl Cx {
                     let ret = tys.pop().unwrap_or(TyTable::VOID);
                     self.b.m.types.intern(TyKind::Func { params: tys, ret })
                 }
+                // `Result<T>`: a record {ok, value, err}, synthesised per T.
+                "Result" => {
+                    let vt = match args.first() {
+                        Some(a) => self.resolve(a)?,
+                        None => TyTable::I32,
+                    };
+                    let rid = self.result_record(vt);
+                    self.b.m.types.intern(TyKind::Record(rid))
+                }
                 // `Action<A, B>`: no return.
                 "Action" => {
                     let mut tys = Vec::new();
@@ -352,6 +369,37 @@ impl Cx {
                 _ => return Err(format!("generic type `{n}` not yet supported")),
             },
         })
+    }
+
+    /// The record standing for `Result<T>`: `{ok: bool, value: T, err: string}`.
+    /// Field indices are fixed so lowering can reach them positionally.
+    fn result_record(&mut self, value_ty: TyId) -> RecordId {
+        if let Some(r) = self.results.get(&value_ty) {
+            return *r;
+        }
+        let n = self.b.m.records.len();
+        let rid = self.b.c_record(
+            &format!("$Result{n}"),
+            vec![
+                ("ok", TyTable::BOOL),
+                ("value", value_ty),
+                ("err", TyTable::STR),
+            ],
+            Equality::ByValue,
+        );
+        self.results.insert(value_ty, rid);
+        rid
+    }
+
+    /// If `ty` is a synthesised `Result`, its record and value type.
+    fn as_result(&self, ty: TyId) -> Option<(RecordId, TyId)> {
+        if let TyKind::Record(rid) = *self.b.m.types.kind(ty) {
+            if self.b.m.record(rid).name.starts_with("$Result") {
+                let vt = self.b.m.record(rid).fields[RESULT_VALUE].ty;
+                return Some((rid, vt));
+            }
+        }
+        None
     }
 
     fn c_layout(&self, fields: &[FieldDef]) -> (i64, i64, Vec<i64>) {
@@ -638,7 +686,16 @@ impl<'a> FnLower<'a> {
             ast::StmtKind::Return(v) => match v {
                 None => self.push(Stmt::Return(None)),
                 Some(e) => {
-                    let (val, _) = self.expr(e, Some(self.ret))?;
+                    let (val, vty) = self.expr(e, Some(self.ret))?;
+                    // `return x;` from a Result-returning method is `Ok(x)`
+                    // unless the value already is a Result.
+                    let val = match self.cx.as_result(self.ret) {
+                        Some((rid, _)) if vty != self.ret => Expr::MakeRecord(
+                            rid,
+                            vec![Expr::Bool(true), val, Expr::Str(String::new())],
+                        ),
+                        _ => val,
+                    };
                     self.push(Stmt::Return(Some(val)));
                 }
             },
@@ -891,7 +948,35 @@ impl<'a> FnLower<'a> {
             }
             ast::ExprKind::Ident(name) => self.ident(name, e.span),
             ast::ExprKind::Member(recv, member) => self.member(recv, member),
-            ast::ExprKind::Call(callee, args) => self.call(callee, args),
+            ast::ExprKind::Call(callee, args) => {
+                // `Error("...")` builds a failed Result of the expected type.
+                if let ast::ExprKind::Ident(n) = &callee.kind {
+                    if n == "Error" && !self.cx.methods.contains_key("Error") {
+                        let want = hint
+                            .or(Some(self.ret))
+                            .and_then(|t| self.cx.as_result(t))
+                            .ok_or_else(|| {
+                                "`Error(...)` needs a `Result` target — use it in a `return` \
+                                 from a Result-returning method, or assign it to a Result"
+                                    .to_string()
+                            })?;
+                        let (rid, vt) = want;
+                        let msg = match args.first() {
+                            Some(a) => self.expr(a, Some(TyTable::STR))?.0,
+                            None => Expr::Str(String::new()),
+                        };
+                        let ty = self.cx.b.m.types.intern(TyKind::Record(rid));
+                        return Ok((
+                            Expr::MakeRecord(
+                                rid,
+                                vec![Expr::Bool(false), zero_of(self.tt(), vt), msg],
+                            ),
+                            ty,
+                        ));
+                    }
+                }
+                self.call(callee, args)
+            }
             ast::ExprKind::Index(base, idx) => {
                 let (b, bty) = self.expr(base, None)?;
                 let elem = match self.tt().kind(bty) {
@@ -939,8 +1024,60 @@ impl<'a> FnLower<'a> {
             }
             ast::ExprKind::New(t, args, inits) => self.new_record(t, args, inits),
             ast::ExprKind::Ternary(c, a, b) => self.ternary(c, a, b, hint),
-            ast::ExprKind::NullCoalesce(_, _) => Err("`??` is not yet lowered".into()),
-            ast::ExprKind::Try(_) => Err("`?` propagation is not yet lowered".into()),
+            ast::ExprKind::NullCoalesce(a, b) => {
+                let (v, vty) = self.expr(a, None)?;
+                let (_, val_ty) = self.cx.as_result(vty).ok_or_else(|| {
+                    "`??` currently applies to a `Result`; `T?` support comes with optionals"
+                        .to_string()
+                })?;
+                let held = self.new_local("$coalesce", vty);
+                self.push(Stmt::Let {
+                    local: held,
+                    value: v,
+                });
+                let out = self.new_local("$value", val_ty);
+                let (fb, _) = self.expr(b, Some(val_ty))?;
+                self.push(Stmt::If {
+                    cond: Expr::Field(Box::new(Expr::Local(held)), RESULT_OK),
+                    then: vec![Stmt::Assign {
+                        place: Place::Local(out),
+                        value: Expr::Field(Box::new(Expr::Local(held)), RESULT_VALUE),
+                    }],
+                    els: vec![Stmt::Assign {
+                        place: Place::Local(out),
+                        value: fb,
+                    }],
+                });
+                Ok((Expr::Local(out), val_ty))
+            }
+            ast::ExprKind::Try(inner) => {
+                let (v, vty) = self.expr(inner, None)?;
+                let (_, val_ty) = self
+                    .cx
+                    .as_result(vty)
+                    .ok_or_else(|| "`?` can only be applied to a `Result`".to_string())?;
+                let (out_rid, out_vt) = self.cx.as_result(self.ret).ok_or_else(|| {
+                    "`?` needs the enclosing method to return a `Result`".to_string()
+                })?;
+                // Hold the result once, then test it.
+                let t = self.new_local("$try", vty);
+                self.push(Stmt::Let { local: t, value: v });
+                let failed = Expr::Not(Box::new(Expr::Field(Box::new(Expr::Local(t)), RESULT_OK)));
+                let propagated = Expr::MakeRecord(
+                    out_rid,
+                    vec![
+                        Expr::Bool(false),
+                        zero_of(self.tt(), out_vt),
+                        Expr::Field(Box::new(Expr::Local(t)), RESULT_ERR),
+                    ],
+                );
+                self.push(Stmt::If {
+                    cond: failed,
+                    then: vec![Stmt::Return(Some(propagated))],
+                    els: vec![],
+                });
+                Ok((Expr::Field(Box::new(Expr::Local(t)), RESULT_VALUE), val_ty))
+            }
             ast::ExprKind::Range(_, _, _) => Err("a range is only valid in `foreach`".into()),
             ast::ExprKind::Interp(_) => {
                 Err("string interpolation is only supported in Console.WriteLine for now".into())
@@ -993,6 +1130,19 @@ impl<'a> FnLower<'a> {
         }
         // Field access on a record value, or `.Length` etc. (later).
         let (base, bty) = self.expr(recv, None)?;
+        // A synthesised Result exposes named members rather than raw fields.
+        if let Some((_, vt)) = self.cx.as_result(bty) {
+            return match member {
+                "IsOk" => Ok((Expr::Field(Box::new(base), RESULT_OK), TyTable::BOOL)),
+                "IsErr" => Ok((
+                    Expr::Not(Box::new(Expr::Field(Box::new(base), RESULT_OK))),
+                    TyTable::BOOL,
+                )),
+                "Value" => Ok((Expr::Field(Box::new(base), RESULT_VALUE), vt)),
+                "Error" => Ok((Expr::Field(Box::new(base), RESULT_ERR), TyTable::STR)),
+                other => Err(format!("no member `{other}` on a Result")),
+            };
+        }
         if let TyKind::Record(rid) = *self.tt().kind(bty) {
             let rec = self.cx.b.m.record(rid);
             if let Some(idx) = rec.fields.iter().position(|f| f.name == member) {
@@ -1795,6 +1945,28 @@ fn unify(
             Ok(())
         }
         _ => Ok(()),
+    }
+}
+
+/// A zero/null value of a type — the unused `value` slot of a failed `Result`.
+fn zero_of(tt: &TyTable, ty: TyId) -> Expr {
+    match tt.kind(ty) {
+        TyKind::F32 | TyKind::F64 => Expr::Float(0.0, ty),
+        TyKind::Bool => Expr::Bool(false),
+        TyKind::Str => Expr::Str(String::new()),
+        k if matches!(
+            k,
+            TyKind::Ptr
+                | TyKind::Bytes
+                | TyKind::Record(_)
+                | TyKind::Array(_)
+                | TyKind::Dict(..)
+                | TyKind::Set(_)
+        ) =>
+        {
+            Expr::Null(ty)
+        }
+        _ => Expr::Int(0, ty),
     }
 }
 
