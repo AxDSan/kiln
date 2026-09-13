@@ -543,6 +543,17 @@ pub enum Expr {
         env: Box<Expr>,
     },
 
+    /// The address of a function, as a `Ptr`. Lets a front end store a method
+    /// in a table (an interface's dispatch record, say).
+    FuncPtr(FuncId),
+
+    /// A callable `{fn, env}` pair built from two pointer values, for dispatch
+    /// through a table rather than to a statically known function.
+    FuncValue {
+        fn_ptr: Box<Expr>,
+        env: Box<Expr>,
+    },
+
     /// The address of an element of an array-like buffer, as a `Ptr`. Lets a
     /// front end compute an offset into a buffer without a pointer-arithmetic
     /// node of its own.

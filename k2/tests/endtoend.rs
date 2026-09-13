@@ -811,3 +811,67 @@ public static class P
     let libc = kiln_k2::compile_to_llvm(src).unwrap();
     assert!(libc.contains("@printf"));
 }
+
+#[test]
+fn interfaces_dispatch_dynamically() {
+    // Interfaces, no inheritance (spec §4.2). An interface-typed value carries
+    // the object and the implementation's methods, so two unrelated types can
+    // be used through the same interface — including inside a List.
+    let src = r#"
+namespace If;
+
+public interface IShape
+{
+    int Area();
+    string Name();
+}
+
+public record Rect(int W, int H) : IShape
+{
+    public int Area() => W * H;
+    public string Name() => "rect";
+}
+
+public record Square(int Side) : IShape
+{
+    public int Area() => Side * Side;
+    public string Name() => "square";
+}
+
+public static class P
+{
+    // Takes any implementation — dispatch happens through the value.
+    public static string Describe(IShape s) => $"{s.Name()} has area {s.Area()}";
+
+    public static void Main()
+    {
+        Console.WriteLine(Describe(new Rect(3, 4)));
+        Console.WriteLine(Describe(new Square(5)));
+
+        var shapes = new List<IShape>();
+        shapes.Add(new Rect(2, 3));
+        shapes.Add(new Square(4));
+        var total = 0;
+        foreach (var s in shapes)
+            total = total + s.Area();
+        Console.WriteLine($"total {total}");
+    }
+}
+"#;
+    assert_eq!(
+        run_k2(src),
+        "rect has area 12\nsquare has area 25\ntotal 22\n"
+    );
+}
+
+#[test]
+fn a_missing_interface_method_is_a_compile_error() {
+    let src = r#"
+namespace If2;
+public interface IShape { int Area(); }
+public record Dot() : IShape { public int Size() => 0; }
+public static class P { public static void Main() { } }
+"#;
+    let err = kiln_k2::compile_to_llvm(src).unwrap_err();
+    assert!(err.contains("does not implement"), "got: {err}");
+}

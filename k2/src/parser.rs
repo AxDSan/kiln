@@ -212,6 +212,41 @@ impl Parser {
         let (vis, is_static) = self.modifiers();
         match self.bump() {
             Tok::Keyword(Kw::Enum) => Ok(Item::Enum(self.enum_decl(vis, doc, span)?)),
+            Tok::Keyword(Kw::Interface) => {
+                let name = self.ident()?;
+                self.expect(&Tok::LBrace)?;
+                let mut methods = Vec::new();
+                while self.peek() != &Tok::RBrace {
+                    let mspan = self.span();
+                    let (mvis, _) = self.modifiers();
+                    let ret = self.type_ref()?;
+                    let mname = self.ident()?;
+                    let params = self.params()?;
+                    self.expect(&Tok::Semi)?;
+                    methods.push(Method {
+                        attrs: Vec::new(),
+                        is_extern: false,
+                        vis: mvis,
+                        is_static: false,
+                        name: mname,
+                        type_params: Vec::new(),
+                        params,
+                        ret,
+                        body: Vec::new(),
+                        expr_body: None,
+                        doc: None,
+                        span: mspan,
+                    });
+                }
+                self.expect(&Tok::RBrace)?;
+                Ok(Item::Interface(InterfaceDecl {
+                    vis,
+                    name,
+                    methods,
+                    doc,
+                    span,
+                }))
+            }
             Tok::Keyword(kw @ (Kw::Class | Kw::Record | Kw::Struct)) => {
                 let kind = match (kw, is_static) {
                     (Kw::Class, true) => TypeKind::StaticClass,
@@ -300,10 +335,13 @@ impl Parser {
             }
             self.expect(&Tok::RParen)?;
         }
-        // optional `: IFace, ...` — parsed and ignored for now (no inheritance).
+        // `: I, J` — interfaces this type implements. There is no inheritance.
+        let mut implements = Vec::new();
         if self.eat(&Tok::Colon) {
             loop {
-                self.type_ref()?;
+                if let TypeRef::Named(n) = self.type_ref()? {
+                    implements.push(n);
+                }
                 if !self.eat(&Tok::Comma) {
                     break;
                 }
@@ -316,6 +354,7 @@ impl Parser {
         if self.eat(&Tok::Semi) {
             return Ok(TypeDecl {
                 attrs: attrs.clone(),
+                implements: implements.clone(),
                 kind,
                 vis,
                 name,
@@ -334,6 +373,7 @@ impl Parser {
         self.expect(&Tok::RBrace)?;
         Ok(TypeDecl {
             attrs,
+            implements,
             kind,
             vis,
             name,

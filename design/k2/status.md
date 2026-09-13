@@ -52,6 +52,10 @@ clang and checks stdout):
 - **`List<T>`**: `new List<T>()`, `.Add(x)` (buffer grows 4 → 8 → 16 …),
   `.Count`, 1-based indexing `xs[1]`, and `foreach` over one. KIR gained real
   indexed element access for this
+- **Interfaces, no inheritance**: `interface I { … }` with `class C : I` /
+  `record R(...) : I`. An interface value carries the object and the
+  implementation's methods, so two unrelated types work through one interface
+  and a `List<IShape>` holds both; a missing implementation is a compile error
 - **The Kiln runtime, opt-in**: `kiln k2 --runtime` links the runtime and
   support libraries exactly as a 1.x build does, and `Console.WriteLine`
   becomes the `print_text` command over the slot ABI instead of `printf` —
@@ -93,7 +97,7 @@ clang and checks stdout):
 
 1. `HashSet<T>`; hashing for `Dictionary` (lookup is a linear scan); moving strings, lists and dictionaries onto the runtime's own text/array commands and the collector (the link path now exists; the data structures still use libc)
 2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
-3. generic *types* (`class Cache<K,V>`) and generic instance methods — only generic static methods are built
+3. generic *types* (`class Cache<K,V>`) and generic instance methods — only generic static methods are built; interface *constraints* are parsed but not enforced
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)
 5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
 6. binding the generated SQL to `libs/db` and returning rows (the statement text is generated; execution needs the runtime)

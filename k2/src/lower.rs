@@ -60,6 +60,9 @@ pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> 
             ast::Item::Enum(ed) => {
                 type_names.insert(ed.name.clone());
             }
+            ast::Item::Interface(id) => {
+                type_names.insert(id.name.clone());
+            }
         }
     }
     for item in &p.items {
@@ -120,8 +123,48 @@ pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> 
         dlls: HashMap::new(),
         packed: std::collections::HashSet::new(),
         tables: HashMap::new(),
+        interfaces: HashMap::new(),
+        iface_records: HashMap::new(),
+        impls: HashMap::new(),
         pending: Vec::new(),
     };
+
+    // Interfaces: a value of interface type is a record holding the object and
+    // one function pointer per method — dispatch without a separate vtable
+    // global to initialise.
+    for item in &p.items {
+        if let ast::Item::Interface(idecl) = item {
+            let names: Vec<String> = idecl.methods.iter().map(|m| m.name.clone()).collect();
+            let mut fields: Vec<(&str, TyId)> = vec![("obj", TyTable::PTR)];
+            for _ in &names {
+                fields.push(("fn", TyTable::PTR));
+            }
+            let n = cx.b.m.records.len();
+            let rid =
+                cx.b.c_record(&format!("$IFace{n}"), fields, Equality::ByRef);
+            cx.interfaces.insert(idecl.name.clone(), names);
+            cx.iface_records.insert(idecl.name.clone(), rid);
+        }
+    }
+    // Which methods each type supplies for each interface it implements.
+    for item in &p.items {
+        if let ast::Item::Type(td) = item {
+            for iname in &td.implements {
+                let Some(want) = cx.interfaces.get(iname).cloned() else {
+                    return Err(format!(
+                        "`{}` implements unknown interface `{iname}`",
+                        td.name
+                    ));
+                };
+                for m in &want {
+                    if !td.methods.iter().any(|x| &x.name == m) {
+                        return Err(format!("`{}` does not implement `{iname}.{m}`", td.name));
+                    }
+                }
+                cx.impls.insert((td.name.clone(), iname.clone()), want);
+            }
+        }
+    }
 
     // `[Packed]` records lay out with no padding; `[Table]` records map to a
     // database table, with column names defaulting to snake_case.
@@ -444,6 +487,12 @@ struct Cx {
     dicts: HashMap<(TyId, TyId), RecordId>,
     /// `[Dll]` externs, by `Type.Name` and bare `Name`.
     dlls: HashMap<String, DllSig>,
+    /// Interfaces: name → the method names it declares, in order.
+    interfaces: HashMap<String, Vec<String>>,
+    /// An interface's value record: `{obj, fn per method}`.
+    iface_records: HashMap<String, RecordId>,
+    /// `(type, interface)` → the type's methods in the interface's order.
+    impls: HashMap<(String, String), Vec<String>>,
     /// `[Table]` records: type name → (table name, columns).
     tables: HashMap<String, TableInfo>,
     /// Records declared `[Packed]`: laid out with no padding, and given
@@ -489,6 +538,8 @@ impl Cx {
                 other => {
                     if self.type_ids.contains_key(other) {
                         self.record_ty(other)
+                    } else if let Some(rid) = self.iface_records.get(other).copied() {
+                        self.b.m.types.intern(TyKind::Record(rid))
                     } else if let Some(t) = self.enum_backing.get(other) {
                         *t
                     } else {
@@ -616,6 +667,26 @@ impl Cx {
         );
         self.dicts.insert((k, v), rid);
         rid
+    }
+
+    /// The interface a value type stands for, if it is an interface record.
+    fn as_interface(&self, ty: TyId) -> Option<String> {
+        if let TyKind::Record(rid) = *self.b.m.types.kind(ty) {
+            return self
+                .iface_records
+                .iter()
+                .find(|(_, r)| **r == rid)
+                .map(|(n, _)| n.clone());
+        }
+        None
+    }
+
+    /// The declared name of a record type, if it has one.
+    fn record_name(&self, ty: TyId) -> Option<String> {
+        if let TyKind::Record(rid) = *self.b.m.types.kind(ty) {
+            return Some(self.b.m.record(rid).name.clone());
+        }
+        None
     }
 
     /// If `ty` is a synthesised `Dictionary`, its record, key and value types.
@@ -1354,27 +1425,31 @@ impl<'a> FnLower<'a> {
     }
 
     /// The printf/snprintf conversion for a value, with any promotion applied.
-    fn fmt_arg(&mut self, v: Expr, ty: TyId) -> (&'static str, Expr) {
+    fn fmt_arg(&mut self, v: Expr, ty: TyId) -> (&'static str, Expr, TyId) {
         match self.tt().kind(ty) {
-            TyKind::Str => ("%s", v),
+            TyKind::Str => ("%s", v, TyTable::STR),
             TyKind::F32 => (
                 "%g",
                 Expr::Cast {
                     value: Box::new(v),
                     to: TyTable::F64,
                 },
+                TyTable::F64,
             ),
-            TyKind::F64 => ("%g", v),
-            TyKind::I64 | TyKind::U64 | TyKind::Nint | TyKind::Nuint => ("%lld", v),
+            TyKind::F64 => ("%g", v, TyTable::F64),
+            TyKind::I64 | TyKind::U64 | TyKind::Nint | TyKind::Nuint => ("%lld", v, TyTable::I64),
             TyKind::Bool => (
                 "%d",
                 Expr::Cast {
                     value: Box::new(v),
                     to: TyTable::I32,
                 },
+                TyTable::I32,
             ),
-            TyKind::U8 | TyKind::U16 | TyKind::U32 => ("%u", cast_to(v, ty, TyTable::U32)),
-            _ => ("%d", cast_to(v, ty, TyTable::I32)),
+            TyKind::U8 | TyKind::U16 | TyKind::U32 => {
+                ("%u", cast_to(v, ty, TyTable::U32), TyTable::U32)
+            }
+            _ => ("%d", cast_to(v, ty, TyTable::I32), TyTable::I32),
         }
     }
 
@@ -1384,7 +1459,7 @@ impl<'a> FnLower<'a> {
     /// the Kiln text runtime when the standard library lands.
     fn build_string(&mut self, parts: Vec<(String, Option<(Expr, TyId)>)>) -> (Expr, TyId) {
         let mut fmt = String::new();
-        let mut args: Vec<Expr> = Vec::new();
+        let mut args: Vec<(Expr, TyId)> = Vec::new();
         for (lit, val) in parts {
             for ch in lit.chars() {
                 if ch == '%' {
@@ -1394,15 +1469,14 @@ impl<'a> FnLower<'a> {
                 }
             }
             if let Some((v, ty)) = val {
-                let (spec, arg) = self.fmt_arg(v, ty);
+                let (spec, arg, promoted) = self.fmt_arg(v, ty);
                 fmt.push_str(spec);
-                args.push(arg);
+                args.push((arg, promoted));
             }
         }
         // Values are evaluated once, into locals, then used by both snprintf calls.
         let mut held = Vec::new();
-        for a in args {
-            let ty = self.infer_arg_ty(&a);
+        for (a, ty) in args {
             let l = self.new_local("$fmtarg", ty);
             self.push(Stmt::Let { local: l, value: a });
             held.push(Expr::Local(l));
@@ -1472,52 +1546,12 @@ impl<'a> FnLower<'a> {
         (Expr::Local(buf), TyTable::STR)
     }
 
-    /// The type a already-lowered format argument carries.
-    fn infer_arg_ty(&self, e: &Expr) -> TyId {
-        match e {
-            Expr::Cast { to, .. } => *to,
-            Expr::Local(l) => self.cx.b.m.func(self.fid).locals[l.0 as usize].ty,
-            Expr::Str(_) => TyTable::STR,
-            Expr::Int(_, t) | Expr::Float(_, t) => *t,
-            Expr::Bool(_) => TyTable::BOOL,
-            Expr::Field(..) | Expr::Call(..) | Expr::Bin(..) => TyTable::I32,
-            _ => TyTable::I32,
-        }
-    }
-
     fn emit_print_str(&mut self, s: &str) {
         self.emit_printf("%s", vec![(Expr::Str(s.to_string()), TyTable::STR)]);
     }
 
     fn emit_print_value(&mut self, v: Expr, ty: TyId) -> Result<(), String> {
-        let (fmt, arg_ty, arg) = match self.tt().kind(ty) {
-            TyKind::Str => ("%s", TyTable::STR, v),
-            TyKind::F32 | TyKind::F64 => {
-                // printf promotes float to double
-                let arg = if ty == TyTable::F32 {
-                    Expr::Cast {
-                        value: Box::new(v),
-                        to: TyTable::F64,
-                    }
-                } else {
-                    v
-                };
-                ("%g", TyTable::F64, arg)
-            }
-            TyKind::I64 | TyKind::U64 | TyKind::Nint | TyKind::Nuint => ("%lld", TyTable::I64, v),
-            TyKind::Bool => (
-                "%d",
-                TyTable::I32,
-                Expr::Cast {
-                    value: Box::new(v),
-                    to: TyTable::I32,
-                },
-            ),
-            TyKind::U8 | TyKind::U16 | TyKind::U32 => {
-                ("%u", TyTable::U32, cast_to(v, ty, TyTable::U32))
-            }
-            _ => ("%d", TyTable::I32, cast_to(v, ty, TyTable::I32)),
-        };
+        let (fmt, arg, arg_ty) = self.fmt_arg(v, ty);
         self.emit_printf(fmt, vec![(arg, arg_ty)]);
         Ok(())
     }
@@ -1561,6 +1595,13 @@ impl<'a> FnLower<'a> {
                 if let TyKind::Optional(inner) = *self.tt().kind(want) {
                     if ty == inner {
                         return Ok((Expr::MakeOptional(inner, Some(Box::new(v))), want));
+                    }
+                }
+                // A concrete type becomes an interface value: the object plus
+                // one function pointer per interface method.
+                if let Some(iface) = self.cx.as_interface(want) {
+                    if let Some(concrete) = self.cx.record_name(ty) {
+                        return self.to_interface(v, &concrete, &iface, want);
                     }
                 }
             }
@@ -2117,6 +2158,15 @@ impl<'a> FnLower<'a> {
                     }
                 }
             }
+            // A call through an interface value dispatches on its table.
+            {
+                let probe = self.expr_raw(recv, None);
+                if let Ok((rv, rty)) = probe {
+                    if let Some(iface) = self.cx.as_interface(rty) {
+                        return self.interface_call(rv, &iface, name, args);
+                    }
+                }
+            }
             // `dict.ContainsKey(k)` / `dict.Get(k)`
             if name == "ContainsKey" || name == "Get" {
                 let (dv, dty) = self.expr_raw(recv, None)?;
@@ -2435,6 +2485,91 @@ impl<'a> FnLower<'a> {
             }
             other => Err(format!("this cannot be translated to SQL: {other:?}")),
         }
+    }
+
+    /// Build an interface value from a concrete one.
+    fn to_interface(
+        &mut self,
+        v: Expr,
+        concrete: &str,
+        iface: &str,
+        want: TyId,
+    ) -> Result<(Expr, TyId), String> {
+        let methods = self
+            .cx
+            .impls
+            .get(&(concrete.to_string(), iface.to_string()))
+            .cloned()
+            .ok_or_else(|| format!("`{concrete}` does not implement `{iface}`"))?;
+        let rid = self.cx.iface_records[iface];
+        let mut fields = vec![Expr::Cast {
+            value: Box::new(v),
+            to: TyTable::PTR,
+        }];
+        for m in &methods {
+            let sig = self
+                .cx
+                .methods
+                .get(&format!("{concrete}.{m}"))
+                .ok_or_else(|| format!("`{concrete}.{m}` is not defined"))?;
+            fields.push(Expr::FuncPtr(sig.fid));
+        }
+        Ok((Expr::MakeRecord(rid, fields), want))
+    }
+
+    /// Call a method through an interface value: the stored function pointer,
+    /// with the stored object as its receiver.
+    fn interface_call(
+        &mut self,
+        recv: Expr,
+        iface: &str,
+        method: &str,
+        args: &[ast::Expr],
+    ) -> Result<(Expr, TyId), String> {
+        let names = self.cx.interfaces[iface].clone();
+        let idx = names
+            .iter()
+            .position(|n| n == method)
+            .ok_or_else(|| format!("`{iface}` has no method `{method}`"))?;
+        // Any implementation has the interface's signature; take it from one.
+        let sig = self
+            .cx
+            .impls
+            .iter()
+            .find(|((_, i), _)| i == iface)
+            .and_then(|((t, _), _)| self.cx.methods.get(&format!("{t}.{method}")).cloned())
+            .ok_or_else(|| format!("nothing implements `{iface}`"))?;
+
+        let holder = self.new_local(
+            "$iface",
+            self.tt()
+                .find(&TyKind::Record(self.cx.iface_records[iface]))
+                .unwrap(),
+        );
+        self.push(Stmt::Let {
+            local: holder,
+            value: recv,
+        });
+        let fn_ty = self.cx.b.m.types.intern(TyKind::Func {
+            params: sig.params.clone(),
+            ret: sig.ret,
+        });
+        let callee = Expr::FuncValue {
+            fn_ptr: Box::new(Expr::Field(Box::new(Expr::Local(holder)), idx + 1)),
+            env: Box::new(Expr::Field(Box::new(Expr::Local(holder)), 0)),
+        };
+        let mut kargs = Vec::new();
+        for (a, pty) in args.iter().zip(sig.params.iter()) {
+            kargs.push(self.expr(a, Some(*pty))?.0);
+        }
+        Ok((
+            Expr::Call(Box::new(Call::Indirect {
+                callee: Box::new(callee),
+                args: kargs,
+                sig: fn_ty,
+            })),
+            sig.ret,
+        ))
     }
 
     /// `memcpy(dst, src, n)`.

@@ -602,6 +602,36 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                 .unwrap();
                 V { op: t, ty: inner }
             }
+            Expr::FuncPtr(f) => {
+                let sym = self.e.m.func(*f).symbol.clone();
+                V {
+                    op: format!("@{sym}"),
+                    ty: TyTable::PTR,
+                }
+            }
+            Expr::FuncValue { fn_ptr, env } => {
+                let f = self.expr(fn_ptr);
+                let en = self.expr(env);
+                let t0 = self.fresh();
+                writeln!(
+                    self.body,
+                    "  {t0} = insertvalue {{ ptr, ptr }} undef, ptr {}, 0",
+                    f.op
+                )
+                .unwrap();
+                let t1 = self.fresh();
+                writeln!(
+                    self.body,
+                    "  {t1} = insertvalue {{ ptr, ptr }} {t0}, ptr {}, 1",
+                    en.op
+                )
+                .unwrap();
+                // The caller knows the signature; the pair itself is untyped.
+                V {
+                    op: t1,
+                    ty: TyTable::PTR,
+                }
+            }
             Expr::ElemPtr(base, idx) => {
                 let b = self.expr(base);
                 let i = self.expr(idx);

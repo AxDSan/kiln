@@ -26,6 +26,17 @@ pub struct Using {
 pub enum Item {
     Type(TypeDecl),
     Enum(EnumDecl),
+    Interface(InterfaceDecl),
+}
+
+/// `interface I { int Area(); }` — method signatures, no bodies.
+#[derive(Clone, Debug)]
+pub struct InterfaceDecl {
+    pub vis: Vis,
+    pub name: String,
+    pub methods: Vec<Method>,
+    pub doc: Option<String>,
+    pub span: Span,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,6 +58,8 @@ pub enum TypeKind {
 pub struct TypeDecl {
     /// Attributes written above the type (`[Packed]`, `[Table(...)]`).
     pub attrs: Vec<Attribute>,
+    /// Interfaces this type declares it implements (`class C : I, J`).
+    pub implements: Vec<String>,
     pub kind: TypeKind,
     pub vis: Vis,
     pub name: String,
