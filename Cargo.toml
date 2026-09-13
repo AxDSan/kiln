@@ -4,7 +4,7 @@
 # them.
 [workspace]
 resolver = "2"
-members = ["ir", "backend", "cli", "debug"]
+members = ["ir", "kir", "backend", "cli", "debug"]
 
 [workspace.package]
 version = "1.3.1"

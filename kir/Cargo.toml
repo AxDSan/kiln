@@ -1,0 +1,9 @@
+[package]
+name = "kiln-kir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "kiln_kir"
+path = "src/lib.rs"
