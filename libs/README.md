@@ -118,6 +118,8 @@ exports must start with one of them:
 | `config` | `config_` |
 | `process` | `process_` |
 | `json` | `json_` |
+| `xml` | `xml_` |
+| `encoding` | `encoding_` |
 | `net` | `net_` |
 | `math` | `math_` |
 | `ui` | `grid_` `datasource_` |
