@@ -142,8 +142,8 @@ clang and checks stdout):
   members generally
 - **`HashSet<T>`**: `new HashSet<T>()`, `.Add(x)` (a duplicate is ignored),
   `.Contains(x)`, `.Count`, and `foreach` over one. String elements compare by
-  content, as dictionary keys do. A set still scans linearly — unlike a
-  dictionary, which is hashed
+  content, as dictionary keys do. **Lookup is hashed**, over the same
+  open-addressed index a dictionary uses
 - **`Dictionary<K,V>`**: `new Dictionary<K,V>()`, `d[k] = v` (updates in place
   or appends), `.Get(k)` → `V?`, `.ContainsKey(k)`, `.Count`. String keys
   compare by content. Lookup is a linear scan for now
@@ -165,7 +165,7 @@ clang and checks stdout):
 
 **Not yet built** (next phases, in rough order):
 
-1. hashing for `HashSet` (`Dictionary` is hashed; a set still scans); the collections are collector-allocated but are still K2's own structures rather than the runtime's `kn_ary_*`/text commands
+1. the collections are collector-allocated and hashed, but are still K2's own structures rather than the runtime's `kn_ary_*`/text commands
 2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
 3. constraints beyond interfaces (`where T : class`, `new()`) are parsed and ignored
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)

@@ -1467,3 +1467,34 @@ public static class P
 "#;
     assert_eq!(run_k2(src), "2000\nwrong 0\n2000 999\n2 4 0\n");
 }
+
+#[test]
+fn a_set_stays_correct_through_rehashing() {
+    let src = r#"
+namespace SetRehash;
+public static class P
+{
+    public static void Main()
+    {
+        var s = new HashSet<int>();
+        foreach (var i in 1..5000)
+            s.Add(i % 1500);
+        Console.WriteLine($"{s.Count}");
+
+        var missing = 0;
+        foreach (var i in 0..1499)
+            if (!s.Contains(i))
+                missing = missing + 1;
+        Console.WriteLine($"missing {missing}");
+        Console.WriteLine($"{s.Contains(9999)}");
+
+        var n = new HashSet<string>();
+        n.Add("ada");
+        n.Add("ada");
+        n.Add("grace");
+        Console.WriteLine($"{n.Count} {n.Contains("grace")} {n.Contains("nope")}");
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "1500\nmissing 0\n0\n2 1 0\n");
+}
