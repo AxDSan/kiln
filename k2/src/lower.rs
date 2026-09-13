@@ -292,6 +292,26 @@ impl Cx {
                     let e = self.resolve(&args[0])?;
                     self.b.m.types.intern(TyKind::Array(e))
                 }
+                // `Func<A, B, R>`: the last argument is the return type.
+                "Func" => {
+                    let mut tys = Vec::new();
+                    for a in args {
+                        tys.push(self.resolve(a)?);
+                    }
+                    let ret = tys.pop().unwrap_or(TyTable::VOID);
+                    self.b.m.types.intern(TyKind::Func { params: tys, ret })
+                }
+                // `Action<A, B>`: no return.
+                "Action" => {
+                    let mut tys = Vec::new();
+                    for a in args {
+                        tys.push(self.resolve(a)?);
+                    }
+                    self.b.m.types.intern(TyKind::Func {
+                        params: tys,
+                        ret: TyTable::VOID,
+                    })
+                }
                 _ => return Err(format!("generic type `{n}` not yet supported")),
             },
         })
@@ -797,6 +817,14 @@ impl<'a> FnLower<'a> {
             ast::ExprKind::Interp(_) => {
                 Err("string interpolation is only supported in Console.WriteLine for now".into())
             }
+            ast::ExprKind::Lambda(l) => {
+                let want = hint.ok_or_else(|| {
+                    "a lambda needs a target type — assign it to a `Func<...>`/`Action<...>` \
+                     local or pass it to a parameter of that type"
+                        .to_string()
+                })?;
+                self.lambda(l, want)
+            }
         }
     }
 
@@ -845,6 +873,33 @@ impl<'a> FnLower<'a> {
     }
 
     fn call(&mut self, callee: &ast::Expr, args: &[ast::Expr]) -> Result<(Expr, TyId), String> {
+        // Calling a value of function type: an indirect call through its
+        // `{fn, env}` pair.
+        if let ast::ExprKind::Ident(name) = &callee.kind {
+            if let Some((lid, ty)) = self.scope.get(name).copied() {
+                if let TyKind::Func { params, ret } = self.tt().kind(ty).clone() {
+                    if args.len() != params.len() {
+                        return Err(format!(
+                            "`{name}` takes {} argument(s), got {}",
+                            params.len(),
+                            args.len()
+                        ));
+                    }
+                    let mut kargs = Vec::new();
+                    for (a, pty) in args.iter().zip(params.iter()) {
+                        kargs.push(self.expr(a, Some(*pty))?.0);
+                    }
+                    return Ok((
+                        Expr::Call(Box::new(Call::Indirect {
+                            callee: Box::new(Expr::Local(lid)),
+                            args: kargs,
+                            sig: ty,
+                        })),
+                        ret,
+                    ));
+                }
+            }
+        }
         // Resolve a method: `Type.Method(..)` (static) or `recv.Method(..)`.
         let (key, this_arg): (String, Option<Expr>) = match &callee.kind {
             ast::ExprKind::Ident(name) => (name.clone(), None),
@@ -908,6 +963,95 @@ impl<'a> FnLower<'a> {
                 args: kargs,
             })),
             sig.ret,
+        ))
+    }
+
+    /// Lift a lambda to its own function and build a closure value.
+    ///
+    /// The lifted function takes the environment pointer as parameter 0, which
+    /// is the KIR closure convention; a non-capturing lambda passes `null` for
+    /// it. Capturing lambdas need their captured locals hoisted into an env
+    /// record at the point of declaration, which is a later step — until then a
+    /// capture is reported rather than silently mis-compiled.
+    fn lambda(&mut self, l: &ast::Lambda, want: TyId) -> Result<(Expr, TyId), String> {
+        let (want_params, want_ret) = match self.tt().kind(want) {
+            TyKind::Func { params, ret } => (params.clone(), *ret),
+            _ => {
+                return Err("a lambda's target type must be a `Func<...>` or `Action<...>`".into())
+            }
+        };
+        if want_params.len() != l.params.len() {
+            return Err(format!(
+                "lambda takes {} parameter(s) but its target type expects {}",
+                l.params.len(),
+                want_params.len()
+            ));
+        }
+        // Reject captures with a clear message rather than a confusing
+        // "unknown name" from the lifted body.
+        let mut free = Vec::new();
+        collect_idents_lambda(l, &mut free);
+        let bound: Vec<&str> = l.params.iter().map(|(n, _)| n.as_str()).collect();
+        for name in &free {
+            if bound.contains(&name.as_str()) {
+                continue;
+            }
+            if self.scope.contains_key(name) {
+                return Err(format!(
+                    "this lambda captures `{name}`; capturing lambdas are not supported yet"
+                ));
+            }
+        }
+
+        // Declare the lifted function: env pointer first, then the parameters.
+        let n = self.cx.b.m.funcs.len();
+        let sym = format!("{}$lambda{n}", self.cx.b.m.name.replace('.', "_"));
+        let mut params: Vec<(&str, TyId)> = vec![("$env", TyTable::PTR)];
+        for ((name, _), ty) in l.params.iter().zip(want_params.iter()) {
+            params.push((name.as_str(), *ty));
+        }
+        let fid = self.cx.b.declare_func(&sym, params, want_ret);
+
+        // Queue the body; `this` binds parameter 0, the (unused) env pointer.
+        let method = ast::Method {
+            vis: ast::Vis::Private,
+            is_static: true,
+            name: sym.clone(),
+            type_params: Vec::new(),
+            params: l
+                .params
+                .iter()
+                .map(|(nm, t)| ast::Param {
+                    name: nm.clone(),
+                    ty: t.clone().unwrap_or(ast::TypeRef::Void),
+                    span: Default::default(),
+                })
+                .collect(),
+            ret: ast::TypeRef::Void,
+            body: match &l.body {
+                ast::LambdaBody::Block(b) => b.clone(),
+                ast::LambdaBody::Expr(_) => Vec::new(),
+            },
+            expr_body: match &l.body {
+                ast::LambdaBody::Expr(e) => Some((**e).clone()),
+                ast::LambdaBody::Block(_) => None,
+            },
+            doc: None,
+            span: Default::default(),
+        };
+        self.cx.pending.push(Pending {
+            fid,
+            method,
+            tvars: self.cx.tvars.clone(),
+            this: true,
+        });
+
+        Ok((
+            Expr::MakeClosure {
+                func: fid,
+                env: Box::new(Expr::Null(TyTable::PTR)),
+            },
+            want,
         ))
     }
 
@@ -1170,6 +1314,124 @@ impl<'a> FnLower<'a> {
 
     fn place_ty(&mut self, e: &ast::Expr) -> Result<TyId, String> {
         Ok(self.expr(e, None)?.1)
+    }
+}
+
+/// Every identifier mentioned in a lambda body, so captures can be detected.
+fn collect_idents_lambda(l: &ast::Lambda, out: &mut Vec<String>) {
+    match &l.body {
+        ast::LambdaBody::Expr(e) => collect_idents_expr(e, out),
+        ast::LambdaBody::Block(b) => {
+            for s in b {
+                collect_idents_stmt(s, out);
+            }
+        }
+    }
+}
+
+fn collect_idents_expr(e: &ast::Expr, out: &mut Vec<String>) {
+    use ast::ExprKind as E;
+    match &e.kind {
+        E::Ident(n) => out.push(n.clone()),
+        E::Member(b, _) => collect_idents_expr(b, out),
+        E::Call(c, args) => {
+            collect_idents_expr(c, out);
+            for a in args {
+                collect_idents_expr(a, out);
+            }
+        }
+        E::Index(a, b) => {
+            collect_idents_expr(a, out);
+            collect_idents_expr(b, out);
+        }
+        E::Unary(_, a) | E::Cast(_, a) | E::Try(a) => collect_idents_expr(a, out),
+        E::Binary(_, a, b) | E::NullCoalesce(a, b) => {
+            collect_idents_expr(a, out);
+            collect_idents_expr(b, out);
+        }
+        E::Range(a, b, _) => {
+            collect_idents_expr(a, out);
+            collect_idents_expr(b, out);
+        }
+        E::Ternary(a, b, c) => {
+            collect_idents_expr(a, out);
+            collect_idents_expr(b, out);
+            collect_idents_expr(c, out);
+        }
+        E::New(_, args, inits) => {
+            for a in args {
+                collect_idents_expr(a, out);
+            }
+            for (_, v) in inits {
+                collect_idents_expr(v, out);
+            }
+        }
+        E::Interp(segs) => {
+            for s in segs {
+                if let ast::InterpSeg::Expr(x) = s {
+                    collect_idents_expr(x, out);
+                }
+            }
+        }
+        E::Lambda(inner) => collect_idents_lambda(inner, out),
+        E::Int(_) | E::Float(_, _) | E::Bool(_) | E::Str(_) | E::Char(_) | E::Null => {}
+    }
+}
+
+fn collect_idents_stmt(s: &ast::Stmt, out: &mut Vec<String>) {
+    use ast::StmtKind as S;
+    match &s.kind {
+        S::Local { value, .. } => collect_idents_expr(value, out),
+        S::Assign { target, value, .. } => {
+            collect_idents_expr(target, out);
+            collect_idents_expr(value, out);
+        }
+        S::Expr(e) => collect_idents_expr(e, out),
+        S::Return(Some(e)) => collect_idents_expr(e, out),
+        S::Return(None) | S::Break | S::Continue => {}
+        S::If { cond, then, els } => {
+            collect_idents_expr(cond, out);
+            for x in then.iter().chain(els) {
+                collect_idents_stmt(x, out);
+            }
+        }
+        S::While { cond, body } => {
+            collect_idents_expr(cond, out);
+            for x in body {
+                collect_idents_stmt(x, out);
+            }
+        }
+        S::For {
+            init,
+            cond,
+            step,
+            body,
+        } => {
+            if let Some(i) = init.as_ref() {
+                collect_idents_stmt(i, out);
+            }
+            if let Some(c) = cond {
+                collect_idents_expr(c, out);
+            }
+            if let Some(st) = step.as_ref() {
+                collect_idents_stmt(st, out);
+            }
+            for x in body {
+                collect_idents_stmt(x, out);
+            }
+        }
+        S::ForEach { coll, body, .. } => {
+            collect_idents_expr(coll, out);
+            for x in body {
+                collect_idents_stmt(x, out);
+            }
+        }
+        S::Defer(d) => collect_idents_stmt(d, out),
+        S::Block(b) => {
+            for x in b {
+                collect_idents_stmt(x, out);
+            }
+        }
     }
 }
 

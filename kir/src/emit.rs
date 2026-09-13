@@ -322,7 +322,16 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                 true
             }
             Stmt::Expr(e) => {
-                self.expr(e);
+                // A call in statement position may be void; only a value
+                // position requires a result.
+                match e {
+                    Expr::Call(c) => {
+                        self.call(c);
+                    }
+                    other => {
+                        self.expr(other);
+                    }
+                }
                 true
             }
             Stmt::Return(v) => {

@@ -225,6 +225,21 @@ pub enum ExprKind {
     NullCoalesce(Box<Expr>, Box<Expr>),
     /// `e?` — Result/T? propagation.
     Try(Box<Expr>),
+    /// `x => e`, `(a, b) => e`, `() => { ... }`
+    Lambda(Lambda),
+}
+
+#[derive(Clone, Debug)]
+pub struct Lambda {
+    /// Parameter names, with an optional written type.
+    pub params: Vec<(String, Option<TypeRef>)>,
+    pub body: LambdaBody,
+}
+
+#[derive(Clone, Debug)]
+pub enum LambdaBody {
+    Expr(Box<Expr>),
+    Block(Vec<Stmt>),
 }
 
 #[derive(Clone, Debug)]

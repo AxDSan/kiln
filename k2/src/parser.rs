@@ -907,7 +907,81 @@ impl Parser {
         Ok(lhs)
     }
 
+    /// `x => …`, `(a, b) => …`, `() => …`, `(int x) => …`. Returns `None` when
+    /// the position does not start a lambda (the parser then backtracks).
+    fn try_lambda(&mut self) -> Result<Option<Expr>, ParseError> {
+        let span = self.span();
+        // `x => …`
+        if matches!(self.peek(), Tok::Ident(_)) && self.peek_at(1) == &Tok::FatArrow {
+            let name = self.ident()?;
+            self.expect(&Tok::FatArrow)?;
+            let body = self.lambda_body()?;
+            return Ok(Some(Expr {
+                kind: ExprKind::Lambda(Lambda {
+                    params: vec![(name, None)],
+                    body,
+                }),
+                span,
+            }));
+        }
+        if self.peek() != &Tok::LParen {
+            return Ok(None);
+        }
+        let save = self.i;
+        self.bump(); // (
+        let mut params = Vec::new();
+        let mut ok = true;
+        while self.peek() != &Tok::RParen {
+            // `T name` or `name`
+            let before = self.i;
+            let mut ty = None;
+            if let Ok(t) = self.type_ref() {
+                if matches!(self.peek(), Tok::Ident(_)) {
+                    ty = Some(t);
+                } else {
+                    self.i = before;
+                }
+            } else {
+                self.i = before;
+            }
+            match self.peek().clone() {
+                Tok::Ident(n) => {
+                    self.bump();
+                    params.push((n, ty));
+                }
+                _ => {
+                    ok = false;
+                    break;
+                }
+            }
+            if !self.eat(&Tok::Comma) {
+                break;
+            }
+        }
+        if !ok || !self.eat(&Tok::RParen) || self.peek() != &Tok::FatArrow {
+            self.i = save;
+            return Ok(None);
+        }
+        self.expect(&Tok::FatArrow)?;
+        let body = self.lambda_body()?;
+        Ok(Some(Expr {
+            kind: ExprKind::Lambda(Lambda { params, body }),
+            span,
+        }))
+    }
+
+    fn lambda_body(&mut self) -> Result<LambdaBody, ParseError> {
+        if self.peek() == &Tok::LBrace {
+            Ok(LambdaBody::Block(self.block()?))
+        } else {
+            Ok(LambdaBody::Expr(Box::new(self.expr()?)))
+        }
+    }
+
     fn unary(&mut self) -> Result<Expr, ParseError> {
+        if let Some(l) = self.try_lambda()? {
+            return Ok(l);
+        }
         let span = self.span();
         let op = match self.peek() {
             Tok::Minus => Some(UnOp::Neg),

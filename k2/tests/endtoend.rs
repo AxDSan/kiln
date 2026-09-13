@@ -181,3 +181,46 @@ public static class P
     );
     assert_eq!(run_k2(src), "7\n1.5\n");
 }
+
+#[test]
+fn lambdas_are_first_class() {
+    let src = r#"
+namespace L;
+public static class P
+{
+    public static int Apply(Func<int, int> f, int x) => f(x);
+
+    public static void Main()
+    {
+        Func<int, int> twice = x => x * 2;
+        Console.WriteLine($"{twice(21)}");
+        Console.WriteLine($"{Apply(n => n + 1, 41)}");
+
+        Func<int, int, int> add = (a, b) => a + b;
+        Console.WriteLine($"{add(20, 22)}");
+
+        Action<int> shout = n => { Console.WriteLine($"n={n}"); };
+        shout(7);
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "42\n42\n42\nn=7\n");
+}
+
+#[test]
+fn capturing_lambda_is_reported_not_miscompiled() {
+    let src = r#"
+namespace C;
+public static class P
+{
+    public static void Main()
+    {
+        var k = 10;
+        Func<int, int> f = x => x + k;
+        Console.WriteLine($"{f(1)}");
+    }
+}
+"#;
+    let err = kiln_k2::compile_to_llvm(src).unwrap_err();
+    assert!(err.contains("captures `k`"), "unexpected error: {err}");
+}

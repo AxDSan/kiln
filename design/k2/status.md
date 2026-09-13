@@ -32,6 +32,10 @@ clang and checks stdout):
   arguments, monomorphised per instantiation with mangled symbols, instances
   cached so one type argument set emits one function (`where` clauses parse;
   constraints are not yet enforced)
+- **lambdas**: `x => e`, `(a, b) => e`, `() => { … }` against a `Func<...>` /
+  `Action<...>` target type — lifted to their own function and called
+  indirectly through the KIR `{fn, env}` closure pair. Non-capturing only; a
+  capture is reported (`captures \`k\``), never mis-compiled
 
 **Parsed but not yet lowered** (parser accepts; lowering errors clearly):
 
@@ -44,7 +48,7 @@ clang and checks stdout):
 1. `List<T>`/`Dictionary<K,V>` against the real Kiln runtime (currently only the array *type* exists; no element ops link a runtime)
 2. `Result<T>` + `?` + `??` over the error slot
 3. generic *types* (`class Cache<K,V>`) and generic instance methods — only generic static methods are built
-4. lambdas + closures at source level (KIR already lowers by-reference capture)
+4. *capturing* lambdas: hoist captured locals into an env record at their declaration (KIR already lowers by-reference capture)
 5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
 6. compile-time attributes: `[Table]`, `Query<T>`, `[Packed]`, `[Dll]`
 7. forms + events + ABI v5
