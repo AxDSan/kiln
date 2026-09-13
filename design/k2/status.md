@@ -117,7 +117,9 @@ clang and checks stdout):
   becomes a `Result`**: where a `Result<T>` is expected — or under `??` — the
   call is wrapped by reading the error slot it writes, so a missing file is a
   value rather than a sentinel. Only a Result that is stored, passed or
-  returned is materialised, as the spec's §9 lowering has it
+  returned is materialised, as the spec's §9 lowering has it. `?` applies
+  straight off a call too, so `File.ReadText(p)?` hands a failure back to the
+  caller
 - **The Kiln runtime, opt-in**: `kiln k2 --runtime` links the runtime and
   support libraries exactly as a 1.x build does; `Console.WriteLine` becomes
   the `print_text` command over the slot ABI, and **every allocation comes from

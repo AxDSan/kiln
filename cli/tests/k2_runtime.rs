@@ -181,3 +181,35 @@ fn a_command_failure_becomes_a_result() {
     let out = build_and_run("result", &src);
     assert_eq!(out, "ok=1 value=here\nok=0\n(missing)\n", "{out}");
 }
+
+#[test]
+fn a_failure_propagates_with_question_mark() {
+    // `?` straight off a command call: the error slot becomes a Result and the
+    // failure is handed back to the caller.
+    let a = tmp("try-a.txt");
+    let b = tmp("try-b.txt");
+    let (pa, pb) = (a.to_str().unwrap(), b.to_str().unwrap());
+    let src = format!(
+        "namespace Try;\n\
+         using Kiln.File;\n\
+         public static class P\n\
+         {{\n\
+         \x20   static Result<string> Both(string x, string y)\n\
+         \x20   {{\n\
+         \x20       var first = File.ReadText(x)?;\n\
+         \x20       var second = File.ReadText(y)?;\n\
+         \x20       return first + second;\n\
+         \x20   }}\n\
+         \x20   public static void Main()\n\
+         \x20   {{\n\
+         \x20       File.WriteText(\"{pa}\", \"A\");\n\
+         \x20       File.WriteText(\"{pb}\", \"B\");\n\
+         \x20       var ok = Both(\"{pa}\", \"{pb}\");\n\
+         \x20       Console.WriteLine($\"{{ok.IsOk}} {{ok.Value}}\");\n\
+         \x20       var bad = Both(\"{pa}\", \"/tmp/not-here-xyz\");\n\
+         \x20       Console.WriteLine($\"{{bad.IsOk}}\");\n\
+         \x20   }}\n\
+         }}\n"
+    );
+    assert_eq!(build_and_run("try", &src), "1 AB\n0\n");
+}

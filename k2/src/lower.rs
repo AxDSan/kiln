@@ -2362,10 +2362,19 @@ impl<'a> FnLower<'a> {
             }
             ast::ExprKind::Try(inner) => {
                 let (v, vty) = self.expr(inner, None)?;
-                let (_, val_ty) = self
-                    .cx
-                    .as_result(vty)
-                    .ok_or_else(|| "`?` can only be applied to a `Result`".to_string())?;
+                // `File.ReadText(p)?` — a command reports failure through the
+                // error slot, so it becomes a Result before being propagated.
+                let (v, vty) = if self.cx.as_result(vty).is_none()
+                    && matches!(&v, Expr::Call(c) if matches!(**c, Call::Command { .. }))
+                {
+                    let rid = self.cx.result_record(vty);
+                    self.wrap_error_slot(v, vty, rid, vty)?
+                } else {
+                    (v, vty)
+                };
+                let (_, val_ty) = self.cx.as_result(vty).ok_or_else(|| {
+                    "`?` applies to a `Result`, or to a command call that can fail".to_string()
+                })?;
                 let (out_rid, out_vt) = self.cx.as_result(self.ret).ok_or_else(|| {
                     "`?` needs the enclosing method to return a `Result`".to_string()
                 })?;
