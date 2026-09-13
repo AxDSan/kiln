@@ -612,3 +612,37 @@ fn the_starter_kit_example_compiles_and_runs() {
          dressed in 3 pieces\n"
     );
 }
+
+#[test]
+fn dictionaries_set_get_and_update() {
+    let src = r#"
+namespace D3;
+public static class P
+{
+    public static void Main()
+    {
+        var ages = new Dictionary<string, int>();
+        ages["ada"] = 36;
+        ages["grace"] = 45;
+        ages["alan"] = 41;
+        Console.WriteLine($"{ages.Count}");
+
+        // Updating an existing key replaces rather than appends.
+        ages["ada"] = 37;
+        Console.WriteLine($"{ages.Count}");
+
+        Console.WriteLine($"{ages.Get("ada") ?? -1}");
+        Console.WriteLine($"{ages.Get("nobody") ?? -1}");
+        Console.WriteLine($"{ages.ContainsKey("grace")}");
+        Console.WriteLine($"{ages.ContainsKey("nobody")}");
+
+        // Integer keys work the same way; growth crosses the initial capacity.
+        var squares = new Dictionary<int, int>();
+        foreach (var i in 1..10)
+            squares[i] = i * i;
+        Console.WriteLine($"{squares.Count} {squares.Get(9) ?? 0}");
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "3\n3\n37\n-1\n1\n0\n10 81\n");
+}

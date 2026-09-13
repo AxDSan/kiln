@@ -707,7 +707,9 @@ impl<'a, 'b> FnEmit<'a, 'b> {
             if tb < fb {
                 "trunc"
             } else if tb > fb {
-                if self.tt().is_unsigned(v.ty) {
+                // A bool is 0 or 1: widening it must zero-extend, or `true`
+                // becomes -1 rather than 1.
+                if self.tt().is_unsigned(v.ty) || matches!(self.tt().kind(v.ty), TyKind::Bool) {
                     "zext"
                 } else {
                     "sext"

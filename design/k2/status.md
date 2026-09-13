@@ -52,6 +52,9 @@ clang and checks stdout):
 - **`List<T>`**: `new List<T>()`, `.Add(x)` (buffer grows 4 → 8 → 16 …),
   `.Count`, 1-based indexing `xs[1]`, and `foreach` over one. KIR gained real
   indexed element access for this
+- **`Dictionary<K,V>`**: `new Dictionary<K,V>()`, `d[k] = v` (updates in place
+  or appends), `.Get(k)` → `V?`, `.ContainsKey(k)`, `.Count`. String keys
+  compare by content. Lookup is a linear scan for now
 - **`Where` / `Select`** over a `List<T>`, taking a lambda and chaining;
   `Select` infers its result element type from the lambda body, so
   `xs.Where(x => x > 8).Select(x => $"n{x}")` turns a list of int into a list
@@ -70,7 +73,7 @@ clang and checks stdout):
 
 **Not yet built** (next phases, in rough order):
 
-1. `Dictionary<K,V>`/`HashSet<T>`, and moving `List<T>` off libc onto the Kiln runtime and collector
+1. `HashSet<T>`; hashing for `Dictionary` (lookup is a linear scan); moving strings, lists and dictionaries off libc onto the Kiln runtime and collector
 2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
 3. generic *types* (`class Cache<K,V>`) and generic instance methods — only generic static methods are built
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)

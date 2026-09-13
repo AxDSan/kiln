@@ -310,3 +310,21 @@ fn command_marshals_over_the_slot_abi() {
         "text arg reinterpreted\n{ll}"
     );
 }
+
+// 6 ─ Widening a bool must zero-extend: `true` is 1, never -1.
+#[test]
+fn a_bool_widens_to_one_not_minus_one() {
+    let mut b = ModuleBuilder::new("boolcast", ModuleKind::Console, Target::X86_64_LINUX);
+    let main = b.declare_func("main_", vec![], TyTable::VOID);
+    let t = print_i32(Expr::Cast {
+        value: Box::new(Expr::Bool(true)),
+        to: TyTable::I32,
+    });
+    let f = print_i32(Expr::Cast {
+        value: Box::new(Expr::Bool(false)),
+        to: TyTable::I32,
+    });
+    b.set_body(main, vec![t, f, Stmt::Return(None)]);
+    b.set_entry(main);
+    assert_eq!(run(&b.build()), "1\n0\n");
+}

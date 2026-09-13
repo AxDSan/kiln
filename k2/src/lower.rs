@@ -16,6 +16,12 @@ const RESULT_OK: usize = 0;
 const RESULT_VALUE: usize = 1;
 const RESULT_ERR: usize = 2;
 
+/// Field indices of a synthesised `Dictionary` record.
+const DICT_LEN: usize = 0;
+const DICT_CAP: usize = 1;
+const DICT_KEYS: usize = 2;
+const DICT_VALUES: usize = 3;
+
 /// Field indices of a synthesised `List` record.
 const LIST_LEN: usize = 0;
 const LIST_CAP: usize = 1;
@@ -92,6 +98,7 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
         tvars: HashMap::new(),
         results: HashMap::new(),
         lists: HashMap::new(),
+        dicts: HashMap::new(),
         pending: Vec::new(),
     };
 
@@ -301,6 +308,8 @@ struct Cx {
     results: HashMap<TyId, RecordId>,
     /// `List<T>` is synthesised per element type: `{len, cap, data}`.
     lists: HashMap<TyId, RecordId>,
+    /// `Dictionary<K,V>` per key/value pair: `{len, cap, keys, values}`.
+    dicts: HashMap<(TyId, TyId), RecordId>,
     pending: Vec<Pending>,
 }
 
@@ -372,6 +381,15 @@ impl Cx {
                     self.b.m.types.intern(TyKind::Func { params: tys, ret })
                 }
                 // `Result<T>`: a record {ok, value, err}, synthesised per T.
+                "Dictionary" => {
+                    if args.len() != 2 {
+                        return Err("Dictionary takes a key and a value type".into());
+                    }
+                    let k = self.resolve(&args[0])?;
+                    let v = self.resolve(&args[1])?;
+                    let rid = self.dict_record(k, v);
+                    self.b.m.types.intern(TyKind::Record(rid))
+                }
                 "Result" => {
                     let vt = match args.first() {
                         Some(a) => self.resolve(a)?,
@@ -435,6 +453,47 @@ impl Cx {
         );
         self.lists.insert(elem, rid);
         rid
+    }
+
+    /// The record standing for `Dictionary<K,V>`: parallel key and value
+    /// buffers. Lookup is a linear scan — correct, and honest about being a
+    /// placeholder until the runtime's hashed dictionary is wired in.
+    fn dict_record(&mut self, k: TyId, v: TyId) -> RecordId {
+        if let Some(r) = self.dicts.get(&(k, v)) {
+            return *r;
+        }
+        let keys_ty = self.b.m.types.intern(TyKind::Array(k));
+        let vals_ty = self.b.m.types.intern(TyKind::Array(v));
+        let n = self.b.m.records.len();
+        let rid = self.b.c_record(
+            &format!("$Dict{n}"),
+            vec![
+                ("len", TyTable::I32),
+                ("cap", TyTable::I32),
+                ("keys", keys_ty),
+                ("values", vals_ty),
+            ],
+            Equality::ByRef,
+        );
+        self.dicts.insert((k, v), rid);
+        rid
+    }
+
+    /// If `ty` is a synthesised `Dictionary`, its record, key and value types.
+    fn as_dict(&self, ty: TyId) -> Option<(RecordId, TyId, TyId)> {
+        if let TyKind::Record(rid) = *self.b.m.types.kind(ty) {
+            if self.b.m.record(rid).name.starts_with("$Dict") {
+                let kt = self.b.m.record(rid).fields[DICT_KEYS].ty;
+                let vt = self.b.m.record(rid).fields[DICT_VALUES].ty;
+                if let (TyKind::Array(k), TyKind::Array(v)) = (
+                    self.b.m.types.kind(kt).clone(),
+                    self.b.m.types.kind(vt).clone(),
+                ) {
+                    return Some((rid, k, v));
+                }
+            }
+        }
+        None
     }
 
     /// If `ty` is a synthesised `List`, its record and element type.
@@ -749,6 +808,58 @@ impl<'a> FnLower<'a> {
                 self.declare_var(name, lty, val)?;
             }
             ast::StmtKind::Assign { target, op, value } => {
+                // `d[k] = v` updates in place, or appends when the key is new.
+                if let ast::ExprKind::Index(base, key) = &target.kind {
+                    let (dv, dty) = self.expr_raw(base, None)?;
+                    if let Some((_, kty, vty)) = self.cx.as_dict(dty) {
+                        if *op != ast::AssignOp::Eq {
+                            return Err(
+                                "compound assignment to a Dictionary entry is not supported".into(),
+                            );
+                        }
+                        let holder = self.new_local("$dict", dty);
+                        self.push(Stmt::Let {
+                            local: holder,
+                            value: dv,
+                        });
+                        let (kv, _) = self.expr(key, Some(kty))?;
+                        let khold = self.new_local("$setkey", kty);
+                        self.push(Stmt::Let {
+                            local: khold,
+                            value: kv,
+                        });
+                        let (vv, _) = self.expr(value, Some(vty))?;
+                        let vhold = self.new_local("$setval", vty);
+                        self.push(Stmt::Let {
+                            local: vhold,
+                            value: vv,
+                        });
+                        let found = self.dict_find(holder, dty, Expr::Local(khold))?;
+                        self.blocks.push(Vec::new());
+                        self.dict_append(holder, dty, Expr::Local(khold), Expr::Local(vhold));
+                        let append = self.blocks.pop().unwrap();
+                        self.push(Stmt::If {
+                            cond: Expr::Bin(
+                                BinOp::Ge,
+                                Box::new(Expr::Local(found)),
+                                Box::new(Expr::Int(0, TyTable::I32)),
+                                TyTable::I32,
+                            ),
+                            then: vec![Stmt::Assign {
+                                place: Place::Index(
+                                    Box::new(Expr::Field(
+                                        Box::new(Expr::Local(holder)),
+                                        DICT_VALUES,
+                                    )),
+                                    Box::new(Expr::Local(found)),
+                                ),
+                                value: Expr::Local(vhold),
+                            }],
+                            els: append,
+                        });
+                        return Ok(());
+                    }
+                }
                 let place = self.place(target)?;
                 let pty = self.place_ty(target)?;
                 let (rhs, _) = self.expr(value, Some(pty))?;
@@ -1336,6 +1447,13 @@ impl<'a> FnLower<'a> {
             }
             ast::ExprKind::Index(base, idx) => {
                 let (b, bty) = self.expr(base, None)?;
+                if self.cx.as_dict(bty).is_some() {
+                    return Err(
+                        "read a Dictionary with `.Get(k)`, which yields a `V?` — there is no \
+                         exception to throw for a missing key"
+                            .into(),
+                    );
+                }
                 // `list[i]` reads the buffer; positions are 1-based.
                 if let Some((_, elem)) = self.cx.as_list(bty) {
                     let (i, _) = self.expr(idx, Some(TyTable::I32))?;
@@ -1565,6 +1683,15 @@ impl<'a> FnLower<'a> {
         }
         // Field access on a record value, or `.Length` etc. (later).
         let (base, bty) = self.expr(recv, None)?;
+        // A dictionary exposes its size.
+        if self.cx.as_dict(bty).is_some() {
+            return match member {
+                "Count" => Ok((Expr::Field(Box::new(base), DICT_LEN), TyTable::I32)),
+                other => Err(format!(
+                    "no member `{other}` on a Dictionary — use .ContainsKey(k) or .Get(k)"
+                )),
+            };
+        }
         // A list exposes its length.
         if self.cx.as_list(bty).is_some() {
             return match member {
@@ -1650,6 +1777,55 @@ impl<'a> FnLower<'a> {
                     });
                     self.list_add(holder, lty, val);
                     return Ok((Expr::Int(0, TyTable::VOID), TyTable::VOID));
+                }
+            }
+            // `dict.ContainsKey(k)` / `dict.Get(k)`
+            if name == "ContainsKey" || name == "Get" {
+                let (dv, dty) = self.expr_raw(recv, None)?;
+                if let Some((_, kty, vty)) = self.cx.as_dict(dty) {
+                    if args.len() != 1 {
+                        return Err(format!("Dictionary.{name} takes one argument"));
+                    }
+                    let holder = self.new_local("$dict", dty);
+                    self.push(Stmt::Let {
+                        local: holder,
+                        value: dv,
+                    });
+                    let (k, _) = self.expr(&args[0], Some(kty))?;
+                    let found = self.dict_find(holder, dty, k)?;
+                    let present = Expr::Bin(
+                        BinOp::Ge,
+                        Box::new(Expr::Local(found)),
+                        Box::new(Expr::Int(0, TyTable::I32)),
+                        TyTable::I32,
+                    );
+                    if name == "ContainsKey" {
+                        return Ok((present, TyTable::BOOL));
+                    }
+                    // `.Get(k)` yields `V?` — absence is a value, not a throw.
+                    let opt_ty = self.cx.b.m.types.intern(TyKind::Optional(vty));
+                    let out = self.new_local("$got", opt_ty);
+                    self.push(Stmt::If {
+                        cond: present,
+                        then: vec![Stmt::Assign {
+                            place: Place::Local(out),
+                            value: Expr::MakeOptional(
+                                vty,
+                                Some(Box::new(Expr::Index(
+                                    Box::new(Expr::Field(
+                                        Box::new(Expr::Local(holder)),
+                                        DICT_VALUES,
+                                    )),
+                                    Box::new(Expr::Local(found)),
+                                ))),
+                            ),
+                        }],
+                        els: vec![Stmt::Assign {
+                            place: Place::Local(out),
+                            value: Expr::MakeOptional(vty, None),
+                        }],
+                    });
+                    return Ok((Expr::Local(out), opt_ty));
                 }
             }
             // `list.Where(pred)` / `list.Select(f)` — written here rather than
@@ -1806,6 +1982,200 @@ impl<'a> FnLower<'a> {
         });
         self.push(Stmt::Assign {
             place: Place::Field(Box::new(l()), LIST_LEN),
+            value: Expr::Bin(
+                BinOp::Add,
+                Box::new(len()),
+                Box::new(Expr::Int(1, TyTable::I32)),
+                TyTable::I32,
+            ),
+        });
+    }
+
+    /// Are two keys equal? Strings compare by content through libc `strcmp`;
+    /// everything else compares by value.
+    fn key_equal(&mut self, a: Expr, b: Expr, kty: TyId) -> Expr {
+        if kty == TyTable::STR {
+            let cmp = Expr::Call(Box::new(Call::Dll {
+                library: "c".into(),
+                symbol: "strcmp".into(),
+                conv: CallConv::Cdecl,
+                args: vec![a, b],
+                arg_tys: vec![TyTable::STR, TyTable::STR],
+                ret: TyTable::I32,
+                varargs: false,
+            }));
+            Expr::Bin(
+                BinOp::Eq,
+                Box::new(cmp),
+                Box::new(Expr::Int(0, TyTable::I32)),
+                TyTable::I32,
+            )
+        } else {
+            Expr::Bin(BinOp::Eq, Box::new(a), Box::new(b), kty)
+        }
+    }
+
+    /// Scan a dictionary for `key`, yielding a local holding its index or -1.
+    fn dict_find(&mut self, holder: LocalId, dty: TyId, key: Expr) -> Result<LocalId, String> {
+        let (_, kty, _) = self.cx.as_dict(dty).expect("a dictionary");
+        let k = self.new_local("$key", kty);
+        self.push(Stmt::Let {
+            local: k,
+            value: key,
+        });
+        let found = self.new_local("$found", TyTable::I32);
+        self.push(Stmt::Let {
+            local: found,
+            value: Expr::Int(-1, TyTable::I32),
+        });
+        let i = self.new_local("$di", TyTable::I32);
+        self.push(Stmt::Let {
+            local: i,
+            value: Expr::Int(0, TyTable::I32),
+        });
+        let cur = Expr::Index(
+            Box::new(Expr::Field(Box::new(Expr::Local(holder)), DICT_KEYS)),
+            Box::new(Expr::Local(i)),
+        );
+        let eq = self.key_equal(cur, Expr::Local(k), kty);
+        let body = vec![
+            Stmt::If {
+                cond: Expr::Not(Box::new(Expr::Bin(
+                    BinOp::Lt,
+                    Box::new(Expr::Local(i)),
+                    Box::new(Expr::Field(Box::new(Expr::Local(holder)), DICT_LEN)),
+                    TyTable::I32,
+                ))),
+                then: vec![Stmt::Break],
+                els: vec![],
+            },
+            Stmt::If {
+                cond: eq,
+                then: vec![
+                    Stmt::Assign {
+                        place: Place::Local(found),
+                        value: Expr::Local(i),
+                    },
+                    Stmt::Break,
+                ],
+                els: vec![],
+            },
+            Stmt::Assign {
+                place: Place::Local(i),
+                value: Expr::Bin(
+                    BinOp::Add,
+                    Box::new(Expr::Local(i)),
+                    Box::new(Expr::Int(1, TyTable::I32)),
+                    TyTable::I32,
+                ),
+            },
+        ];
+        self.push(Stmt::Loop { body });
+        Ok(found)
+    }
+
+    /// Grow both buffers and append a key/value pair.
+    fn dict_append(&mut self, holder: LocalId, dty: TyId, key: Expr, val: Expr) {
+        let (drid, kty, vty) = self.cx.as_dict(dty).expect("a dictionary");
+        let d = || Expr::Local(holder);
+        let len = || Expr::Field(Box::new(d()), DICT_LEN);
+        let cap = || Expr::Field(Box::new(d()), DICT_CAP);
+        let ksize = self.cx.scalar_size(kty);
+        let vsize = self.cx.scalar_size(vty);
+        let keys_ty = self.cx.b.m.record(drid).fields[DICT_KEYS].ty;
+        let vals_ty = self.cx.b.m.record(drid).fields[DICT_VALUES].ty;
+        let newcap = self.new_local("$dcap", TyTable::I32);
+        let realloc = |buf: Expr, elem: i64, cap: Expr, ret: TyId| {
+            Expr::Call(Box::new(Call::Dll {
+                library: "c".into(),
+                symbol: "realloc".into(),
+                conv: CallConv::Cdecl,
+                args: vec![
+                    Expr::Cast {
+                        value: Box::new(buf),
+                        to: TyTable::PTR,
+                    },
+                    Expr::Cast {
+                        value: Box::new(Expr::Bin(
+                            BinOp::Mul,
+                            Box::new(cap),
+                            Box::new(Expr::Int(elem as i128, TyTable::I32)),
+                            TyTable::I32,
+                        )),
+                        to: TyTable::I64,
+                    },
+                ],
+                arg_tys: vec![TyTable::PTR, TyTable::I64],
+                ret,
+                varargs: false,
+            }))
+        };
+        let grow = vec![
+            Stmt::If {
+                cond: Expr::Bin(
+                    BinOp::Eq,
+                    Box::new(cap()),
+                    Box::new(Expr::Int(0, TyTable::I32)),
+                    TyTable::I32,
+                ),
+                then: vec![Stmt::Assign {
+                    place: Place::Local(newcap),
+                    value: Expr::Int(4, TyTable::I32),
+                }],
+                els: vec![Stmt::Assign {
+                    place: Place::Local(newcap),
+                    value: Expr::Bin(
+                        BinOp::Mul,
+                        Box::new(cap()),
+                        Box::new(Expr::Int(2, TyTable::I32)),
+                        TyTable::I32,
+                    ),
+                }],
+            },
+            Stmt::Assign {
+                place: Place::Field(Box::new(d()), DICT_KEYS),
+                value: realloc(
+                    Expr::Field(Box::new(d()), DICT_KEYS),
+                    ksize,
+                    Expr::Local(newcap),
+                    keys_ty,
+                ),
+            },
+            Stmt::Assign {
+                place: Place::Field(Box::new(d()), DICT_VALUES),
+                value: realloc(
+                    Expr::Field(Box::new(d()), DICT_VALUES),
+                    vsize,
+                    Expr::Local(newcap),
+                    vals_ty,
+                ),
+            },
+            Stmt::Assign {
+                place: Place::Field(Box::new(d()), DICT_CAP),
+                value: Expr::Local(newcap),
+            },
+        ];
+        self.push(Stmt::If {
+            cond: Expr::Bin(BinOp::Eq, Box::new(len()), Box::new(cap()), TyTable::I32),
+            then: grow,
+            els: vec![],
+        });
+        self.push(Stmt::Assign {
+            place: Place::Index(
+                Box::new(Expr::Field(Box::new(d()), DICT_KEYS)),
+                Box::new(len()),
+            ),
+            value: key,
+        });
+        self.push(Stmt::Assign {
+            place: Place::Index(
+                Box::new(Expr::Field(Box::new(d()), DICT_VALUES)),
+                Box::new(len()),
+            ),
+            value: val,
+        });
+        self.push(Stmt::Assign {
+            place: Place::Field(Box::new(d()), DICT_LEN),
             value: Expr::Bin(
                 BinOp::Add,
                 Box::new(len()),
@@ -2261,6 +2631,23 @@ impl<'a> FnLower<'a> {
         inits: &[(String, ast::Expr)],
     ) -> Result<(Expr, TyId), String> {
         let ty = self.cx.resolve(t)?;
+        // `new Dictionary<K,V>()` starts empty; buffers grow on first set.
+        if let Some((drid, _, _)) = self.cx.as_dict(ty) {
+            let keys_ty = self.cx.b.m.record(drid).fields[DICT_KEYS].ty;
+            let vals_ty = self.cx.b.m.record(drid).fields[DICT_VALUES].ty;
+            return Ok((
+                Expr::MakeRecord(
+                    drid,
+                    vec![
+                        Expr::Int(0, TyTable::I32),
+                        Expr::Int(0, TyTable::I32),
+                        Expr::Null(keys_ty),
+                        Expr::Null(vals_ty),
+                    ],
+                ),
+                ty,
+            ));
+        }
         // `new List<T>()` starts empty; the buffer is allocated on first Add.
         if self.cx.as_list(ty).is_some() {
             let TyKind::Record(lrid) = *self.tt().kind(ty) else {
