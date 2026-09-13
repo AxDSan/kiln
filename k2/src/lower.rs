@@ -679,6 +679,13 @@ impl Cx {
                 "string" => TyTable::STR,
                 "Bytes" => TyTable::BYTES,
                 "Ptr" => TyTable::PTR,
+                // `Action` with no type arguments: takes nothing, returns
+                // nothing. It is the shape an event handler has, so it is the
+                // one a program reaches for first.
+                "Action" => self.b.m.types.intern(TyKind::Func {
+                    params: Vec::new(),
+                    ret: TyTable::VOID,
+                }),
                 other => {
                     if self.type_ids.contains_key(other) {
                         self.record_ty(other)
@@ -1765,6 +1772,32 @@ impl<'a> FnLower<'a> {
         Ok(())
     }
 
+    /// Bind a loop variable for the body, in a fresh cell per iteration when a
+    /// lambda closes over it.
+    ///
+    /// C# learned this the hard way: one cell shared by every iteration means
+    /// all the closures see the last value, which is never what was meant. So
+    /// the loop keeps its counter in a hidden local and each turn copies it
+    /// into a cell of its own — the statements that do it are returned, to be
+    /// run at the top of the body, after the bounds check.
+    fn bind_loop_var(&mut self, var: &str, ty: TyId, from: LocalId) -> Result<Vec<Stmt>, String> {
+        if !self.captured.contains(var) {
+            self.scope.insert(var.to_string(), (from, ty));
+            return Ok(Vec::new());
+        }
+        self.blocks.push(Vec::new());
+        let r = self.make_cell(var, ty, Expr::Local(from));
+        let prologue = self.blocks.pop().unwrap();
+        r?;
+        Ok(prologue)
+    }
+
+    /// Drop a loop variable's binding once its body has been lowered.
+    fn unbind_loop_var(&mut self, var: &str) {
+        self.scope.remove(var);
+        self.cells.remove(var);
+    }
+
     /// `foreach (i in a..b)` — the only collection form supported yet.
     fn lower_foreach(
         &mut self,
@@ -1787,7 +1820,7 @@ impl<'a> FnLower<'a> {
                     value: Expr::Int(0, TyTable::I32),
                 });
                 let item = self.new_local(var, elem);
-                self.scope.insert(var.to_string(), (item, elem));
+                let bind = self.bind_loop_var(var, elem, item)?;
                 let len = Expr::Field(Box::new(Expr::Local(holder)), LIST_LEN);
                 let mut inner = vec![
                     Stmt::If {
@@ -1822,6 +1855,10 @@ impl<'a> FnLower<'a> {
                 let body_b = self.lower_body(body);
                 self.loop_steps.pop();
                 self.loop_frames.pop();
+                self.unbind_loop_var(var);
+                // The cell is filled after the item is read and before the
+                // body runs, so each turn closes over its own copy.
+                inner.extend(bind);
                 inner.extend(body_b?);
                 inner.extend(step);
                 self.push(Stmt::Loop { body: inner });
@@ -1835,7 +1872,7 @@ impl<'a> FnLower<'a> {
         let (lo_v, ity) = self.expr(lo, Some(TyTable::I32))?;
         let (hi_v, _) = self.expr(hi, Some(ity))?;
         let iv = self.new_local(var, ity);
-        self.scope.insert(var.to_string(), (iv, ity));
+        let bind = self.bind_loop_var(var, ity, iv)?;
         let hi_l = self.new_local("$end", ity);
         self.push(Stmt::Let {
             local: iv,
@@ -1870,6 +1907,8 @@ impl<'a> FnLower<'a> {
         let body_b = self.lower_body(body);
         self.loop_steps.pop();
         self.loop_frames.pop();
+        self.unbind_loop_var(var);
+        inner.extend(bind);
         inner.extend(body_b?);
         inner.extend(step);
         self.push(Stmt::Loop { body: inner });
@@ -1918,12 +1957,18 @@ impl<'a> FnLower<'a> {
 
         if self.cx.runtime == Runtime::Kiln {
             // `print_text` writes a whole line, so the line is built first.
+            // `Console.Write` has no line to write: the runtime's own printing
+            // goes through libc's `printf` on the same stream, so writing the
+            // built string with `%s` and no newline interleaves correctly with
+            // it — the two cannot get out of order.
             if !newline {
-                return Err(
-                    "Console.Write is not available against the Kiln runtime yet — \
-                     print_text writes a whole line"
-                        .into(),
-                );
+                let s = match parts.len() {
+                    0 => return Ok(Some(())),
+                    1 if parts[0].1.is_none() => Expr::Str(parts[0].0.clone()),
+                    _ => self.build_string(parts).0,
+                };
+                self.emit_printf("%s", vec![(s, TyTable::STR)]);
+                return Ok(Some(()));
             }
             if parts.is_empty() {
                 self.emit_command_print(Expr::Str(String::new()));
@@ -4484,9 +4529,13 @@ impl<'a> FnLower<'a> {
                 seen.push(name.clone());
                 captures.push((name.clone(), c.rec, c.ty));
             } else if self.scope.contains_key(name) {
+                // A captured name should have been put in a cell when it was
+                // declared. Reaching here means the pass that decides that
+                // missed this binding form — a miscompile if it were allowed
+                // through, since the closure would read a copy.
                 return Err(format!(
-                    "this lambda captures `{name}`, which is a loop or pattern variable; \
-                     capturing those is not supported yet"
+                    "this lambda captures `{name}`, which is bound in a form the \
+                     compiler cannot yet close over"
                 ));
             }
         }

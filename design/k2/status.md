@@ -172,17 +172,19 @@ clang and checks stdout):
 - `x!` (null-forgiving) and `x?.M`; `??` covers both `Result` and `T?`
 - generic type arguments (`List<T>` maps to an array type; others rejected)
 - interface bases (`: I` parsed and ignored)
+- closures over a `foreach` variable: each turn binds its own cell, so a lambda
+  made in a loop holds that turn's value (C#'s post-5.0 rule), while a write
+  within the turn is still shared. `Action` with no type arguments as well
 
 **Not yet built** (next phases, in rough order):
 
 1. the collections are collector-allocated and hashed, but are still K2's own structures rather than the runtime's `kn_ary_*`/text commands
 2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
 3. constraints beyond interfaces (`where T : class`, `new()`) are parsed and ignored
-4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)
-5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
-6. binding the generated SQL to `libs/db` and returning rows (the statement text is generated; execution needs the runtime)
-7. ABI v5 proper: a handler that captures a *local*; Studio itself calling `kiln edit` (the command exists; the C++ side still splices 1.x text)
-8. hover and completion still read the 1.x index (diagnostics, outline, formatting, grammars and the debugger are done)
+4. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
+5. binding the generated SQL to `libs/db` and returning rows (the statement text is generated; execution needs the runtime)
+6. ABI v5 proper: a handler that captures a *local*; Studio itself calling `kiln edit` (the command exists; the C++ side still splices 1.x text)
+7. hover and completion still read the 1.x index (diagnostics, outline, formatting, grammars and the debugger are done)
 
 ## Milestone: the RAD half runs
 

@@ -231,10 +231,13 @@ fn edits_republish_diagnostics() {
 fn unsupported_requests_get_an_error_not_silence() {
     let mut c = Client::start();
     c.send(serde_json::json!({
-        // Formatting is genuinely unimplemented; hover et al. are supported now.
-        "jsonrpc": "2.0", "id": 7, "method": "textDocument/formatting",
+        // Rename is genuinely unimplemented. Formatting used to stand here and
+        // no longer can: K2 files are formatted, and a 1.x file — which has no
+        // canonical spelling — answers "no edits" rather than an error.
+        "jsonrpc": "2.0", "id": 7, "method": "textDocument/rename",
         "params": { "textDocument": {"uri": "file:///tmp/x.kiln"},
-                    "options": {"tabSize": 2, "insertSpaces": true} }
+                    "position": {"line": 0, "character": 0},
+                    "newName": "y" }
     }));
     let reply = c.recv();
     assert_eq!(reply["id"], 7);

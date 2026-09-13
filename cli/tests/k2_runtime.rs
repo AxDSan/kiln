@@ -319,3 +319,16 @@ fn a_record_is_described_by_its_fields() {
         "a record is held by pointer:\n{ll}"
     );
 }
+
+#[test]
+fn console_write_interleaves_with_the_runtimes_own_printing() {
+    // `print_text` writes a whole line, so `Console.Write` cannot use it. The
+    // runtime prints through libc on the same stream, so a `%s` with no newline
+    // lands in the right place between two `WriteLine`s — which is the only
+    // thing that could go wrong here.
+    let out = build_and_run(
+        "write",
+        "namespace Wr;\npublic static class P\n{\n    public static void Main()\n    {\n        Console.WriteLine(\"start\");\n        foreach (var i in 1..3)\n            Console.Write($\"{i} \");\n        Console.WriteLine(\"end\");\n        Console.Write(\"a\");\n        Console.Write(\"b\");\n        Console.WriteLine(\"\");\n    }\n}\n",
+    );
+    assert_eq!(out, "start\n1 2 3 end\nab\n", "{out}");
+}

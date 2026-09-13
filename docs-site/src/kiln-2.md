@@ -185,6 +185,28 @@ public static class P
 }
 ```
 
+A loop variable is the exception worth knowing: each turn of a `foreach` binds
+its own, so a closure made in one turn holds that turn's value rather than the
+last one. Writing to it inside the same turn is still seen by that turn's
+closure — it is per-iteration, not a copy.
+
+```k2
+namespace PerTurn;
+
+public static class P
+{
+    public static void Main()
+    {
+        var fs = new List<Action>();
+        foreach (var i in 1..3)
+            fs.Add(() => { Console.Write($"{i} "); });
+        foreach (var f in fs)
+            f();                                // 1 2 3, not 3 3 3
+        Console.WriteLine("");
+    }
+}
+```
+
 ## Generics
 
 Methods and types both take type parameters, and each set of type arguments is
@@ -450,8 +472,6 @@ locals by name, and shows a record as its fields.
 Kiln 2 is not finished, and it is worth knowing where the edges are:
 
 - It is **not the default**. 1.x still builds with `kiln build` and still ships.
-- `Console.Write` has no line-less counterpart against the Kiln runtime.
-- A `foreach` loop variable cannot be captured by a lambda.
 - Non-interface generic constraints (`where T : class`, `new()`) parse and are
   ignored.
 - The designer in Studio still edits 1.x; `kiln edit` is the interface it will

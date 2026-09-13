@@ -208,10 +208,9 @@ public static class P
 }
 
 #[test]
-fn capturing_a_loop_variable_is_reported_not_miscompiled() {
-    // Locals and parameters are captured by reference through cells; a foreach
-    // variable is not celled yet, so it must be reported rather than compiled
-    // to the wrong thing.
+fn a_loop_variable_is_captured_like_any_other() {
+    // A lambda made inside a loop and called inside the same turn reads that
+    // turn's value — the everyday case, and the one that used to be refused.
     let src = r#"
 namespace C;
 public static class P
@@ -226,8 +225,7 @@ public static class P
     }
 }
 "#;
-    let err = kiln_k2::compile_to_llvm(src).unwrap_err();
-    assert!(err.contains("captures `i`"), "unexpected error: {err}");
+    assert_eq!(run_k2(src), "2\n3\n4\n");
 }
 
 #[test]
@@ -1497,4 +1495,69 @@ public static class P
 }
 "#;
     assert_eq!(run_k2(src), "1500\nmissing 0\n0\n2 1 0\n");
+}
+
+#[test]
+fn each_turn_of_a_loop_closes_over_its_own_variable() {
+    // C# 5 changed this rule because the old one was always a bug: with one
+    // shared variable every closure sees the last value. Each turn gets a cell
+    // of its own, so the list prints 1 2 3 and not 3 3 3 — over a range and
+    // over a list, and the loop variable still reads normally inside the body.
+    let src = r#"
+namespace LoopCapture;
+public static class P
+{
+    public static void Main()
+    {
+        var fs = new List<Action>();
+        foreach (var i in 1..3)
+        {
+            Console.WriteLine($"at {i}");
+            fs.Add(() => { Console.Write($"{i} "); });
+        }
+        foreach (var f in fs)
+            f();
+        Console.WriteLine("");
+
+        var names = new List<string>();
+        names.Add("ada");
+        names.Add("grace");
+        var gs = new List<Action>();
+        foreach (var n in names)
+            gs.Add(() => { Console.Write($"{n} "); });
+        foreach (var g in gs)
+            g();
+        Console.WriteLine("");
+    }
+}
+"#;
+    assert_eq!(
+        run_k2(src),
+        "at 1\nat 2\nat 3\n1 2 3 \nada grace \n"
+    );
+}
+
+#[test]
+fn a_loop_variable_is_still_captured_by_reference_within_one_turn() {
+    // Per-iteration does not mean by-value: a closure made in one turn still
+    // sees a write made later in that same turn.
+    let src = r#"
+namespace TurnRef;
+public static class P
+{
+    public static void Main()
+    {
+        var fs = new List<Action>();
+        foreach (var i in 1..2)
+        {
+            fs.Add(() => { Console.Write($"{i} "); });
+            i = i * 10;
+        }
+        foreach (var f in fs)
+            f();
+        Console.WriteLine("");
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "10 20 \n");
 }
