@@ -419,3 +419,35 @@ public static class P
 "#;
     assert_eq!(run_k2(src), "1\n3\n5\nj1\nj2\nj4\nj5\n");
 }
+
+#[test]
+fn optionals_narrow_on_a_null_check() {
+    let src = r#"
+namespace O;
+public static class P
+{
+    public static int? Halve(int n)
+    {
+        if (n % 2 != 0)
+            return null;
+        return n / 2;
+    }
+
+    public static void Main()
+    {
+        var a = Halve(84);
+        if (a != null)
+            Console.WriteLine($"{a}");          // narrowed: reads as int
+
+        var b = Halve(7);
+        if (b == null)
+            Console.WriteLine("no value");
+
+        Console.WriteLine($"{Halve(7) ?? -1}");  // fallback
+        Console.WriteLine($"{Halve(10) ?? -1}");
+        Console.WriteLine($"{Halve(9).HasValue}");
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "42\nno value\n-1\n5\n0\n");
+}

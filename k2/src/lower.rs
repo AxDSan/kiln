@@ -564,6 +564,9 @@ struct FnLower<'a> {
     /// The step of each enclosing loop (a `for`'s increment, a `foreach`'s
     /// counter bump). `continue` must run it, or the loop never advances.
     loop_steps: Vec<Vec<Stmt>>,
+    /// `T?` locals proven non-null by an enclosing `if`, so reading one yields
+    /// the `T` rather than the optional.
+    narrowed: std::collections::HashSet<String>,
 }
 
 impl<'a> FnLower<'a> {
@@ -579,6 +582,7 @@ impl<'a> FnLower<'a> {
             defers: vec![Vec::new()],
             loop_frames: Vec::new(),
             loop_steps: Vec::new(),
+            narrowed: std::collections::HashSet::new(),
         }
     }
 
@@ -739,8 +743,21 @@ impl<'a> FnLower<'a> {
             },
             ast::StmtKind::If { cond, then, els } => {
                 let (c, _) = self.expr(cond, Some(TyTable::BOOL))?;
-                let then_b = self.lower_body(then)?;
-                let els_b = self.lower_body(els)?;
+                // `if (x != null)` proves `x` present in the then-branch;
+                // `if (x == null)` proves it in the else-branch.
+                let (narrow_then, narrow_else) = null_test_target(cond);
+                let saved = self.narrowed.clone();
+                if let Some(n) = &narrow_then {
+                    self.narrowed.insert(n.clone());
+                }
+                let then_b = self.lower_body(then);
+                self.narrowed = saved.clone();
+                if let Some(n) = &narrow_else {
+                    self.narrowed.insert(n.clone());
+                }
+                let els_b = self.lower_body(els);
+                self.narrowed = saved;
+                let (then_b, els_b) = (then_b?, els_b?);
                 self.push(Stmt::If {
                     cond: c,
                     then: then_b,
@@ -996,7 +1013,22 @@ impl<'a> FnLower<'a> {
 
     // ─── expressions ───────────────────────────────────────────────────────
 
+    /// Lower an expression, wrapping a plain `T` when a `T?` is expected.
     fn expr(&mut self, e: &ast::Expr, hint: Option<TyId>) -> Result<(Expr, TyId), String> {
+        let (v, ty) = self.expr_raw(e, hint)?;
+        if let Some(want) = hint {
+            if ty != want {
+                if let TyKind::Optional(inner) = *self.tt().kind(want) {
+                    if ty == inner {
+                        return Ok((Expr::MakeOptional(inner, Some(Box::new(v))), want));
+                    }
+                }
+            }
+        }
+        Ok((v, ty))
+    }
+
+    fn expr_raw(&mut self, e: &ast::Expr, hint: Option<TyId>) -> Result<(Expr, TyId), String> {
         match &e.kind {
             ast::ExprKind::Int(v) => {
                 let ty = hint
@@ -1018,6 +1050,9 @@ impl<'a> FnLower<'a> {
             ast::ExprKind::Char(c) => Ok((Expr::Int(*c as i128, TyTable::CHAR), TyTable::CHAR)),
             ast::ExprKind::Null => {
                 let ty = hint.unwrap_or(TyTable::PTR);
+                if let TyKind::Optional(inner) = *self.tt().kind(ty) {
+                    return Ok((Expr::MakeOptional(inner, None), ty));
+                }
                 Ok((Expr::Null(ty), ty))
             }
             ast::ExprKind::Ident(name) => self.ident(name, e.span),
@@ -1068,7 +1103,11 @@ impl<'a> FnLower<'a> {
                 Ok((Expr::Index(Box::new(b), Box::new(i0)), elem))
             }
             ast::ExprKind::Unary(op, inner) => {
-                let (v, ty) = self.expr(inner, hint)?;
+                let uhint = hint.map(|h| match *self.tt().kind(h) {
+                    TyKind::Optional(i) => i,
+                    _ => h,
+                });
+                let (v, ty) = self.expr(inner, uhint)?;
                 let out = match op {
                     ast::UnOp::Neg => Expr::Neg(Box::new(v), ty),
                     ast::UnOp::Not => Expr::Not(Box::new(v)),
@@ -1084,7 +1123,29 @@ impl<'a> FnLower<'a> {
                 };
                 Ok((out, rty))
             }
-            ast::ExprKind::Binary(op, a, b) => self.binary(*op, a, b, hint),
+            ast::ExprKind::Binary(op, a, b) => {
+                // A null comparison on an optional is a presence test.
+                if matches!(op, ast::BinOp::Eq | ast::BinOp::Ne) {
+                    let (opt, _other) = match (&a.kind, &b.kind) {
+                        (ast::ExprKind::Null, _) => (Some(b), true),
+                        (_, ast::ExprKind::Null) => (Some(a), true),
+                        _ => (None, false),
+                    };
+                    if let Some(x) = opt {
+                        let (v, vty) = self.expr_raw(x, None)?;
+                        if let TyKind::Optional(_) = *self.tt().kind(vty) {
+                            let has = Expr::OptionalHasValue(Box::new(v));
+                            let out = if *op == ast::BinOp::Ne {
+                                has
+                            } else {
+                                Expr::Not(Box::new(has))
+                            };
+                            return Ok((out, TyTable::BOOL));
+                        }
+                    }
+                }
+                self.binary(*op, a, b, hint)
+            }
             ast::ExprKind::Cast(t, inner) => {
                 let to = self.cx.resolve(t)?;
                 let (v, _) = self.expr(inner, None)?;
@@ -1099,11 +1160,33 @@ impl<'a> FnLower<'a> {
             ast::ExprKind::New(t, args, inits) => self.new_record(t, args, inits),
             ast::ExprKind::Ternary(c, a, b) => self.ternary(c, a, b, hint),
             ast::ExprKind::NullCoalesce(a, b) => {
-                let (v, vty) = self.expr(a, None)?;
-                let (_, val_ty) = self.cx.as_result(vty).ok_or_else(|| {
-                    "`??` currently applies to a `Result`; `T?` support comes with optionals"
-                        .to_string()
-                })?;
+                let (v, vty) = self.expr_raw(a, None)?;
+                // `T? ?? fallback`
+                if let TyKind::Optional(inner) = *self.tt().kind(vty) {
+                    let held = self.new_local("$coalesce", vty);
+                    self.push(Stmt::Let {
+                        local: held,
+                        value: v,
+                    });
+                    let out = self.new_local("$value", inner);
+                    let (fb, _) = self.expr(b, Some(inner))?;
+                    self.push(Stmt::If {
+                        cond: Expr::OptionalHasValue(Box::new(Expr::Local(held))),
+                        then: vec![Stmt::Assign {
+                            place: Place::Local(out),
+                            value: Expr::OptionalGet(Box::new(Expr::Local(held))),
+                        }],
+                        els: vec![Stmt::Assign {
+                            place: Place::Local(out),
+                            value: fb,
+                        }],
+                    });
+                    return Ok((Expr::Local(out), inner));
+                }
+                let (_, val_ty) = self
+                    .cx
+                    .as_result(vty)
+                    .ok_or_else(|| "`??` applies to a `Result` or a `T?`".to_string())?;
                 let held = self.new_local("$coalesce", vty);
                 self.push(Stmt::Let {
                     local: held,
@@ -1172,6 +1255,11 @@ impl<'a> FnLower<'a> {
             return Ok((Expr::Field(Box::new(c.ptr), 0), c.ty));
         }
         if let Some((lid, ty)) = self.scope.get(name).copied() {
+            if let TyKind::Optional(inner) = *self.tt().kind(ty) {
+                if self.narrowed.contains(name) {
+                    return Ok((Expr::OptionalGet(Box::new(Expr::Local(lid))), inner));
+                }
+            }
             return Ok((Expr::Local(lid), ty));
         }
         if let Some((ty, value)) = self.cx.consts.get(name).cloned() {
@@ -1204,6 +1292,16 @@ impl<'a> FnLower<'a> {
         }
         // Field access on a record value, or `.Length` etc. (later).
         let (base, bty) = self.expr(recv, None)?;
+        // An optional exposes presence and value explicitly.
+        if let TyKind::Optional(inner) = *self.tt().kind(bty) {
+            return match member {
+                "HasValue" => Ok((Expr::OptionalHasValue(Box::new(base)), TyTable::BOOL)),
+                "Value" => Ok((Expr::OptionalGet(Box::new(base)), inner)),
+                other => Err(format!(
+                    "no member `{other}` on a `T?` — test it against null, or use .Value"
+                )),
+            };
+        }
         // A synthesised Result exposes named members rather than raw fields.
         if let Some((_, vt)) = self.cx.as_result(bty) {
             return match member {
@@ -1605,6 +1703,12 @@ impl<'a> FnLower<'a> {
         b: &ast::Expr,
         hint: Option<TyId>,
     ) -> Result<(Expr, TyId), String> {
+        // Arithmetic happens on the value type; a `T?` target wraps the result
+        // afterwards, so never let an optional become the operand type.
+        let hint = hint.map(|h| match *self.tt().kind(h) {
+            TyKind::Optional(inner) => inner,
+            _ => h,
+        });
         // short-circuit && / ||
         if op == ast::BinOp::And || op == ast::BinOp::Or {
             let (av, _) = self.expr(a, Some(TyTable::BOOL))?;
@@ -2020,6 +2124,28 @@ fn unify(
         }
         _ => Ok(()),
     }
+}
+
+/// For `x != null` returns `(Some(x), None)`; for `x == null`, `(None, Some(x))`
+/// — the branch in which `x` is known to hold a value.
+fn null_test_target(cond: &ast::Expr) -> (Option<String>, Option<String>) {
+    if let ast::ExprKind::Binary(op, a, b) = &cond.kind {
+        if matches!(op, ast::BinOp::Eq | ast::BinOp::Ne) {
+            let name = match (&a.kind, &b.kind) {
+                (ast::ExprKind::Ident(n), ast::ExprKind::Null) => Some(n.clone()),
+                (ast::ExprKind::Null, ast::ExprKind::Ident(n)) => Some(n.clone()),
+                _ => None,
+            };
+            if let Some(n) = name {
+                return if *op == ast::BinOp::Ne {
+                    (Some(n), None)
+                } else {
+                    (None, Some(n))
+                };
+            }
+        }
+    }
+    (None, None)
 }
 
 /// A zero/null value of a type — the unused `value` slot of a failed `Result`.
