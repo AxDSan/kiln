@@ -1,0 +1,96 @@
+# Reading the game client's own tables.
+#
+# The client ships XML that declares GB2312 over bytes that are really GBK, a
+# comment block full of Chinese, CRLF, and one self-closing row per item. This
+# program writes a table of that shape — as BYTES, because that is the whole
+# point — and then reads it the way a server reads the real thing.
+#
+#   kiln run examples/xmllib.kiln
+module xmllib
+use file
+use xml
+use text
+use encoding
+
+sub main
+  let path = "/tmp/kiln_xmllib.xml"
+
+  # --- a table in the client's own shape -------------------------------
+  # Built byte by byte: the declaration lies about the encoding on purpose, and
+  # 214/208 is 中 in GBK, which Rust-style source text cannot express.
+  var doc: bytes = bytes_new(0)
+  doc = bytes_concat(doc, bytes_from_text("<?xml version=\"1.0\" encoding=\"GB2312\"?>\n"))
+  doc = bytes_concat(doc, bytes_from_text("<!--\"weapon\", "))
+  var cn: bytes = bytes_new(2)
+  call bytes_set(cn, 1, 206)
+  call bytes_set(cn, 2, 228)
+  doc = bytes_concat(doc, cn)
+  doc = bytes_concat(doc, bytes_from_text(" -->\n"))
+  doc = bytes_concat(doc, bytes_from_text("<ItemBaseAttribute>\n  <Weapons>\n    <Swords>\n"))
+  doc = bytes_concat(doc, bytes_from_text("      <ShortSword ID=\"1000\" Attack=\"15,23,39,68,118\" Icon=\"36,144\"/>\n"))
+  doc = bytes_concat(doc, bytes_from_text("      <Scimitar ID=\"1001\" Attack=\"65,78,102,141,208\"/>\n"))
+  doc = bytes_concat(doc, bytes_from_text("    </Swords>\n  </Weapons>\n"))
+  doc = bytes_concat(doc, bytes_from_text("  <Armors>\n    <Plate ID=\"2100\" Attack=\"9\"/>\n  </Armors>\n"))
+  doc = bytes_concat(doc, bytes_from_text("</ItemBaseAttribute>\n"))
+  call file_write_bytes(path, doc)
+
+  # --- reading it back --------------------------------------------------
+  let h = xml_parse(file_read_bytes(path))
+  if h = 0
+    call print_text("parse failed: {last_error_text()}")
+    return
+  end
+
+  let root = xml_root(h)
+  let rname = xml_name(h, root)
+  let nchild = xml_count(h, root)
+  call print_text("{rname}: {nchild} groups, starting on line {xml_line(h, root)}")
+
+  # By position, which is how a program walks groups it cannot name in advance.
+  for i in 1..nchild
+    let group = xml_child(h, root, i)
+    let gname = xml_name(h, group)
+    let rows = xml_count(h, group)
+    call print_text("  group {i}: {gname} ({rows} child)")
+  end
+
+  # By name, descending: the item rows sit two levels below the root.
+  let sword = xml_descend(h, root, "ShortSword")
+  let sname = xml_name(h, sword)
+  let sid = xml_attr(h, sword, "ID")
+  let satk = xml_attr(h, sword, "Attack")
+  call print_text("found {sname} ID={sid} Attack={satk}")
+
+  # Every row of the Swords group, whatever its element is called — which is
+  # the case here, since the client names each row its own template.
+  let swords = xml_first(h, xml_child(h, root, 1), "Swords")
+  var row = xml_first(h, swords, "")
+  var total = 0
+  while row <> 0
+    let nm = xml_name(h, row)
+    let atk = xml_attr(h, row, "Attack")
+    call print_text("  {nm}: {atk}")
+    var first: int = 0
+    if text_split_count(atk, ",") > 0
+      first = text_to_int(text_split_at(atk, ",", 1))
+    end
+    total += first
+    row = xml_sibling(h, row, "")
+  end
+  call print_text("total first-tick attack: {total}")
+
+  # An attribute that is not there answers "" without failing, and the
+  # predicate is what tells "absent" from "empty".
+  let missing = xml_attr(h, sword, "MaterialProyAdd")
+  let has = xml_has_attr(h, sword, "MaterialProyAdd")
+  call print_text("MaterialProyAdd '{missing}' present={has} error code {last_error_code()}")
+
+  # --- the GBK the comment block carries --------------------------------
+  # Only visible after decoding: the parser hands back the client's bytes
+  # untouched, which is what makes a document whose declaration lies readable.
+  let text = encoding_decode(file_read_bytes(path), "gbk")
+  let ok = text_contains(text, "武")
+  call print_text("decoded to UTF-8, comment reads back: {ok}")
+
+  call print_int(xml_close_all())
+end
