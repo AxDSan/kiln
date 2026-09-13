@@ -72,6 +72,8 @@ pub struct EnumDecl {
 
 #[derive(Clone, Debug)]
 pub struct Field {
+    /// Attributes written on the field (`[Column("x")]`, `[Key]`, `[Auto]`).
+    pub attrs: Vec<Attribute>,
     pub vis: Vis,
     pub name: String,
     pub ty: TypeRef,

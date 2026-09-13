@@ -716,3 +716,60 @@ public static class P
     // 2 + 2 + 4 = 8 bytes, no padding. 0x1234 = 4660, low byte 0x34 = 52.
     assert_eq!(run_k2(src), "size 8\n4660 40 7\n22136 12 9\n52 18\n");
 }
+
+#[test]
+fn table_attribute_builds_sql_at_compile_time() {
+    // The feature the original starter kit argued for: the SQL is generated
+    // from the record and a predicate lambda, at compile time. No reflection
+    // reaches the binary — only the string.
+    let src = r#"
+namespace Db;
+
+[Table("character_items")]
+public record CharacterItem(
+    [Auto] ulong Id,
+    uint CharacterId,
+    int Slot,
+    uint TemplateId,
+    [Column("flags")] uint Flags);
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(CharacterItem.InsertSql());
+        Console.WriteLine(CharacterItem.SelectSql());
+
+        var wanted = 7;
+        Console.WriteLine(CharacterItem.SelectSql(i => i.CharacterId == wanted));
+        Console.WriteLine(CharacterItem.SelectSql(i => i.CharacterId == wanted && i.Slot < 10));
+    }
+}
+"#;
+    assert_eq!(
+        run_k2(src),
+        "insert into character_items (character_id, slot, template_id, flags) values (?, ?, ?, ?)\n\
+         select id, character_id, slot, template_id, flags from character_items\n\
+         select id, character_id, slot, template_id, flags from character_items where (character_id = ?)\n\
+         select id, character_id, slot, template_id, flags from character_items where ((character_id = ?) and (slot < 10))\n"
+    );
+}
+
+#[test]
+fn an_untranslatable_query_is_a_compile_error() {
+    let src = r#"
+namespace Db2;
+[Table("t")]
+public record Row(int A);
+public static class P
+{
+    public static int Side() => 1;
+    public static void Main()
+    {
+        Console.WriteLine(Row.SelectSql(r => r.A == Side()));
+    }
+}
+"#;
+    let err = kiln_k2::compile_to_llvm(src).unwrap_err();
+    assert!(err.contains("cannot be translated to SQL"), "got: {err}");
+}

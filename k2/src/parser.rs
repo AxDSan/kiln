@@ -280,10 +280,12 @@ impl Parser {
         if self.peek() == &Tok::LParen {
             self.bump();
             while self.peek() != &Tok::RParen {
+                let fattrs = self.attributes()?;
                 let pspan = self.span();
                 let ty = self.type_ref()?;
                 let pname = self.ident()?;
                 record_params.push(Field {
+                    attrs: fattrs,
                     vis: Vis::Public,
                     name: pname,
                     ty,
@@ -467,6 +469,7 @@ impl Parser {
         };
         self.expect(&Tok::Semi)?;
         fields.push(Field {
+            attrs,
             vis,
             name,
             ty,

@@ -103,14 +103,38 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
         dicts: HashMap::new(),
         dlls: HashMap::new(),
         packed: std::collections::HashSet::new(),
+        tables: HashMap::new(),
         pending: Vec::new(),
     };
 
-    // `[Packed]` records lay out with no padding.
+    // `[Packed]` records lay out with no padding; `[Table]` records map to a
+    // database table, with column names defaulting to snake_case.
     for item in &p.items {
         if let ast::Item::Type(td) = item {
             if td.attrs.iter().any(|a| a.name == "Packed") {
                 cx.packed.insert(td.name.clone());
+            }
+            if let Some(t) = td.attrs.iter().find(|a| a.name == "Table") {
+                let table = match t.args.first().map(|e| &e.kind) {
+                    Some(ast::ExprKind::Str(s)) => s.clone(),
+                    _ => snake_case(&td.name),
+                };
+                let mut columns = Vec::new();
+                for f in td.record_params.iter().chain(td.fields.iter()) {
+                    let col = f
+                        .attrs
+                        .iter()
+                        .find(|a| a.name == "Column")
+                        .and_then(|a| match a.args.first().map(|e| &e.kind) {
+                            Some(ast::ExprKind::Str(s)) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| snake_case(&f.name));
+                    let auto = f.attrs.iter().any(|a| a.name == "Auto");
+                    columns.push((f.name.clone(), col, auto));
+                }
+                cx.tables
+                    .insert(td.name.clone(), TableInfo { table, columns });
             }
         }
     }
@@ -319,6 +343,14 @@ struct Sig {
     ret: TyId,
 }
 
+/// A record mapped to a database table by `[Table]`.
+#[derive(Clone)]
+struct TableInfo {
+    table: String,
+    /// `(field name, column name, is_auto)` in declaration order.
+    columns: Vec<(String, String, bool)>,
+}
+
 /// A foreign function declared with `[Dll]`.
 #[derive(Clone)]
 struct DllSig {
@@ -395,6 +427,8 @@ struct Cx {
     dicts: HashMap<(TyId, TyId), RecordId>,
     /// `[Dll]` externs, by `Type.Name` and bare `Name`.
     dlls: HashMap<String, DllSig>,
+    /// `[Table]` records: type name → (table name, columns).
+    tables: HashMap<String, TableInfo>,
     /// Records declared `[Packed]`: laid out with no padding, and given
     /// generated Read/Write over a byte buffer.
     packed: std::collections::HashSet<String>,
@@ -1892,6 +1926,47 @@ impl<'a> FnLower<'a> {
                     return Ok((Expr::Int(0, TyTable::VOID), TyTable::VOID));
                 }
             }
+            // `T.InsertSql()` / `T.SelectSql(x => ...)` on a [Table] record.
+            // The statement is built at compile time: there is no reflection in
+            // the binary, only the string these produce.
+            if let ast::ExprKind::Ident(obj) = &recv.kind {
+                if let Some(info) = self.cx.tables.get(obj).cloned() {
+                    if name == "InsertSql" {
+                        let cols: Vec<&str> = info
+                            .columns
+                            .iter()
+                            .filter(|(_, _, auto)| !auto)
+                            .map(|(_, c, _)| c.as_str())
+                            .collect();
+                        let holes = vec!["?"; cols.len()].join(", ");
+                        let sql = format!(
+                            "insert into {} ({}) values ({})",
+                            info.table,
+                            cols.join(", "),
+                            holes
+                        );
+                        return Ok((Expr::Str(sql), TyTable::STR));
+                    }
+                    if name == "SelectSql" {
+                        let cols: Vec<&str> =
+                            info.columns.iter().map(|(_, c, _)| c.as_str()).collect();
+                        let head = format!("select {} from {}", cols.join(", "), info.table);
+                        if args.is_empty() {
+                            return Ok((Expr::Str(head), TyTable::STR));
+                        }
+                        let ast::ExprKind::Lambda(l) = &args[0].kind else {
+                            return Err("SelectSql takes a predicate lambda".into());
+                        };
+                        let ast::LambdaBody::Expr(body) = &l.body else {
+                            return Err("a query predicate must be an expression".into());
+                        };
+                        let param = l.params.first().map(|(n, _)| n.clone()).unwrap_or_default();
+                        let mut where_sql = String::new();
+                        self.query_sql(body, &param, &info, &mut where_sql)?;
+                        return Ok((Expr::Str(format!("{head} where {where_sql}")), TyTable::STR));
+                    }
+                }
+            }
             // `T.Read(bytes, offset)` on a [Packed] record, and `Bytes.Alloc(n)`.
             if let ast::ExprKind::Ident(obj) = &recv.kind {
                 if obj == "Bytes" && name == "Alloc" {
@@ -2220,6 +2295,87 @@ impl<'a> FnLower<'a> {
                 TyTable::I32,
             ),
         });
+    }
+
+    /// Translate a predicate lambda into a SQL `where` clause at compile time.
+    ///
+    /// Only the shapes a database can evaluate are accepted — comparisons,
+    /// `&&`/`||`/`!`, a column of the row, and constants. Anything else is a
+    /// compile error naming the unsupported piece, rather than something that
+    /// silently runs in the wrong place.
+    fn query_sql(
+        &mut self,
+        e: &ast::Expr,
+        param: &str,
+        info: &TableInfo,
+        out: &mut String,
+    ) -> Result<(), String> {
+        use ast::ExprKind as E;
+        match &e.kind {
+            E::Binary(op, a, b) => {
+                let sym = match op {
+                    ast::BinOp::Eq => "=",
+                    ast::BinOp::Ne => "<>",
+                    ast::BinOp::Lt => "<",
+                    ast::BinOp::Le => "<=",
+                    ast::BinOp::Gt => ">",
+                    ast::BinOp::Ge => ">=",
+                    ast::BinOp::And => "and",
+                    ast::BinOp::Or => "or",
+                    other => {
+                        return Err(format!("`{other:?}` cannot be translated to SQL"));
+                    }
+                };
+                out.push('(');
+                self.query_sql(a, param, info, out)?;
+                out.push_str(&format!(" {sym} "));
+                self.query_sql(b, param, info, out)?;
+                out.push(')');
+                Ok(())
+            }
+            E::Unary(ast::UnOp::Not, inner) => {
+                out.push_str("not ");
+                self.query_sql(inner, param, info, out)
+            }
+            // `x.Column` — the row's column.
+            E::Member(recv, field) => {
+                if let E::Ident(n) = &recv.kind {
+                    if n == param {
+                        let col = info
+                            .columns
+                            .iter()
+                            .find(|(f, _, _)| f == field)
+                            .map(|(_, c, _)| c.clone())
+                            .ok_or_else(|| {
+                                format!("`{field}` is not a column of `{}`", info.table)
+                            })?;
+                        out.push_str(&col);
+                        return Ok(());
+                    }
+                }
+                Err("a query may only reach the row's own columns".into())
+            }
+            E::Int(v) => {
+                out.push_str(&v.to_string());
+                Ok(())
+            }
+            E::Bool(b) => {
+                out.push_str(if *b { "1" } else { "0" });
+                Ok(())
+            }
+            E::Str(s) => {
+                // A literal string is still parameterised, never interpolated.
+                let _ = s;
+                out.push('?');
+                Ok(())
+            }
+            // Anything captured from outside becomes a bound parameter.
+            E::Ident(_) => {
+                out.push('?');
+                Ok(())
+            }
+            other => Err(format!("this cannot be translated to SQL: {other:?}")),
+        }
     }
 
     /// `memcpy(dst, src, n)`.
@@ -3463,6 +3619,24 @@ fn null_test_target(cond: &ast::Expr) -> (Option<String>, Option<String>) {
         }
     }
     (None, None)
+}
+
+/// `CharacterId` → `character_id`. The default column name for a field.
+fn snake_case(name: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in name.chars().enumerate() {
+        if c.is_uppercase() {
+            if i > 0 {
+                out.push('_');
+            }
+            for l in c.to_lowercase() {
+                out.push(l);
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// A zero/null value of a type — the unused `value` slot of a failed `Result`.

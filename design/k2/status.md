@@ -52,6 +52,12 @@ clang and checks stdout):
 - **`List<T>`**: `new List<T>()`, `.Add(x)` (buffer grows 4 → 8 → 16 …),
   `.Count`, 1-based indexing `xs[1]`, and `foreach` over one. KIR gained real
   indexed element access for this
+- **`[Table]` with compile-time SQL**: `[Table("...")]`, `[Column("...")]`,
+  `[Auto]` on a record give `T.InsertSql()` and `T.SelectSql(x => ...)`, where
+  the predicate is translated to a parameterised `where` clause **at compile
+  time** — comparisons, `&&`/`||`/`!`, the row's own columns and constants.
+  Captured values become `?`. Anything else is a compile error naming it, so a
+  query never silently runs in the wrong place. Columns default to snake_case
 - **`[Packed]`**: a record laid out with no padding, plus generated
   `T.Size`, `T.Read(bytes, offset)` and `r.Write(bytes, offset)` over a
   `Bytes` buffer (`Bytes.Alloc(n)`, `buf[i]`) — an exact binary layout, which
@@ -86,7 +92,7 @@ clang and checks stdout):
 3. generic *types* (`class Cache<K,V>`) and generic instance methods — only generic static methods are built
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)
 5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
-6. the database attributes: `[Table]`, `Query<T>` (`[Dll]` and `[Packed]` are done)
+6. binding the generated SQL to `libs/db` and returning rows (the statement text is generated; execution needs the runtime)
 7. forms + events + ABI v5
 8. LSP, `kiln migrate`, folding K2 into `kiln build`/`run` with runtime linking
 
