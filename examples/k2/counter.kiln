@@ -1,0 +1,66 @@
+// A Kiln 2 window: draw it, wire it, ship one native binary.
+//
+//   kiln k2 examples/k2/counter.kiln --run
+//
+// The property assignments and component blocks are the designer's half — the
+// same half Studio owns and rewrites. The methods below are yours, in the same
+// file.
+namespace Counter;
+
+public form MainWindow
+{
+    Title = "Counter";
+    Width = 320;
+    Height = 200;
+    BackgroundColor = "#14161d";
+
+    Label count
+    {
+        Text = "0";
+        Left = 40;
+        Top = 40;
+        Width = 220;
+        Height = 28;
+        Color = "#e6e8ee";
+    }
+
+    Button add
+    {
+        Text = "Add one";
+        Left = 40;
+        Top = 100;
+        Width = 140;
+        Height = 34;
+        BackgroundColor = "#4a86e8";
+        Color = "#ffffff";
+        BorderRadius = 6;
+        Click += OnAdd;
+    }
+
+    Button reset
+    {
+        Text = "Reset";
+        Left = 196;
+        Top = 100;
+        Width = 84;
+        Height = 34;
+        BackgroundColor = "#2b3040";
+        Color = "#e6e8ee";
+        BorderRadius = 6;
+        Click += OnReset;
+    }
+
+    int n;
+
+    void OnAdd()
+    {
+        n = n + 1;
+        count.Text = $"{n}";
+    }
+
+    void OnReset()
+    {
+        n = 0;
+        count.Text = "0";
+    }
+}

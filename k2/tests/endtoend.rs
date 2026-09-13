@@ -917,3 +917,52 @@ public static class P
 "#;
     assert_eq!(run_k2(src), "(3, 4)\n(7, seven)\n42\nkiln\n");
 }
+
+#[test]
+fn a_form_lowers_to_the_ui_interface() {
+    // The RAD half: a `form` becomes the UI build sequence — init, create each
+    // component, set its properties, bind its handlers, run the loop. Rendering
+    // it needs the UI runtime (see examples/k2/counter.kiln, built with
+    // `kiln k2`); here we check the module it lowers to.
+    let src = r#"
+namespace C;
+public form MainWindow
+{
+    Title = "Counter";
+    Width = 320;
+    Height = 200;
+
+    Label count { Text = "0"; Left = 40; Top = 40; }
+    Button add { Text = "Add one"; Click += OnAdd; }
+
+    int n;
+
+    void OnAdd()
+    {
+        n = n + 1;
+        count.Text = $"{n}";
+    }
+}
+"#;
+    let m = kiln_k2::compile(src).unwrap();
+    assert_eq!(m.kind, kiln_k2::ModuleKind::Gui, "a form is a GUI program");
+    let ll = kiln_kir::emit::emit(&m);
+    for expected in [
+        "@kn_ui_init",
+        "@kn_ui_create",
+        "@kn_ui_set",
+        "@kn_ui_on",
+        "@kn_ui_set_a11y",
+        "@kn_ui_run",
+        "@kn_ui_shutdown",
+    ] {
+        assert!(ll.contains(expected), "missing {expected}:\n{ll}");
+    }
+    // The handler is bound by address, and component state lives in globals.
+    assert!(ll.contains("ptr @MainWindow_OnAdd"), "{ll}");
+    assert!(ll.contains("@MainWindow__count"), "{ll}");
+    assert!(ll.contains("@MainWindow__state_n"), "{ll}");
+    // Identifiers must not reach the binary as data; the window is named by its
+    // title, and the label by its text.
+    assert!(ll.contains("Counter"), "{ll}");
+}

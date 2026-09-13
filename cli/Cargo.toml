@@ -12,6 +12,7 @@ path = "src/main.rs"
 kiln-ir = { path = "../ir" }
 kiln-backend = { path = "../backend" }
 kiln-k2 = { path = "../k2" }
+kiln-kir = { path = "../kir" }
 kiln-debug = { path = "../debug" }
 lsp-server = "0.10"
 lsp-types = "0.97"

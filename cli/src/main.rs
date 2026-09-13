@@ -494,13 +494,17 @@ fn cmd_k2(rest: &[String]) -> i32 {
     } else {
         kiln_k2::Runtime::Libc
     };
-    let ll = match kiln_k2::compile_to_llvm_with(&src, runtime) {
-        Ok(ll) => ll,
+    let module = match kiln_k2::compile_with(&src, runtime) {
+        Ok(m) => m,
         Err(e) => {
             eprintln!("kiln k2: {input}:{e}");
             return 1;
         }
     };
+    // A program with a form is a GUI program: it needs the ui library, and the
+    // runtime enters its event loop.
+    let is_gui = module.kind == kiln_k2::ModuleKind::Gui;
+    let ll = kiln_kir::emit::emit(&module);
     if emit_ir {
         print!("{ll}");
         return 0;
@@ -518,12 +522,17 @@ fn cmd_k2(rest: &[String]) -> i32 {
     // With `--runtime`, link the Kiln runtime exactly as a 1.x build does: it
     // supplies the C `main` that calls `ECodeStart`, the collector, and the
     // support libraries behind the slot ABI.
-    if use_runtime {
+    if use_runtime || is_gui {
         let Some(root) = find_repo_root() else {
             eprintln!("kiln k2: --runtime needs the Kiln runtime sources");
             return 1;
         };
-        let plan = match libload::load(&root, &[]) {
+        let uses: Vec<String> = if is_gui {
+            vec!["ui".to_string()]
+        } else {
+            Vec::new()
+        };
+        let plan = match libload::load(&root, &uses) {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("kiln k2: {e}");
@@ -536,7 +545,7 @@ fn cmd_k2(rest: &[String]) -> i32 {
             &root,
             &plan,
             &out_path,
-            Target::Console,
+            if is_gui { Target::Gui } else { Target::Console },
             Os::Linux,
             Arch::host(),
             false,

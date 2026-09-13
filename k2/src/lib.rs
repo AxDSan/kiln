@@ -15,6 +15,7 @@ pub mod lexer;
 pub mod lower;
 pub mod parser;
 
+pub use kiln_kir::ModuleKind;
 pub use lower::Runtime;
 
 /// Parse and lower K2 source to a KIR module, choosing what it links against.

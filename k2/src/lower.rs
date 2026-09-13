@@ -63,6 +63,9 @@ pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> 
             ast::Item::Interface(id) => {
                 type_names.insert(id.name.clone());
             }
+            ast::Item::Form(f) => {
+                type_names.insert(f.name.clone());
+            }
         }
     }
     for item in &p.items {
@@ -126,6 +129,8 @@ pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> 
         dlls: HashMap::new(),
         packed: std::collections::HashSet::new(),
         tables: HashMap::new(),
+        form_state: HashMap::new(),
+        components: HashMap::new(),
         generic_types: HashMap::new(),
         type_mono: HashMap::new(),
         interfaces: HashMap::new(),
@@ -390,6 +395,61 @@ pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> 
             }
         }
     }
+    // A form: its components become globals holding runtime handles, its
+    // methods are plain functions, and its build sequence is the entry point.
+    let form = p.items.iter().find_map(|i| match i {
+        ast::Item::Form(f) => Some(f.clone()),
+        _ => None,
+    });
+    if let Some(f) = &form {
+        cx.b.m.kind = ModuleKind::Gui;
+        for c in &f.components {
+            let g =
+                cx.b.add_global(&format!("{}__{}", f.name, c.id), TyTable::I64, false);
+            cx.components.insert(c.id.clone(), (g, c.type_name.clone()));
+        }
+        for fld in &f.fields {
+            let ty = cx.resolve(&fld.ty)?;
+            let g = cx.b.add_global(
+                &format!("{}__state_{}", f.name, fld.name),
+                ty,
+                cx.b.m.types.is_pointer(ty),
+            );
+            cx.form_state.insert(fld.name.clone(), (g, ty));
+        }
+        // Declare the handlers first so the build sequence can bind them.
+        for m in &f.methods {
+            let owned: Vec<(String, TyId)> = m
+                .params
+                .iter()
+                .map(|p| Ok((p.name.clone(), cx.resolve(&p.ty)?)))
+                .collect::<Result<_, String>>()?;
+            let params: Vec<(&str, TyId)> = owned.iter().map(|(n, t)| (n.as_str(), *t)).collect();
+            let ret = cx.resolve(&m.ret)?;
+            let sym = format!("{}_{}", f.name, m.name);
+            let fid = cx.b.declare_func(&sym, params, ret);
+            let sig = Sig {
+                fid,
+                this: false,
+                params: owned.iter().map(|(_, t)| *t).collect(),
+                ret,
+            };
+            cx.methods
+                .insert(format!("{}.{}", f.name, m.name), sig.clone());
+            cx.methods.entry(m.name.clone()).or_insert(sig);
+        }
+        for m in &f.methods {
+            let sig = cx.methods[&format!("{}.{}", f.name, m.name)].clone();
+            cx.lower_into(sig.fid, m, false, None, None)?;
+        }
+        let build =
+            cx.b.declare_func(&format!("{}_Build", f.name), vec![], TyTable::I32);
+        cx.lower_form(build, f)?;
+        cx.b.set_entry(build);
+        cx.drain_pending()?;
+        return Ok(cx.b.build());
+    }
+
     // Top-level statements become Main.
     if !p.top_level.is_empty() {
         let main = cx.b.declare_func("kmain", vec![], TyTable::VOID);
@@ -509,6 +569,10 @@ struct Cx {
     dicts: HashMap<(TyId, TyId), RecordId>,
     /// `[Dll]` externs, by `Type.Name` and bare `Name`.
     dlls: HashMap<String, DllSig>,
+    /// Form-level state: name → its global.
+    form_state: HashMap<String, (GlobalId, TyId)>,
+    /// Component id → (global holding its runtime handle, component type).
+    components: HashMap<String, (GlobalId, String)>,
     /// Generic type declarations, awaiting type arguments.
     generic_types: HashMap<String, ast::TypeDecl>,
     /// Instantiated generic types: (name, type args) → the record it became.
@@ -1019,6 +1083,123 @@ impl Cx {
         Ok(())
     }
 
+    /// Emit a form's build sequence: start the UI, create each component, set
+    /// its properties, bind its handlers, then run the event loop. This mirrors
+    /// what the 1.x backend emits, so it meets the same `kn_ui_*` interface.
+    fn lower_form(&mut self, fid: FuncId, f: &ast::FormDecl) -> Result<(), String> {
+        let mut title = "Kiln Application".to_string();
+        let (mut width, mut height) = (800i64, 600i64);
+        for (n, v) in &f.properties {
+            match n.as_str() {
+                "Title" => title = literal_text(v)?,
+                "Width" => width = literal_text(v)?.parse().unwrap_or(800),
+                "Height" => height = literal_text(v)?.parse().unwrap_or(600),
+                _ => {}
+            }
+        }
+        let mut fl = FnLower::new(self, fid, TyTable::I32);
+        fl.push(Stmt::Expr(ui_call(
+            "kn_ui_init",
+            vec![
+                Expr::Str(title.clone()),
+                Expr::Int(width as i128, TyTable::I32),
+                Expr::Int(height as i128, TyTable::I32),
+            ],
+            vec![TyTable::STR, TyTable::I32, TyTable::I32],
+            TyTable::I32,
+        )));
+        // The root window is handle 1, as the runtime assigns it.
+        let root = Expr::Int(1, TyTable::I64);
+        // The accessibility tree needs every element announced; the window is
+        // named by its title, never by the identifier in the source.
+        fl.push(Stmt::Expr(ui_a11y(
+            root.clone(),
+            1, // KN_ROLE_WINDOW
+            Expr::Str(title.clone()),
+        )));
+        for (n, v) in &f.properties {
+            if matches!(n.as_str(), "Title" | "Width" | "Height") {
+                continue;
+            }
+            let text = literal_text(v)?;
+            fl.push(Stmt::Expr(ui_set(
+                root.clone(),
+                &snake_case(n),
+                Expr::Str(text),
+            )));
+        }
+
+        for c in &f.components {
+            let (g, _) = fl.cx.components[&c.id];
+            let handle = ui_call(
+                "kn_ui_create",
+                vec![root.clone(), Expr::Str(snake_case(&c.type_name))],
+                vec![TyTable::I64, TyTable::STR],
+                TyTable::I64,
+            );
+            fl.push(Stmt::Assign {
+                place: Place::Global(g),
+                value: handle,
+            });
+            for (n, v) in &c.properties {
+                let text = literal_text(v)?;
+                fl.push(Stmt::Expr(ui_set(
+                    Expr::Global(g),
+                    &snake_case(n),
+                    Expr::Str(text),
+                )));
+            }
+            let role = match snake_case(&c.type_name).as_str() {
+                "button" => 2, // KN_ROLE_BUTTON
+                "label" => 3,  // KN_ROLE_LABEL
+                _ => 0,
+            };
+            let name = c
+                .properties
+                .iter()
+                .find(|(n, _)| n == "Text")
+                .and_then(|(_, v)| literal_text(v).ok());
+            fl.push(Stmt::Expr(ui_a11y(
+                Expr::Global(g),
+                role,
+                match name {
+                    Some(t) => Expr::Str(t),
+                    None => Expr::Null(TyTable::STR),
+                },
+            )));
+            for (event, handler) in &c.handlers {
+                let sig = fl
+                    .cx
+                    .methods
+                    .get(&format!("{}.{}", f.name, handler))
+                    .ok_or_else(|| format!("`{handler}` is not a method of `{}`", f.name))?;
+                let target = Expr::FuncPtr(sig.fid);
+                fl.push(Stmt::Expr(ui_call(
+                    "kn_ui_on",
+                    vec![Expr::Global(g), Expr::Str(snake_case(event)), target],
+                    vec![TyTable::I64, TyTable::STR, TyTable::PTR],
+                    TyTable::I32,
+                )));
+            }
+        }
+
+        let rc = fl.new_local("$rc", TyTable::I32);
+        fl.push(Stmt::Let {
+            local: rc,
+            value: ui_call("kn_ui_run", vec![], vec![], TyTable::I32),
+        });
+        fl.push(Stmt::Expr(ui_call(
+            "kn_ui_shutdown",
+            vec![],
+            vec![],
+            TyTable::VOID,
+        )));
+        fl.push(Stmt::Return(Some(Expr::Local(rc))));
+        let body = fl.finish();
+        self.b.set_body(fid, body);
+        Ok(())
+    }
+
     /// Lower every queued monomorphic instance. Lowering one may queue more
     /// (a generic calling another generic), so this runs to a fixed point.
     fn drain_pending(&mut self) -> Result<(), String> {
@@ -1199,6 +1380,28 @@ impl<'a> FnLower<'a> {
                 self.declare_var(name, lty, val)?;
             }
             ast::StmtKind::Assign { target, op, value } => {
+                // `count.Text = "..."` sets a component property at run time.
+                if let ast::ExprKind::Member(recv, prop) = &target.kind {
+                    if let ast::ExprKind::Ident(id) = &recv.kind {
+                        if let Some(g) = self.cx.components.get(id).map(|(g, _)| *g) {
+                            if *op != ast::AssignOp::Eq {
+                                return Err(
+                                    "compound assignment to a component property is not supported"
+                                        .into(),
+                                );
+                            }
+                            let (v, vty) = self.expr(value, None)?;
+                            // Properties cross as text, whatever the value is.
+                            let text = if vty == TyTable::STR {
+                                v
+                            } else {
+                                self.build_string(vec![(String::new(), Some((v, vty)))]).0
+                            };
+                            self.push(Stmt::Expr(ui_set(Expr::Global(g), &snake_case(prop), text)));
+                            return Ok(());
+                        }
+                    }
+                }
                 // `d[k] = v` updates in place, or appends when the key is new.
                 if let ast::ExprKind::Index(base, key) = &target.kind {
                     let (dv, dty) = self.expr_raw(base, None)?;
@@ -2069,6 +2272,9 @@ impl<'a> FnLower<'a> {
                 }
             }
             return Ok((Expr::Local(lid), ty));
+        }
+        if let Some((g, ty)) = self.cx.form_state.get(name).copied() {
+            return Ok((Expr::Global(g), ty));
         }
         if let Some((ty, value)) = self.cx.consts.get(name).cloned() {
             return self.expr(&value, Some(ty));
@@ -3649,6 +3855,9 @@ impl<'a> FnLower<'a> {
                 if let Some((lid, _)) = self.scope.get(name).copied() {
                     return Ok(Place::Local(lid));
                 }
+                if let Some((g, _)) = self.cx.form_state.get(name).copied() {
+                    return Ok(Place::Global(g));
+                }
                 // A bare name inside an instance method may be a field of `this`.
                 if let Some((this_lid, this_ty)) = self.scope.get("this").copied() {
                     if let TyKind::Record(rid) = *self.tt().kind(this_ty) {
@@ -4031,6 +4240,51 @@ fn null_test_target(cond: &ast::Expr) -> (Option<String>, Option<String>) {
         }
     }
     (None, None)
+}
+
+/// A call into the UI interface (`abi/kiln_ui.h`) — plain C, not the slot ABI.
+fn ui_call(symbol: &str, args: Vec<Expr>, arg_tys: Vec<TyId>, ret: TyId) -> Expr {
+    Expr::Call(Box::new(Call::Dll {
+        library: "ui".into(),
+        symbol: symbol.to_string(),
+        conv: CallConv::Cdecl,
+        args,
+        arg_tys,
+        ret,
+        varargs: false,
+    }))
+}
+
+/// `kn_ui_set_a11y(handle, role, name)` — what the accessibility tree reads.
+fn ui_a11y(handle: Expr, role: i32, name: Expr) -> Expr {
+    ui_call(
+        "kn_ui_set_a11y",
+        vec![handle, Expr::Int(role as i128, TyTable::I32), name],
+        vec![TyTable::I64, TyTable::I32, TyTable::STR],
+        TyTable::I32,
+    )
+}
+
+/// `kn_ui_set(handle, name, value)` — every property crosses as text.
+fn ui_set(handle: Expr, name: &str, value: Expr) -> Expr {
+    ui_call(
+        "kn_ui_set",
+        vec![handle, Expr::Str(name.to_string()), value],
+        vec![TyTable::I64, TyTable::STR, TyTable::STR],
+        TyTable::I32,
+    )
+}
+
+/// A designer property must be a literal; it is written into the binary as the
+/// text the runtime sets.
+fn literal_text(e: &ast::Expr) -> Result<String, String> {
+    Ok(match &e.kind {
+        ast::ExprKind::Str(s) => s.clone(),
+        ast::ExprKind::Int(v) => v.to_string(),
+        ast::ExprKind::Bool(b) => b.to_string(),
+        ast::ExprKind::Float(v, _) => v.to_string(),
+        _ => return Err("a designer property must be a literal".into()),
+    })
 }
 
 /// `CharacterId` → `character_id`. The default column name for a field.

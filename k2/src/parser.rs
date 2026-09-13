@@ -212,6 +212,69 @@ impl Parser {
         let (vis, is_static) = self.modifiers();
         match self.bump() {
             Tok::Keyword(Kw::Enum) => Ok(Item::Enum(self.enum_decl(vis, doc, span)?)),
+            Tok::Keyword(Kw::Form) => {
+                let name = self.ident()?;
+                self.expect(&Tok::LBrace)?;
+                let mut properties = Vec::new();
+                let mut components = Vec::new();
+                let mut fields = Vec::new();
+                let mut consts = Vec::new();
+                let mut methods = Vec::new();
+                while self.peek() != &Tok::RBrace {
+                    // `Prop = value;`
+                    if matches!(self.peek(), Tok::Ident(_)) && self.peek_at(1) == &Tok::Eq {
+                        let pname = self.ident()?;
+                        self.expect(&Tok::Eq)?;
+                        let v = self.expr()?;
+                        self.expect(&Tok::Semi)?;
+                        properties.push((pname, v));
+                        continue;
+                    }
+                    // `Type id { … }` — a component
+                    if matches!(self.peek(), Tok::Ident(_))
+                        && matches!(self.peek_at(1), Tok::Ident(_))
+                        && self.peek_at(2) == &Tok::LBrace
+                    {
+                        let cspan = self.span();
+                        let type_name = self.ident()?;
+                        let id = self.ident()?;
+                        self.expect(&Tok::LBrace)?;
+                        let mut cprops = Vec::new();
+                        let mut handlers = Vec::new();
+                        while self.peek() != &Tok::RBrace {
+                            let n = self.ident()?;
+                            if self.eat(&Tok::PlusEq) {
+                                handlers.push((n, self.ident()?));
+                            } else {
+                                self.expect(&Tok::Eq)?;
+                                cprops.push((n, self.expr()?));
+                            }
+                            self.expect(&Tok::Semi)?;
+                        }
+                        self.expect(&Tok::RBrace)?;
+                        components.push(ComponentDecl {
+                            type_name,
+                            id,
+                            properties: cprops,
+                            handlers,
+                            span: cspan,
+                        });
+                        continue;
+                    }
+                    self.member(&name, &mut fields, &mut consts, &mut methods)?;
+                }
+                self.expect(&Tok::RBrace)?;
+                Ok(Item::Form(FormDecl {
+                    vis,
+                    name,
+                    properties,
+                    components,
+                    fields,
+                    methods,
+                    doc,
+                    span,
+                }))
+            }
             Tok::Keyword(Kw::Interface) => {
                 let name = self.ident()?;
                 self.expect(&Tok::LBrace)?;

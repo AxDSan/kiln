@@ -52,6 +52,11 @@ clang and checks stdout):
 - **`List<T>`**: `new List<T>()`, `.Add(x)` (buffer grows 4 → 8 → 16 …),
   `.Count`, 1-based indexing `xs[1]`, and `foreach` over one. KIR gained real
   indexed element access for this
+- **Forms — the RAD half**: a `form` block declares the window's properties and
+  its components, `Click += OnAdd` wires an event, form fields hold state
+  between events, and `count.Text = $"{n}"` sets a property at run time. It
+  lowers to the same `kn_ui_*` interface the 1.x backend emits, so it renders
+  through the real UI runtime (`examples/k2/counter.kiln`)
 - **Generic types**: `record Pair<A, B>` and `class Box<T>` instantiate per set
   of type arguments — fields substituted, methods declared and lowered per
   instance, with the template's own name meaning that instance inside it
@@ -108,8 +113,15 @@ clang and checks stdout):
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)
 5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
 6. binding the generated SQL to `libs/db` and returning rows (the statement text is generated; execution needs the runtime)
-7. forms + events + ABI v5
+7. ABI v5: a lambda as an event handler (a method group works today, which needs no env pointer); `partial form` so the designer's half and the code half can be separate blocks; Studio editing K2 through `kiln edit`
 8. LSP, `kiln migrate`, folding K2 into `kiln build`/`run` with runtime linking
+
+## Milestone: the RAD half runs
+
+`examples/k2/counter.kiln` is a Kiln 2 window — drawn in the `form` block, wired
+with `Click += OnAdd`, built by `kiln k2` into a native binary, and rendered by
+the real Kiln UI runtime. Verified by dumping a frame and looking at it, as
+Studio work must be.
 
 ## Milestone
 

@@ -27,6 +27,37 @@ pub enum Item {
     Type(TypeDecl),
     Enum(EnumDecl),
     Interface(InterfaceDecl),
+    Form(FormDecl),
+}
+
+/// `form MainWindow { Title = "..."; Button ok { ... } void OnOk() { } }`
+///
+/// The property assignments and component blocks are the designer's half; the
+/// methods are the code half, in the same file.
+#[derive(Clone, Debug)]
+pub struct FormDecl {
+    pub vis: Vis,
+    pub name: String,
+    pub properties: Vec<(String, Expr)>,
+    pub components: Vec<ComponentDecl>,
+    /// State the form keeps between events; there is no form instance, so
+    /// these become module globals.
+    pub fields: Vec<Field>,
+    pub methods: Vec<Method>,
+    pub doc: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ComponentDecl {
+    /// `Label`, `Button`, … as written.
+    pub type_name: String,
+    /// The component's name in code.
+    pub id: String,
+    pub properties: Vec<(String, Expr)>,
+    /// `Click += OnAdd`
+    pub handlers: Vec<(String, String)>,
+    pub span: Span,
 }
 
 /// `interface I { int Area(); }` — method signatures, no bodies.
