@@ -16,6 +16,11 @@ const RESULT_OK: usize = 0;
 const RESULT_VALUE: usize = 1;
 const RESULT_ERR: usize = 2;
 
+/// Field indices of a synthesised `List` record.
+const LIST_LEN: usize = 0;
+const LIST_CAP: usize = 1;
+const LIST_DATA: usize = 2;
+
 pub fn lower(p: &ast::Program) -> Result<Module, String> {
     let mut b = ModuleBuilder::new(
         p.namespace.as_deref().unwrap_or("program"),
@@ -85,6 +90,7 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
         mono: HashMap::new(),
         tvars: HashMap::new(),
         results: HashMap::new(),
+        lists: HashMap::new(),
         pending: Vec::new(),
     };
 
@@ -279,6 +285,8 @@ struct Cx {
     tvars: HashMap<String, TyId>,
     /// `Result<T>` is synthesised per value type: a record `{ok, value, err}`.
     results: HashMap<TyId, RecordId>,
+    /// `List<T>` is synthesised per element type: `{len, cap, data}`.
+    lists: HashMap<TyId, RecordId>,
     pending: Vec<Pending>,
 }
 
@@ -335,7 +343,8 @@ impl Cx {
             ast::TypeRef::Generic(n, args) => match n.as_str() {
                 "List" => {
                     let e = self.resolve(&args[0])?;
-                    self.b.m.types.intern(TyKind::Array(e))
+                    let rid = self.list_record(e);
+                    self.b.m.types.intern(TyKind::Record(rid))
                 }
                 // `Func<A, B, R>`: the last argument is the return type.
                 "Func" => {
@@ -391,6 +400,40 @@ impl Cx {
         rid
     }
 
+    /// The record standing for `List<T>`: `{len, cap, data}` where `data` is a
+    /// contiguous buffer of `T`.
+    fn list_record(&mut self, elem: TyId) -> RecordId {
+        if let Some(r) = self.lists.get(&elem) {
+            return *r;
+        }
+        let data_ty = self.b.m.types.intern(TyKind::Array(elem));
+        let n = self.b.m.records.len();
+        let rid = self.b.c_record(
+            &format!("$List{n}"),
+            vec![
+                ("len", TyTable::I32),
+                ("cap", TyTable::I32),
+                ("data", data_ty),
+            ],
+            Equality::ByRef,
+        );
+        self.lists.insert(elem, rid);
+        rid
+    }
+
+    /// If `ty` is a synthesised `List`, its record and element type.
+    fn as_list(&self, ty: TyId) -> Option<(RecordId, TyId)> {
+        if let TyKind::Record(rid) = *self.b.m.types.kind(ty) {
+            if self.b.m.record(rid).name.starts_with("$List") {
+                let data = self.b.m.record(rid).fields[LIST_DATA].ty;
+                if let TyKind::Array(e) = *self.b.m.types.kind(data) {
+                    return Some((rid, e));
+                }
+            }
+        }
+        None
+    }
+
     /// If `ty` is a synthesised `Result`, its record and value type.
     fn as_result(&self, ty: TyId) -> Option<(RecordId, TyId)> {
         if let TyKind::Record(rid) = *self.b.m.types.kind(ty) {
@@ -416,7 +459,7 @@ impl Cx {
         (round_up(offset, align.max(1)), align, offsets)
     }
 
-    fn scalar_size(&self, ty: TyId) -> i64 {
+    pub(crate) fn scalar_size(&self, ty: TyId) -> i64 {
         match self.b.m.types.kind(ty) {
             TyKind::Bool | TyKind::I8 | TyKind::U8 => 1,
             TyKind::I16 | TyKind::U16 => 2,
@@ -858,6 +901,63 @@ impl<'a> FnLower<'a> {
         coll: &ast::Expr,
         body: &[ast::Stmt],
     ) -> Result<(), String> {
+        // `foreach (x in list)` walks positions 1..Count.
+        if !matches!(coll.kind, ast::ExprKind::Range(..)) {
+            let (lv, lty) = self.expr(coll, None)?;
+            if let Some((_, elem)) = self.cx.as_list(lty) {
+                let holder = self.new_local("$each", lty);
+                self.push(Stmt::Let {
+                    local: holder,
+                    value: lv,
+                });
+                let idx = self.new_local("$i", TyTable::I32);
+                self.push(Stmt::Let {
+                    local: idx,
+                    value: Expr::Int(0, TyTable::I32),
+                });
+                let item = self.new_local(var, elem);
+                self.scope.insert(var.to_string(), (item, elem));
+                let len = Expr::Field(Box::new(Expr::Local(holder)), LIST_LEN);
+                let mut inner = vec![
+                    Stmt::If {
+                        cond: Expr::Not(Box::new(Expr::Bin(
+                            BinOp::Lt,
+                            Box::new(Expr::Local(idx)),
+                            Box::new(len),
+                            TyTable::I32,
+                        ))),
+                        then: vec![Stmt::Break],
+                        els: vec![],
+                    },
+                    Stmt::Assign {
+                        place: Place::Local(item),
+                        value: Expr::Index(
+                            Box::new(Expr::Field(Box::new(Expr::Local(holder)), LIST_DATA)),
+                            Box::new(Expr::Local(idx)),
+                        ),
+                    },
+                ];
+                let step = vec![Stmt::Assign {
+                    place: Place::Local(idx),
+                    value: Expr::Bin(
+                        BinOp::Add,
+                        Box::new(Expr::Local(idx)),
+                        Box::new(Expr::Int(1, TyTable::I32)),
+                        TyTable::I32,
+                    ),
+                }];
+                self.loop_frames.push(self.defers.len());
+                self.loop_steps.push(step.clone());
+                let body_b = self.lower_body(body);
+                self.loop_steps.pop();
+                self.loop_frames.pop();
+                inner.extend(body_b?);
+                inner.extend(step);
+                self.push(Stmt::Loop { body: inner });
+                return Ok(());
+            }
+            return Err("foreach supports integer ranges and List<T>".into());
+        }
         let ast::ExprKind::Range(lo, hi, inclusive) = &coll.kind else {
             return Err("foreach supports only integer ranges `a..b` for now".into());
         };
@@ -1220,6 +1320,20 @@ impl<'a> FnLower<'a> {
             }
             ast::ExprKind::Index(base, idx) => {
                 let (b, bty) = self.expr(base, None)?;
+                // `list[i]` reads the buffer; positions are 1-based.
+                if let Some((_, elem)) = self.cx.as_list(bty) {
+                    let (i, _) = self.expr(idx, Some(TyTable::I32))?;
+                    let i0 = Expr::Bin(
+                        BinOp::Sub,
+                        Box::new(i),
+                        Box::new(Expr::Int(1, TyTable::I32)),
+                        TyTable::I32,
+                    );
+                    return Ok((
+                        Expr::Index(Box::new(Expr::Field(Box::new(b), LIST_DATA)), Box::new(i0)),
+                        elem,
+                    ));
+                }
                 let elem = match self.tt().kind(bty) {
                     TyKind::Array(e) => *e,
                     _ => return Err("indexing is only supported on List<T> for now".into()),
@@ -1435,6 +1549,13 @@ impl<'a> FnLower<'a> {
         }
         // Field access on a record value, or `.Length` etc. (later).
         let (base, bty) = self.expr(recv, None)?;
+        // A list exposes its length.
+        if self.cx.as_list(bty).is_some() {
+            return match member {
+                "Count" => Ok((Expr::Field(Box::new(base), LIST_LEN), TyTable::I32)),
+                other => Err(format!("no member `{other}` on a List")),
+            };
+        }
         // An optional exposes presence and value explicitly.
         if let TyKind::Optional(inner) = *self.tt().kind(bty) {
             return match member {
@@ -1493,6 +1614,105 @@ impl<'a> FnLower<'a> {
                         })),
                         ret,
                     ));
+                }
+            }
+        }
+        // `list.Add(x)` — grow the buffer if it is full, then store.
+        if let ast::ExprKind::Member(recv, name) = &callee.kind {
+            if name == "Add" {
+                let (lv, lty) = self.expr_raw(recv, None)?;
+                if let Some((lrid, elem)) = self.cx.as_list(lty) {
+                    if args.len() != 1 {
+                        return Err("List.Add takes one argument".into());
+                    }
+                    let (val, _) = self.expr(&args[0], Some(elem))?;
+                    let holder = self.new_local("$list", lty);
+                    self.push(Stmt::Let {
+                        local: holder,
+                        value: lv,
+                    });
+                    let l = || Expr::Local(holder);
+                    let len = || Expr::Field(Box::new(l()), LIST_LEN);
+                    let cap = || Expr::Field(Box::new(l()), LIST_CAP);
+                    let esize = self.cx.scalar_size(elem);
+
+                    // if (len == cap) { cap = cap == 0 ? 4 : cap * 2; data = realloc(data, cap*esize) }
+                    let newcap = self.new_local("$newcap", TyTable::I32);
+                    let grow = vec![
+                        Stmt::If {
+                            cond: Expr::Bin(
+                                BinOp::Eq,
+                                Box::new(cap()),
+                                Box::new(Expr::Int(0, TyTable::I32)),
+                                TyTable::I32,
+                            ),
+                            then: vec![Stmt::Assign {
+                                place: Place::Local(newcap),
+                                value: Expr::Int(4, TyTable::I32),
+                            }],
+                            els: vec![Stmt::Assign {
+                                place: Place::Local(newcap),
+                                value: Expr::Bin(
+                                    BinOp::Mul,
+                                    Box::new(cap()),
+                                    Box::new(Expr::Int(2, TyTable::I32)),
+                                    TyTable::I32,
+                                ),
+                            }],
+                        },
+                        Stmt::Assign {
+                            place: Place::Field(Box::new(l()), LIST_DATA),
+                            value: Expr::Call(Box::new(Call::Dll {
+                                library: "c".into(),
+                                symbol: "realloc".into(),
+                                conv: CallConv::Cdecl,
+                                args: vec![
+                                    Expr::Cast {
+                                        value: Box::new(Expr::Field(Box::new(l()), LIST_DATA)),
+                                        to: TyTable::PTR,
+                                    },
+                                    Expr::Cast {
+                                        value: Box::new(Expr::Bin(
+                                            BinOp::Mul,
+                                            Box::new(Expr::Local(newcap)),
+                                            Box::new(Expr::Int(esize as i128, TyTable::I32)),
+                                            TyTable::I32,
+                                        )),
+                                        to: TyTable::I64,
+                                    },
+                                ],
+                                arg_tys: vec![TyTable::PTR, TyTable::I64],
+                                ret: self.cx.b.m.record(lrid).fields[LIST_DATA].ty,
+                                varargs: false,
+                            })),
+                        },
+                        Stmt::Assign {
+                            place: Place::Field(Box::new(l()), LIST_CAP),
+                            value: Expr::Local(newcap),
+                        },
+                    ];
+                    self.push(Stmt::If {
+                        cond: Expr::Bin(BinOp::Eq, Box::new(len()), Box::new(cap()), TyTable::I32),
+                        then: grow,
+                        els: vec![],
+                    });
+                    self.push(Stmt::Assign {
+                        place: Place::Index(
+                            Box::new(Expr::Field(Box::new(l()), LIST_DATA)),
+                            Box::new(len()),
+                        ),
+                        value: val,
+                    });
+                    self.push(Stmt::Assign {
+                        place: Place::Field(Box::new(l()), LIST_LEN),
+                        value: Expr::Bin(
+                            BinOp::Add,
+                            Box::new(len()),
+                            Box::new(Expr::Int(1, TyTable::I32)),
+                            TyTable::I32,
+                        ),
+                    });
+                    return Ok((Expr::Int(0, TyTable::VOID), TyTable::VOID));
                 }
             }
         }
@@ -1872,6 +2092,24 @@ impl<'a> FnLower<'a> {
         inits: &[(String, ast::Expr)],
     ) -> Result<(Expr, TyId), String> {
         let ty = self.cx.resolve(t)?;
+        // `new List<T>()` starts empty; the buffer is allocated on first Add.
+        if self.cx.as_list(ty).is_some() {
+            let TyKind::Record(lrid) = *self.tt().kind(ty) else {
+                unreachable!()
+            };
+            let data_ty = self.cx.b.m.record(lrid).fields[LIST_DATA].ty;
+            return Ok((
+                Expr::MakeRecord(
+                    lrid,
+                    vec![
+                        Expr::Int(0, TyTable::I32),
+                        Expr::Int(0, TyTable::I32),
+                        Expr::Null(data_ty),
+                    ],
+                ),
+                ty,
+            ));
+        }
         let TyKind::Record(rid) = *self.tt().kind(ty) else {
             return Err("`new` is only supported for records/classes for now".into());
         };

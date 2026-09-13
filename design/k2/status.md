@@ -48,6 +48,9 @@ clang and checks stdout):
 - **`T?` optionals**: `return null;`, implicit `T` → `T?` wrapping, `x != null` /
   `x == null` as presence tests that **narrow** the variable in the proven
   branch (so it reads as `T`), `??` fallback, `.HasValue` / `.Value`
+- **`List<T>`**: `new List<T>()`, `.Add(x)` (buffer grows 4 → 8 → 16 …),
+  `.Count`, 1-based indexing `xs[1]`, and `foreach` over one. KIR gained real
+  indexed element access for this
 - **`switch` expressions**: `x switch { 1 => …, < 10 => …, _ => … }` with
   constant and relational patterns, lowered to an if-chain into one temporary
 - **`defer`**: runs when its block is left — falling off the end, `return`,
@@ -62,7 +65,7 @@ clang and checks stdout):
 
 **Not yet built** (next phases, in rough order):
 
-1. `List<T>`/`Dictionary<K,V>` against the real Kiln runtime (currently only the array *type* exists; no element ops link a runtime)
+1. `Dictionary<K,V>`/`HashSet<T>`, and moving `List<T>` off libc onto the Kiln runtime and collector
 2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
 3. generic *types* (`class Cache<K,V>`) and generic instance methods — only generic static methods are built
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)
@@ -75,9 +78,9 @@ clang and checks stdout):
 
 - **Records are C-layout + `malloc`**, even `class`. Managed records / GC
   integration and reference vs value equality land with the runtime work.
-- **`Console.WriteLine` is `printf`** and strings are built with
-  `snprintf`/`malloc`, not the Kiln text runtime or collector. A built string is
-  never freed. Replaced in Phase 4.
+- **`Console.WriteLine` is `printf`**, strings are built with
+  `snprintf`/`malloc`, and `List<T>` uses `malloc`/`realloc` — not the Kiln text
+  runtime or collector. Nothing built this way is freed. Replaced in Phase 4.
 - **The K2 path links libc only** via a generated `main` shim; no runtime, no
   collector roots. Folded into `kiln build` (with runtime linking) later.
 - **One `k2` crate** holds syntax + lowering; splits into `k2-syntax`/`k2-sema`/

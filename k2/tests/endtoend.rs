@@ -523,3 +523,38 @@ public static class P
         "Hello, world!\nkiln has 42\nconcat\n[kiln has 42]\n[kiln has 42]\n"
     );
 }
+
+#[test]
+fn lists_grow_and_iterate() {
+    let src = r#"
+namespace L2;
+public static class P
+{
+    public static void Main()
+    {
+        var xs = new List<int>();
+        foreach (var i in 1..10)
+            xs.Add(i * i);
+
+        Console.WriteLine($"count {xs.Count}");
+        Console.WriteLine($"first {xs[1]} last {xs[xs.Count]}");
+
+        var total = 0;
+        foreach (var x in xs)
+            total = total + x;
+        Console.WriteLine($"sum {total}");
+
+        var names = new List<string>();
+        names.Add("ada");
+        names.Add("grace");
+        foreach (var n in names)
+            Console.WriteLine(n);
+    }
+}
+"#;
+    // squares 1..100 sum to 385; growth crosses 4 -> 8 -> 16.
+    assert_eq!(
+        run_k2(src),
+        "count 10\nfirst 1 last 100\nsum 385\nada\ngrace\n"
+    );
+}

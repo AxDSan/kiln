@@ -416,8 +416,45 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                 let b = self.expr(base);
                 self.field_ptr(&b, *idx)
             }
-            Place::Index(..) => unimplemented!("index l-value: managed collections, later phase"),
+            Place::Index(base, idx) => {
+                let b = self.expr(base);
+                let i = self.expr(idx);
+                let elem = match self.tt().kind(b.ty) {
+                    TyKind::Array(e) => *e,
+                    k => panic!("index assignment on non-array {k:?}"),
+                };
+                let p = self.elem_ptr(&b, &i, elem);
+                (p, elem)
+            }
         }
+    }
+
+    /// Address of element `i` of the contiguous buffer `b` holds. The index is
+    /// already 0-based: the front end subtracts one from Kiln's 1-based
+    /// positions before it gets here.
+    fn elem_ptr(&mut self, b: &V, i: &V, elem: TyId) -> String {
+        let idx = if self.tt().llvm(i.ty) == "i64" {
+            i.op.clone()
+        } else {
+            let t = self.fresh();
+            writeln!(
+                self.body,
+                "  {t} = sext {} {} to i64",
+                self.tt().llvm(i.ty),
+                i.op
+            )
+            .unwrap();
+            t
+        };
+        let p = self.fresh();
+        writeln!(
+            self.body,
+            "  {p} = getelementptr {}, ptr {}, i64 {idx}",
+            self.tt().llvm(elem),
+            b.op
+        )
+        .unwrap();
+        p
     }
 
     /// Pointer to field `idx` of a C-layout record value `b`, and the field type.
@@ -497,7 +534,18 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                 writeln!(self.body, "  {t} = load {}, ptr {ptr}", self.tt().llvm(fty)).unwrap();
                 V { op: t, ty: fty }
             }
-            Expr::Index(..) => unimplemented!("index read: managed collections, later phase"),
+            Expr::Index(base, idx) => {
+                let b = self.expr(base);
+                let i = self.expr(idx);
+                let elem = match self.tt().kind(b.ty) {
+                    TyKind::Array(e) => *e,
+                    k => panic!("index read on non-array {k:?}"),
+                };
+                let p = self.elem_ptr(&b, &i, elem);
+                let t = self.fresh();
+                writeln!(self.body, "  {t} = load {}, ptr {p}", self.tt().llvm(elem)).unwrap();
+                V { op: t, ty: elem }
+            }
             Expr::Bin(op, a, b, ty) => self.bin(*op, a, b, *ty),
             Expr::Not(x) => {
                 let v = self.expr(x);
