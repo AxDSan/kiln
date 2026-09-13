@@ -246,6 +246,16 @@ impl Server {
             .clone();
         let line_no = p.text_document_position.position.line as usize + 1;
         let col = utf16_col_to_byte(&src, line_no, p.text_document_position.position.character);
+        // K2 is completed from its own parse tree, for the same reason hover is.
+        if crate::lsp_k2::is_k2(&src) {
+            let items: Vec<CompletionItem> = crate::lsp_k2::completion(&src, line_no, col)
+                .into_iter()
+                .map(|(name, kind, detail)| {
+                    item(&name, symbol_kind_to_completion(kind), detail)
+                })
+                .collect();
+            return serde_json::to_value(items).ok();
+        }
         let line_text = nth_line(&src, line_no).unwrap_or_default();
         // Text to the left of the caret. `col` is a 1-based byte column.
         let cut = col.saturating_sub(1).min(line_text.len());
@@ -404,6 +414,20 @@ impl Server {
 
     fn on_hover(&mut self, params: serde_json::Value) -> Option<serde_json::Value> {
         let (src, line, col) = self.context(params)?;
+        // A K2 file is answered from the K2 parse tree. The 1.x index below is
+        // a token scanner for a different language: pointed at K2 it would
+        // answer confidently and wrongly, which is worse than not answering.
+        if crate::lsp_k2::is_k2(&src) {
+            let text = crate::lsp_k2::hover(&src, line, col)?;
+            return serde_json::to_value(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: text,
+                }),
+                range: None,
+            })
+            .ok();
+        }
         let ix = Index::build(&src);
         let occ = ix.at(line, col)?;
         let registry = self.registry_for_src(&ix);
@@ -1364,5 +1388,22 @@ mod tests {
         );
         assert_eq!(parameter_labels("twice(n: int): int"), vec!["n: int"]);
         assert!(parameter_labels("quit()").is_empty());
+    }
+}
+
+/// The completion kind that matches a symbol kind, so a K2 completion carries
+/// the same icon the outline uses for the same thing.
+fn symbol_kind_to_completion(k: SymbolKind) -> CompletionItemKind {
+    match k {
+        SymbolKind::METHOD => CompletionItemKind::METHOD,
+        SymbolKind::FIELD => CompletionItemKind::FIELD,
+        SymbolKind::CONSTANT => CompletionItemKind::CONSTANT,
+        SymbolKind::ENUM => CompletionItemKind::ENUM,
+        SymbolKind::ENUM_MEMBER => CompletionItemKind::ENUM_MEMBER,
+        SymbolKind::INTERFACE => CompletionItemKind::INTERFACE,
+        SymbolKind::STRUCT => CompletionItemKind::STRUCT,
+        SymbolKind::OBJECT => CompletionItemKind::VARIABLE,
+        SymbolKind::KEY => CompletionItemKind::KEYWORD,
+        _ => CompletionItemKind::CLASS,
     }
 }

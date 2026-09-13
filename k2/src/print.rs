@@ -338,7 +338,9 @@ fn attribute(a: &Attribute) -> String {
     }
 }
 
-fn ty(t: &TypeRef) -> String {
+/// A type as it is written in source — the language server shows it in
+/// signatures, so it is public rather than printer-private.
+pub fn ty(t: &TypeRef) -> String {
     match t {
         TypeRef::Void => "void".into(),
         TypeRef::Named(n) => n.clone(),

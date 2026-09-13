@@ -187,3 +187,285 @@ pub fn formatting(src: &str) -> Option<Vec<TextEdit>> {
         new_text: out,
     }])
 }
+
+// ─── Hover and completion ───────────────────────────────────────────────────
+//
+// Both answer from the K2 parse tree rather than a token scan, so what the
+// editor says about a name is what the compiler decided about it. A file that
+// does not parse still answers: the declarations above the caret are usually
+// intact, and an editor that goes quiet the moment you type `(` is worse than
+// one that is briefly a little stale.
+
+/// Every name the file declares, with what to say about it.
+struct Model {
+    /// name → (signature, what kind of thing it is)
+    entries: Vec<(String, String, &'static str)>,
+    /// `owner` → its members, for completion after a dot.
+    members: Vec<(String, Vec<(String, String, &'static str)>)>,
+}
+
+fn method_sig(m: &kiln_k2::ast::Method) -> String {
+    use kiln_k2::print::ty;
+    let ps: Vec<String> = m
+        .params
+        .iter()
+        .map(|p| format!("{} {}", ty(&p.ty), p.name))
+        .collect();
+    let generics = if m.type_params.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", m.type_params.join(", "))
+    };
+    format!(
+        "{}{} {}{}({})",
+        if m.is_static { "static " } else { "" },
+        ty(&m.ret),
+        m.name,
+        generics,
+        ps.join(", ")
+    )
+}
+
+/// Parse, and if that fails, parse again with the caret's line blanked out.
+///
+/// This is the whole difference between a language server that helps and one
+/// that goes quiet exactly when you need it: `Rect.` is a syntax error, and
+/// asking what follows the dot is the one moment you are guaranteed to be
+/// looking at a file that does not parse. Everything else in the file is
+/// intact, so blanking the one line being typed recovers it.
+fn parse_tolerantly(src: &str, caret_line: Option<usize>) -> Option<kiln_k2::ast::Program> {
+    let parse = |text: &str| {
+        kiln_k2::lexer::lex(text)
+            .ok()
+            .and_then(|t| kiln_k2::parser::parse(t).ok())
+    };
+    if let Some(p) = parse(src) {
+        return Some(p);
+    }
+    let line = caret_line?;
+    let blanked: String = src
+        .lines()
+        .enumerate()
+        .map(|(i, l)| if i + 1 == line { "" } else { l })
+        .collect::<Vec<_>>()
+        .join("\n");
+    parse(&blanked)
+}
+
+fn build_model(src: &str, caret_line: Option<usize>) -> Model {
+    use kiln_k2::ast::*;
+    use kiln_k2::print::ty;
+    let mut model = Model {
+        entries: Vec::new(),
+        members: Vec::new(),
+    };
+    let Some(program) = parse_tolerantly(src, caret_line) else {
+        return model;
+    };
+    for item in &program.items {
+        match item {
+            Item::Type(t) => {
+                let what = match t.kind {
+                    TypeKind::Record => "record",
+                    TypeKind::Struct => "struct",
+                    TypeKind::Class => "class",
+                    TypeKind::StaticClass => "static class",
+                };
+                let generics = if t.type_params.is_empty() {
+                    String::new()
+                } else {
+                    format!("<{}>", t.type_params.join(", "))
+                };
+                model
+                    .entries
+                    .push((t.name.clone(), format!("{what} {}{generics}", t.name), what));
+                let mut ms = Vec::new();
+                for f in t.record_params.iter().chain(t.fields.iter()) {
+                    ms.push((f.name.clone(), format!("{} {}", ty(&f.ty), f.name), "field"));
+                }
+                for c in &t.consts {
+                    ms.push((c.name.clone(), format!("const {}", c.name), "constant"));
+                }
+                for m in &t.methods {
+                    ms.push((m.name.clone(), method_sig(m), "method"));
+                }
+                model.entries.extend(ms.iter().cloned());
+                model.members.push((t.name.clone(), ms));
+            }
+            Item::Enum(e) => {
+                model
+                    .entries
+                    .push((e.name.clone(), format!("enum {}", e.name), "enum"));
+                let ms: Vec<_> = e
+                    .members
+                    .iter()
+                    .map(|(n, _)| (n.clone(), format!("{}.{n}", e.name), "enum member"))
+                    .collect();
+                model.entries.extend(ms.iter().cloned());
+                model.members.push((e.name.clone(), ms));
+            }
+            Item::Interface(i) => {
+                model
+                    .entries
+                    .push((i.name.clone(), format!("interface {}", i.name), "interface"));
+                let ms: Vec<_> = i.methods.iter().map(|m| (m.name.clone(), method_sig(m), "method")).collect();
+                model.entries.extend(ms.iter().cloned());
+                model.members.push((i.name.clone(), ms));
+            }
+            Item::Form(f) => {
+                model
+                    .entries
+                    .push((f.name.clone(), format!("form {}", f.name), "form"));
+                for c in &f.components {
+                    // A component is reached by its own name, and its
+                    // properties are what you can set on it.
+                    model.entries.push((
+                        c.id.clone(),
+                        format!("{} {}", c.type_name, c.id),
+                        "component",
+                    ));
+                    let props: Vec<_> = c
+                        .properties
+                        .iter()
+                        .map(|(n, _)| (n.clone(), format!("{}.{n}", c.id), "property"))
+                        .collect();
+                    model.members.push((c.id.clone(), props));
+                }
+                for x in &f.fields {
+                    model
+                        .entries
+                        .push((x.name.clone(), format!("{} {}", ty(&x.ty), x.name), "field"));
+                }
+                for m in &f.methods {
+                    model.entries.push((m.name.clone(), method_sig(m), "method"));
+                }
+            }
+        }
+    }
+    model
+}
+
+/// The identifier under the caret, and the text to its left on that line.
+fn word_at(src: &str, line: usize, col: usize) -> (String, String) {
+    let text = src.lines().nth(line.saturating_sub(1)).unwrap_or("");
+    let bytes = text.as_bytes();
+    let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'@';
+    let cut = col.saturating_sub(1).min(text.len());
+    let mut start = cut;
+    while start > 0 && is_word(bytes[start - 1]) {
+        start -= 1;
+    }
+    let mut end = cut;
+    while end < bytes.len() && is_word(bytes[end]) {
+        end += 1;
+    }
+    (text[start..end].to_string(), text[..cut].to_string())
+}
+
+/// What to show when the caret rests on a name in a K2 file.
+pub fn hover(src: &str, line: usize, col: usize) -> Option<String> {
+    let (word, _) = word_at(src, line, col);
+    if word.is_empty() {
+        return None;
+    }
+    if let Some(k) = keyword_doc(&word) {
+        return Some(format!("```\n{word}\n```\n\n{k}"));
+    }
+    let model = build_model(src, Some(line));
+    let (_, sig, what) = model.entries.iter().find(|(n, _, _)| *n == word)?;
+    Some(format!("```\n{sig}\n```\n\n{what}"))
+}
+
+/// A one-line account of a keyword or built-in type, for hover.
+///
+/// These are the words with no declaration to point at, so without this the
+/// editor says nothing about exactly the parts of the language a newcomer is
+/// most likely to be hovering.
+fn keyword_doc(w: &str) -> Option<&'static str> {
+    Some(match w {
+        "defer" => "runs when the enclosing block is left, however it is left",
+        "let" => "an immutable binding",
+        "var" => "a local whose type is inferred",
+        "form" => "a window: its properties and components are the source Studio edits",
+        "record" => "compared by value; written positionally",
+        "class" => "holds mutable state; compared by reference",
+        "interface" => "a shape two types can share — there is no inheritance",
+        "namespace" => "the file's namespace",
+        "using" => "load a library: `using Kiln.File;` gives `File.ReadText`",
+        "switch" => "a switch expression: each arm is a pattern and a value",
+        "foreach" => "iterate a range or a list; each turn binds its own variable",
+        "partial" => "this declaration is one half; the other half is elsewhere",
+        "extern" => "declared here, defined elsewhere — see `[Dll]`",
+        "string" => "text",
+        "int" | "long" | "short" | "sbyte" => "a signed integer",
+        "uint" | "ulong" | "ushort" | "byte" => "an unsigned integer",
+        "nint" | "nuint" => "an integer the width of a pointer",
+        "bool" => "true or false",
+        "double" | "float" => "a floating-point number",
+        "Result" => "a value that is either a result or an error — there are no exceptions",
+        _ => return None,
+    })
+}
+
+/// Completions for a K2 file: the members of what is before the dot, or every
+/// name in the file plus the words the language itself provides.
+pub fn completion(src: &str, line: usize, col: usize) -> Vec<(String, SymbolKind, String)> {
+    let (_, before) = word_at(src, line, col);
+    let model = build_model(src, Some(line));
+    let mut out = Vec::new();
+
+    // `id.` — the members of that one thing, and nothing else.
+    let dotted = before.trim_end();
+    if let Some(head) = dotted.strip_suffix('.') {
+        let owner: String = head
+            .chars()
+            .rev()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        if let Some((_, ms)) = model.members.iter().find(|(n, _)| *n == owner) {
+            for (name, sig, what) in ms {
+                out.push((name.clone(), kind_of(what), sig.clone()));
+            }
+        }
+        return out;
+    }
+
+    for (name, sig, what) in &model.entries {
+        out.push((name.clone(), kind_of(what), sig.clone()));
+    }
+    for kw in K2_WORDS {
+        out.push((
+            kw.to_string(),
+            SymbolKind::KEY,
+            keyword_doc(kw).unwrap_or("keyword").to_string(),
+        ));
+    }
+    out
+}
+
+fn kind_of(what: &str) -> SymbolKind {
+    match what {
+        "method" => SymbolKind::METHOD,
+        "field" | "property" => SymbolKind::FIELD,
+        "constant" => SymbolKind::CONSTANT,
+        "enum" => SymbolKind::ENUM,
+        "enum member" => SymbolKind::ENUM_MEMBER,
+        "interface" => SymbolKind::INTERFACE,
+        "record" | "struct" => SymbolKind::STRUCT,
+        "component" => SymbolKind::OBJECT,
+        _ => SymbolKind::CLASS,
+    }
+}
+
+/// The words the language provides, offered alongside what the file declares.
+const K2_WORDS: &[&str] = &[
+    "namespace", "using", "public", "private", "internal", "static", "const", "var", "let",
+    "class", "record", "struct", "enum", "interface", "form", "partial", "new", "this", "return",
+    "if", "else", "switch", "for", "foreach", "in", "while", "do", "break", "continue", "defer",
+    "is", "as", "ref", "out", "extern", "int", "uint", "long", "ulong", "short", "ushort", "byte",
+    "sbyte", "nint", "nuint", "float", "double", "bool", "char", "string", "void", "true", "false",
+    "null", "Result", "List", "Dictionary", "HashSet", "Action", "Func", "Console",
+];
