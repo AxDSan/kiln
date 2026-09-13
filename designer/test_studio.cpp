@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "catalog.h"
+#include "highlight.h"
 #include "help_page.h"
 
 using namespace kiln::designer;
@@ -68,6 +69,42 @@ static std::string session(const std::string& designer, const std::string& kiln,
         pclose(p);
     }
     return out;
+}
+
+/* The code pane's highlighter, on both languages.
+ *
+ * It is a line tokenizer rather than a parser — deliberately — but it has to
+ * know which language it is looking at. Painted with 1.x's rules a K2 file
+ * gets no keywords at all, and worse, its `//` comments are not comments, so
+ * the English inside them is painted: `and` in a sentence comes out as an
+ * operator. */
+static void test_highlight() {
+    std::printf("highlighting\n");
+
+    // 1.x, unchanged.
+    check("1.x: `sub` is a keyword",
+          has(highlight_line("sub main"), "<span class='k'>sub</span>"));
+    check("1.x: `#` opens a comment",
+          has(highlight_line("# a note"), "<span class='c'>"));
+
+    // Kiln 2.
+    check("K2: `namespace` is a keyword",
+          has(highlight_line("namespace Counter;", true), "<span class='k'>namespace</span>"));
+    check("K2: `public partial form` are keywords",
+          has(highlight_line("public partial form MainWindow", true),
+              "<span class='k'>partial</span>"));
+    check("K2: `//` opens a comment",
+          has(highlight_line("// a note", true), "<span class='c'>"));
+    check("K2: an interpolated string is one string",
+          has(highlight_line("count.Text = $\"{n}\";", true), "<span class='s'>"));
+
+    // The bug this is really about: a word inside a comment is prose.
+    const std::string prose = highlight_line("// the designer's half and yours", true);
+    check("K2: a word in a comment is not painted as a keyword",
+          !has(prose, "<span class='k'>"));
+    // And 1.x's keywords are not K2's.
+    check("K2: `sub` is not a keyword",
+          !has(highlight_line("sub main", true), "<span class='k'>sub</span>"));
 }
 
 static void test_catalog() {
@@ -1157,6 +1194,7 @@ static void test_help(const std::string& kiln, const std::string& designer) {
 int main(int argc, char** argv) {
     const std::string kiln = argc > 1 ? argv[1] : "./target/debug/kiln";
     const std::string designer = argc > 2 ? argv[2] : "designer/kiln-designer";
+    test_highlight();
     test_catalog();
     if (::access(designer.c_str(), X_OK) == 0) {
         test_sessions(kiln, designer);

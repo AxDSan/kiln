@@ -13,6 +13,27 @@
 
 namespace kiln::designer {
 
+/// Kiln 2's keywords. A different language needs a different list: painting a
+/// K2 file with 1.x's leaves `namespace`, `class` and `var` plain, and — since
+/// K2 comments open with `//` rather than `#` — paints the English inside a
+/// comment, where `and` is a word and not an operator.
+inline bool is_keyword_k2(const std::string& w) {
+    static const char* kw[] = {
+        "namespace", "using",  "public",  "private", "internal", "static",   "const",
+        "var",       "let",    "class",   "record",  "struct",   "enum",     "interface",
+        "form",      "partial","new",     "this",    "return",   "if",       "else",
+        "switch",    "case",   "default", "for",     "foreach",  "in",       "while",
+        "do",        "break",  "continue","defer",   "is",       "as",       "ref",
+        "out",       "extern", "where",   "true",    "false",    "null",     "void",
+        "int",       "uint",   "long",    "ulong",   "short",    "ushort",   "byte",
+        "sbyte",     "nint",   "nuint",   "float",   "double",   "bool",     "char",
+        "string",    "Result", "List",    "Dictionary", "HashSet"};
+    for (const char* k : kw) {
+        if (w == k) return true;
+    }
+    return false;
+}
+
 inline bool is_keyword(const std::string& w) {
     // `target`, `to`, `step`, `through` and the infix bitwise words are soft
     // keywords in the grammar — highlighted, but still usable as identifiers
@@ -56,14 +77,34 @@ inline std::string escape_code(const std::string& s) {
 }
 
 /// Highlight one line into RML markup.
-inline std::string highlight_line(const std::string& line) {
+///
+/// `k2` selects the language: Kiln 2 comments with `//`, writes its keywords in
+/// C#'s set, and interpolates with `$"…"`. Everything else about the tokenizer
+/// is the same, because the shapes are.
+inline std::string highlight_line(const std::string& line, bool k2 = false) {
     std::string out;
     size_t i = 0;
     while (i < line.size()) {
         const char c = line[i];
-        if (c == '#') {                       // comment to end of line
+        if (!k2 && c == '#') {                // 1.x comment to end of line
             out += "<span class='c'>" + escape_code(line.substr(i)) + "</span>";
             break;
+        }
+        if (k2 && c == '/' && i + 1 < line.size() && line[i + 1] == '/') {
+            out += "<span class='c'>" + escape_code(line.substr(i)) + "</span>";
+            break;
+        }
+        // `$"…"` is one string, and the `$` belongs to it.
+        if (k2 && c == '$' && i + 1 < line.size() && line[i + 1] == '"') {
+            size_t j = i + 2;
+            while (j < line.size() && line[j] != '"') {
+                if (line[j] == '\\') j++;
+                j++;
+            }
+            j = j < line.size() ? j + 1 : line.size();
+            out += "<span class='s'>" + escape_code(line.substr(i, j - i)) + "</span>";
+            i = j;
+            continue;
         }
         if (c == '"') {                        // string literal
             size_t j = i + 1;
@@ -105,7 +146,8 @@ inline std::string highlight_line(const std::string& line) {
             // property; otherwise keyword or plain identifier.
             const bool call = j < line.size() && line[j] == '(';
             const bool prop = i > 0 && line[i - 1] == '.';
-            const char* cls = is_keyword(word) ? "k" : (call ? "m" : (prop ? "i" : nullptr));
+            const bool kw = k2 ? is_keyword_k2(word) : is_keyword(word);
+            const char* cls = kw ? "k" : (call ? "m" : (prop ? "i" : nullptr));
             if (cls) {
                 out += "<span class='" + std::string(cls) + "'>" + escape_code(word) + "</span>";
             } else {

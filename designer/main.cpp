@@ -2340,7 +2340,7 @@ void rebuild_code() {
         char num[16];
         std::snprintf(num, sizeof num, "%4zu", i + 1);
         html += "<div class='cl'><span class='ln'>" + std::string(num) + "</span>" +
-                highlight_line(lines[i]) + "</div>";
+                highlight_line(lines[i], g.model.is_k2) + "</div>";
     }
     if (Rml::Element* head = code->GetParentNode()->GetChild(0)) {
         // Named a preview because it is one: it is syntax-highlighted and
@@ -2491,7 +2491,9 @@ void refresh_highlight() {
                                 : bad                        ? "<div class='badline'>"
                                                              : "<div>";
         html += std::string(row_class) + shift +
-                (lines[i].empty() ? std::string("&nbsp;") : highlight_line(lines[i])) + bars +
+                (lines[i].empty() ? std::string("&nbsp;")
+                                 : highlight_line(lines[i], g.model.is_k2)) +
+                bars +
                 "</span></div>";
     }
     layer->SetInnerRML(html);

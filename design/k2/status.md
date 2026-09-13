@@ -111,6 +111,9 @@ clang and checks stdout):
   double-click it — writes `Button button1` into the designer's half and
   `void Button1Click()` into yours, wired and compiling. Its own tests drive
   the gestures and read the file back
+- **Studio's code pane highlights K2**: `//` comments, C#'s keyword set and
+  `$"…"` as one string. It had 1.x's rules only, which left K2 unpainted and —
+  because `//` was not a comment — painted the English inside one
 - **`kiln edit`**: `set`, `add`, `remove`, `rename`, `on` change a form's
   designer block **through the tree**, not as text — so comments, the code half
   and everything else survive. This is what Studio calls: the CLI has always
@@ -220,7 +223,7 @@ clang and checks stdout):
 3. constraints beyond interfaces (`where T : class`, `new()`) are parsed and ignored
 4. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
 5. ABI v5 proper: a handler that captures a *local*; Studio itself calling `kiln edit` (the command exists; the C++ side still splices 1.x text)
-6. Studio's code view still highlights from a C++ keyword list rather than the language server (reading, saving and the RAD gestures all go through the CLI now)
+6. Studio's code pane highlights K2 from its own line tokenizer rather than from the language server's semantic tokens — the shapes are right, but the toolchain is not the one deciding them
 
 ## Milestone: the RAD half runs
 
