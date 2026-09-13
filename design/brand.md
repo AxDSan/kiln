@@ -21,6 +21,26 @@ where "build" produces one file you can send to someone. The compiler is real
 (LLVM, native code, no interpreter and no runtime to install), but the compiler
 is not the pitch. **The pitch is that building a desktop app is quick again.**
 
+## Where this is going: Kiln 2
+
+Kiln 2 ([`design/k2/`](k2/spec.md)) repositions the product. It stops being
+an implementation of EPL: the language becomes C#-shaped, and the audience
+becomes people who think in C# and want a native binary without .NET. What
+survives is the part above that was never about EPL — the form you draw is
+the source, and build produces one file you can send.
+
+Until Kiln 2 becomes the default (plan Phase 10), public copy keeps
+describing 1.x as shipped. At the flip, these replace the EPL lines:
+
+| Room | Line |
+| --- | --- |
+| A line | Draw an app. Write it like C#. Ship one native binary. |
+| A sentence | A C#-shaped language and form designer that compiles to one native binary — no runtime, no .NET, no metadata to reverse. |
+
+Do not describe Kiln 2 as "C# without .NET" or a C# implementation: it is
+not source-compatible with C#, indexes from 1, and has no exceptions or
+inheritance. "C#-shaped" is the claim.
+
 ## What Kiln is not
 
 Say none of these. Each one is a claim the product does not make and does not
