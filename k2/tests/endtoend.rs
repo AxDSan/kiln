@@ -875,3 +875,45 @@ public static class P { public static void Main() { } }
     let err = kiln_k2::compile_to_llvm(src).unwrap_err();
     assert!(err.contains("does not implement"), "got: {err}");
 }
+
+#[test]
+fn generic_types_instantiate_per_type_argument() {
+    let src = r#"
+namespace GT;
+
+/// A generic pair, instantiated per type argument.
+public record Pair<A, B>(A First, B Second)
+{
+    public string Show() => $"({First}, {Second})";
+}
+
+/// A generic class with state and methods.
+public class Box<T>
+{
+    T value;
+    public Box(T v) { value = v; }
+    public T Get() => value;
+    public void Set(T v) { value = v; }
+}
+
+public static class P
+{
+    public static void Main()
+    {
+        var a = new Pair<int, int>(3, 4);
+        Console.WriteLine(a.Show());
+
+        var b = new Pair<int, string>(7, "seven");
+        Console.WriteLine(b.Show());
+
+        var box = new Box<int>(41);
+        box.Set(box.Get() + 1);
+        Console.WriteLine($"{box.Get()}");
+
+        var words = new Box<string>("kiln");
+        Console.WriteLine(words.Get());
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "(3, 4)\n(7, seven)\n42\nkiln\n");
+}

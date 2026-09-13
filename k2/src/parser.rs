@@ -310,6 +310,7 @@ impl Parser {
         attrs: Vec<Attribute>,
     ) -> Result<TypeDecl, ParseError> {
         let name = self.ident()?;
+        let type_params = self.opt_type_params()?;
         // positional record params
         let mut record_params = Vec::new();
         if self.peek() == &Tok::LParen {
@@ -355,6 +356,7 @@ impl Parser {
             return Ok(TypeDecl {
                 attrs: attrs.clone(),
                 implements: implements.clone(),
+                type_params: type_params.clone(),
                 kind,
                 vis,
                 name,
@@ -368,12 +370,13 @@ impl Parser {
         }
         self.expect(&Tok::LBrace)?;
         while self.peek() != &Tok::RBrace {
-            self.member(&mut fields, &mut consts, &mut methods)?;
+            self.member(&name, &mut fields, &mut consts, &mut methods)?;
         }
         self.expect(&Tok::RBrace)?;
         Ok(TypeDecl {
             attrs,
             implements,
+            type_params,
             kind,
             vis,
             name,
@@ -423,6 +426,7 @@ impl Parser {
 
     fn member(
         &mut self,
+        type_name: &str,
         fields: &mut Vec<Field>,
         consts: &mut Vec<ConstDecl>,
         methods: &mut Vec<Method>,
@@ -455,6 +459,28 @@ impl Parser {
         } else {
             false
         };
+
+        // A constructor: the type's own name, then a parameter list.
+        if self.peek() == &Tok::Ident(type_name.to_string()) && self.peek_at(1) == &Tok::LParen {
+            self.bump();
+            let params = self.params()?;
+            let body = self.block()?;
+            methods.push(Method {
+                attrs,
+                is_extern: false,
+                vis,
+                is_static: true,
+                name: "$ctor".into(),
+                type_params: Vec::new(),
+                params,
+                ret: TypeRef::Named(type_name.to_string()),
+                body,
+                expr_body: None,
+                doc,
+                span,
+            });
+            return Ok(());
+        }
 
         let ty = self.type_ref()?;
         let name = self.ident()?;

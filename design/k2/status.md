@@ -52,6 +52,13 @@ clang and checks stdout):
 - **`List<T>`**: `new List<T>()`, `.Add(x)` (buffer grows 4 → 8 → 16 …),
   `.Count`, 1-based indexing `xs[1]`, and `foreach` over one. KIR gained real
   indexed element access for this
+- **Generic types**: `record Pair<A, B>` and `class Box<T>` instantiate per set
+  of type arguments — fields substituted, methods declared and lowered per
+  instance, with the template's own name meaning that instance inside it
+- **Constructors**: `public Box(T v) { value = v; }` — a zeroed instance is
+  bound to `this`, the body runs (bare field names resolve through it, for
+  reads and writes alike), and the instance is returned. `new T(...)` prefers a
+  declared constructor over positional fields
 - **Interfaces, no inheritance**: `interface I { … }` with `class C : I` /
   `record R(...) : I`. An interface value carries the object and the
   implementation's methods, so two unrelated types work through one interface
@@ -97,7 +104,7 @@ clang and checks stdout):
 
 1. `HashSet<T>`; hashing for `Dictionary` (lookup is a linear scan); moving strings, lists and dictionaries onto the runtime's own text/array commands and the collector (the link path now exists; the data structures still use libc)
 2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
-3. generic *types* (`class Cache<K,V>`) and generic instance methods — only generic static methods are built; interface *constraints* are parsed but not enforced
+3. generic *instance* methods, and interface constraints on generics (parsed, not enforced)
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)
 5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
 6. binding the generated SQL to `libs/db` and returning rows (the statement text is generated; execution needs the runtime)

@@ -67,6 +67,9 @@ pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> 
     }
     for item in &p.items {
         if let ast::Item::Type(td) = item {
+            if !td.type_params.is_empty() {
+                continue; // a template: instantiated on use
+            }
             if td.kind != ast::TypeKind::StaticClass {
                 let rid = RecordId(b.m.records.len() as u32);
                 b.m.records.push(RecordDef {
@@ -123,6 +126,8 @@ pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> 
         dlls: HashMap::new(),
         packed: std::collections::HashSet::new(),
         tables: HashMap::new(),
+        generic_types: HashMap::new(),
+        type_mono: HashMap::new(),
         interfaces: HashMap::new(),
         iface_records: HashMap::new(),
         impls: HashMap::new(),
@@ -212,7 +217,7 @@ pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> 
     // Pass 2: fill record fields and compute C layout.
     for item in &p.items {
         if let ast::Item::Type(td) = item {
-            if td.kind == ast::TypeKind::StaticClass {
+            if td.kind == ast::TypeKind::StaticClass || !td.type_params.is_empty() {
                 continue;
             }
             let rid = cx.type_ids[&td.name];
@@ -256,9 +261,21 @@ pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> 
         }
     }
 
+    // Generic type templates are instantiated from type references.
+    for item in &p.items {
+        if let ast::Item::Type(td) = item {
+            if !td.type_params.is_empty() {
+                cx.generic_types.insert(td.name.clone(), td.clone());
+            }
+        }
+    }
+
     // Pass 3: declare all methods (symbol + signature) before lowering bodies.
     for item in &p.items {
         if let ast::Item::Type(td) = item {
+            if !td.type_params.is_empty() {
+                continue;
+            }
             for m in &td.methods {
                 let this = if m.is_static || td.kind == ast::TypeKind::StaticClass {
                     None
@@ -361,6 +378,9 @@ pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> 
     // instances are lowered from the pending queue below).
     for item in &p.items {
         if let ast::Item::Type(td) = item {
+            if !td.type_params.is_empty() {
+                continue;
+            }
             for m in &td.methods {
                 if !m.type_params.is_empty() || m.is_extern {
                     continue;
@@ -439,6 +459,8 @@ struct Pending {
     /// For a lifted lambda: the environment record reached through parameter 0,
     /// and the captured variables it holds, in field order.
     env: Option<EnvPlan>,
+    /// For a constructor: the record it builds and returns.
+    ctor: Option<RecordId>,
 }
 
 /// How a lifted lambda reaches the variables it captured.
@@ -487,6 +509,10 @@ struct Cx {
     dicts: HashMap<(TyId, TyId), RecordId>,
     /// `[Dll]` externs, by `Type.Name` and bare `Name`.
     dlls: HashMap<String, DllSig>,
+    /// Generic type declarations, awaiting type arguments.
+    generic_types: HashMap<String, ast::TypeDecl>,
+    /// Instantiated generic types: (name, type args) → the record it became.
+    type_mono: HashMap<(String, Vec<TyId>), RecordId>,
     /// Interfaces: name → the method names it declares, in order.
     interfaces: HashMap<String, Vec<String>>,
     /// An interface's value record: `{obj, fn per method}`.
@@ -599,7 +625,18 @@ impl Cx {
                         ret: TyTable::VOID,
                     })
                 }
-                _ => return Err(format!("generic type `{n}` not yet supported")),
+                _ => {
+                    if self.generic_types.contains_key(n.as_str()) {
+                        let mut targs = Vec::new();
+                        for a in args {
+                            targs.push(self.resolve(a)?);
+                        }
+                        let rid = self.instantiate_type(n, &targs)?;
+                        self.b.m.types.intern(TyKind::Record(rid))
+                    } else {
+                        return Err(format!("generic type `{n}` not yet supported"));
+                    }
+                }
             },
         })
     }
@@ -622,6 +659,112 @@ impl Cx {
         );
         self.results.insert(value_ty, rid);
         rid
+    }
+
+    /// Instantiate a generic type for concrete type arguments: a record with
+    /// the fields substituted, and its methods declared and queued.
+    fn instantiate_type(&mut self, name: &str, targs: &[TyId]) -> Result<RecordId, String> {
+        let key = (name.to_string(), targs.to_vec());
+        if let Some(r) = self.type_mono.get(&key) {
+            return Ok(*r);
+        }
+        let td = self.generic_types[name].clone();
+        if td.type_params.len() != targs.len() {
+            return Err(format!(
+                "`{name}` takes {} type argument(s), got {}",
+                td.type_params.len(),
+                targs.len()
+            ));
+        }
+        let suffix: Vec<String> = targs.iter().map(|t| t.0.to_string()).collect();
+        let inst_name = format!("{name}${}", suffix.join("_"));
+
+        // Reserve the record so a field may refer back to the instance.
+        let rid = RecordId(self.b.m.records.len() as u32);
+        self.b.m.records.push(RecordDef {
+            id: rid,
+            name: inst_name.clone(),
+            fields: Vec::new(),
+            layout: Layout::Managed,
+            equality: match td.kind {
+                ast::TypeKind::Record => Equality::ByValue,
+                _ => Equality::ByRef,
+            },
+        });
+        let _ = self.b.m.types.intern(TyKind::Record(rid));
+        self.type_mono.insert(key, rid);
+
+        // Bind the type parameters — and the template's own name, so that a
+        // member written in terms of `Box` means this instance of it.
+        let mut tvars = HashMap::new();
+        for (p, t) in td.type_params.iter().zip(targs.iter()) {
+            tvars.insert(p.clone(), *t);
+        }
+        let inst_ty_early = self.b.m.types.intern(TyKind::Record(rid));
+        tvars.insert(name.to_string(), inst_ty_early);
+        let saved = std::mem::replace(&mut self.tvars, tvars.clone());
+
+        let result = (|| -> Result<(), String> {
+            let mut fields = Vec::new();
+            for f in td.record_params.iter().chain(td.fields.iter()) {
+                fields.push(FieldDef {
+                    name: f.name.clone(),
+                    ty: self.resolve(&f.ty)?,
+                });
+            }
+            let (size, align, offsets) = self.c_layout(&fields);
+            self.b.m.records[rid.0 as usize].fields = fields;
+            self.b.m.records[rid.0 as usize].layout = Layout::C {
+                size,
+                align,
+                offsets,
+            };
+
+            // Declare and queue every method of this instance.
+            let inst_ty = self.b.m.types.intern(TyKind::Record(rid));
+            for m in &td.methods {
+                if !m.type_params.is_empty() || m.is_extern {
+                    continue;
+                }
+                let this = !m.is_static && td.kind != ast::TypeKind::StaticClass;
+                let mut params: Vec<(&str, TyId)> = Vec::new();
+                if this && m.name != "$ctor" {
+                    params.push(("this", inst_ty));
+                }
+                let owned: Vec<(String, TyId)> = m
+                    .params
+                    .iter()
+                    .map(|p| Ok((p.name.clone(), self.resolve(&p.ty)?)))
+                    .collect::<Result<_, String>>()?;
+                for (n, t) in &owned {
+                    params.push((n.as_str(), *t));
+                }
+                let ret = self.resolve(&m.ret)?;
+                let sym = format!("{inst_name}_{}", m.name);
+                let fid = self.b.declare_func(&sym, params, ret);
+                let sig = Sig {
+                    fid,
+                    this,
+                    params: owned.iter().map(|(_, t)| *t).collect(),
+                    ret,
+                };
+                self.methods
+                    .insert(format!("{inst_name}.{}", m.name), sig.clone());
+                let ctor = if m.name == "$ctor" { Some(rid) } else { None };
+                self.pending.push(Pending {
+                    fid,
+                    method: m.clone(),
+                    tvars: tvars.clone(),
+                    this: this && ctor.is_none(),
+                    env: None,
+                    ctor,
+                });
+            }
+            Ok(())
+        })();
+        self.tvars = saved;
+        result?;
+        Ok(rid)
     }
 
     /// The record standing for `List<T>`: `{len, cap, data}` where `data` is a
@@ -762,7 +905,15 @@ impl Cx {
         sig: &Sig,
     ) -> Result<(), String> {
         let _ = td;
-        self.lower_into(sig.fid, m, sig.this, None)
+        let ctor = if m.name == "$ctor" {
+            match *self.b.m.types.kind(sig.ret) {
+                TyKind::Record(rid) => Some(rid),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        self.lower_into(sig.fid, m, sig.this, None, ctor)
     }
 
     /// Lower a method body into an already-declared function. Parameter types
@@ -774,6 +925,7 @@ impl Cx {
         m: &ast::Method,
         this: bool,
         env: Option<EnvPlan>,
+        ctor: Option<RecordId>,
     ) -> Result<(), String> {
         let ret = self.b.m.func(fid).ret;
         let ptys: Vec<TyId> = self.b.m.func(fid).params.iter().map(|p| p.ty).collect();
@@ -825,6 +977,32 @@ impl Cx {
             fl.scope.remove(&name);
             fl.make_cell(&name, ty, Expr::Local(lid))?;
         }
+        // A constructor starts with a zeroed instance bound to `this`, runs the
+        // body (whose bare field names resolve through it), and returns it.
+        let this_local = if let Some(rid) = ctor {
+            let rty = fl.cx.b.m.types.intern(TyKind::Record(rid));
+            let zeros: Vec<Expr> = fl
+                .cx
+                .b
+                .m
+                .record(rid)
+                .fields
+                .iter()
+                .map(|f| f.ty)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|t| zero_of(&fl.cx.b.m.types, t))
+                .collect();
+            let l = fl.cx.b.add_local(fid, "this", rty);
+            fl.push(Stmt::Let {
+                local: l,
+                value: Expr::MakeRecord(rid, zeros),
+            });
+            fl.scope.insert("this".into(), (l, rty));
+            Some(l)
+        } else {
+            None
+        };
         if let Some(e) = &m.expr_body {
             let (val, _) = fl.expr(e, Some(ret))?;
             fl.push(Stmt::Return(Some(val)));
@@ -832,6 +1010,9 @@ impl Cx {
             for s in &m.body {
                 fl.stmt(s)?;
             }
+        }
+        if let Some(l) = this_local {
+            fl.push(Stmt::Return(Some(Expr::Local(l))));
         }
         let body = fl.finish();
         self.b.set_body(fid, body);
@@ -843,7 +1024,7 @@ impl Cx {
     fn drain_pending(&mut self) -> Result<(), String> {
         while let Some(p) = self.pending.pop() {
             let saved = std::mem::replace(&mut self.tvars, p.tvars);
-            let r = self.lower_into(p.fid, &p.method, p.this, p.env);
+            let r = self.lower_into(p.fid, &p.method, p.this, p.env, p.ctor);
             self.tvars = saved;
             r?;
         }
@@ -2238,13 +2419,25 @@ impl<'a> FnLower<'a> {
                     {
                         (qualified, None)
                     } else {
-                        // instance call
-                        let (recv_v, _) = self.expr(recv, None)?;
-                        (name.clone(), Some(recv_v))
+                        // instance call: prefer the receiver's own method.
+                        let (recv_v, rty) = self.expr(recv, None)?;
+                        let key = self
+                            .cx
+                            .record_name(rty)
+                            .map(|r| format!("{r}.{name}"))
+                            .filter(|k| self.cx.methods.contains_key(k))
+                            .unwrap_or_else(|| name.clone());
+                        (key, Some(recv_v))
                     }
                 } else {
-                    let (recv_v, _) = self.expr(recv, None)?;
-                    (name.clone(), Some(recv_v))
+                    let (recv_v, rty) = self.expr(recv, None)?;
+                    let key = self
+                        .cx
+                        .record_name(rty)
+                        .map(|r| format!("{r}.{name}"))
+                        .filter(|k| self.cx.methods.contains_key(k))
+                        .unwrap_or_else(|| name.clone());
+                    (key, Some(recv_v))
                 }
             }
             _ => return Err("unsupported call target".into()),
@@ -3141,6 +3334,7 @@ impl<'a> FnLower<'a> {
             tvars: self.cx.tvars.clone(),
             this: true,
             env: env_plan,
+            ctor: None,
         });
 
         Ok((
@@ -3225,6 +3419,7 @@ impl<'a> FnLower<'a> {
             tvars,
             this: false,
             env: None,
+            ctor: None,
         });
         Ok(sig)
     }
@@ -3283,6 +3478,21 @@ impl<'a> FnLower<'a> {
         let TyKind::Record(rid) = *self.tt().kind(ty) else {
             return Err("`new` is only supported for records/classes for now".into());
         };
+        // A declared constructor wins over positional field initialisation.
+        let rname = self.cx.b.m.record(rid).name.clone();
+        if let Some(sig) = self.cx.methods.get(&format!("{rname}.$ctor")).cloned() {
+            let mut kargs = Vec::new();
+            for (a, pty) in args.iter().zip(sig.params.iter()) {
+                kargs.push(self.expr(a, Some(*pty))?.0);
+            }
+            return Ok((
+                Expr::Call(Box::new(Call::Direct {
+                    func: sig.fid,
+                    args: kargs,
+                })),
+                sig.ret,
+            ));
+        }
         let field_tys: Vec<(String, TyId)> = self
             .cx
             .b
@@ -3436,11 +3646,19 @@ impl<'a> FnLower<'a> {
                 if let Some(c) = self.cells.get(name).cloned() {
                     return Ok(Place::Field(Box::new(c.ptr), 0));
                 }
-                let (lid, _) = *self
-                    .scope
-                    .get(name)
-                    .ok_or_else(|| format!("cannot assign to unknown `{name}`"))?;
-                Ok(Place::Local(lid))
+                if let Some((lid, _)) = self.scope.get(name).copied() {
+                    return Ok(Place::Local(lid));
+                }
+                // A bare name inside an instance method may be a field of `this`.
+                if let Some((this_lid, this_ty)) = self.scope.get("this").copied() {
+                    if let TyKind::Record(rid) = *self.tt().kind(this_ty) {
+                        let rec = self.cx.b.m.record(rid);
+                        if let Some(idx) = rec.fields.iter().position(|f| f.name == *name) {
+                            return Ok(Place::Field(Box::new(Expr::Local(this_lid)), idx));
+                        }
+                    }
+                }
+                Err(format!("cannot assign to unknown `{name}`"))
             }
             ast::ExprKind::Member(recv, member) => {
                 let (base, bty) = self.expr(recv, None)?;

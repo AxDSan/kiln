@@ -60,6 +60,8 @@ pub struct TypeDecl {
     pub attrs: Vec<Attribute>,
     /// Interfaces this type declares it implements (`class C : I, J`).
     pub implements: Vec<String>,
+    /// Generic type parameters (`class Cache<K, V>`).
+    pub type_params: Vec<String>,
     pub kind: TypeKind,
     pub vis: Vis,
     pub name: String,
