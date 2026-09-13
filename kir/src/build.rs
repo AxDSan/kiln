@@ -148,6 +148,7 @@ impl ModuleBuilder {
         self.m.funcs.push(Func {
             id,
             symbol: symbol.to_string(),
+            line: 0,
             params: param_defs,
             ret,
             conv,

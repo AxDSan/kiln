@@ -713,7 +713,7 @@ fn cmd_k2(rest: &[String]) -> i32 {
             .ok()
             .map(|p| p.registry)
     });
-    let module = match kiln_k2::compile_full(&src, runtime, registry.as_ref()) {
+    let module = match kiln_k2::compile_named(&src, runtime, registry.as_ref(), Some(&input)) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("kiln k2: {input}:{e}");

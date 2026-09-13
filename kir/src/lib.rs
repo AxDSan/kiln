@@ -14,6 +14,7 @@
 use std::collections::HashMap;
 
 pub mod build;
+pub mod debug;
 pub mod emit;
 
 // ─── Interned types ─────────────────────────────────────────────────────────
@@ -324,6 +325,9 @@ pub struct Module {
     pub funcs: Vec<Func>,
     pub entry: Option<FuncId>,
     pub kind: ModuleKind,
+    /// The file this module was compiled from. `None` emits no debug
+    /// information at all, exactly as the 1.x backend does.
+    pub source: Option<String>,
     /// Where allocations come from. A record, a string and a collection all
     /// allocate; with the runtime linked they should be collectable.
     pub allocator: Allocator,
@@ -340,6 +344,7 @@ impl Module {
             funcs: Vec::new(),
             entry: None,
             kind,
+            source: None,
             allocator: Allocator::Libc,
         }
     }
@@ -449,6 +454,8 @@ pub struct Local {
 pub struct Func {
     pub id: FuncId,
     pub symbol: String,
+    /// The line the function is declared on, for its subprogram entry.
+    pub line: usize,
     pub params: Vec<Param>,
     pub ret: TyId,
     pub conv: CallConv,
@@ -486,6 +493,10 @@ pub enum Stmt {
     Break,
     Continue,
     Return(Option<Expr>),
+    /// A source line marker. The front end puts one before each statement it
+    /// lowers, and the emitter attaches it to the instructions that follow —
+    /// which is all a line table is.
+    Line(usize),
 }
 
 /// The l-value subset.

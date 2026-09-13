@@ -387,6 +387,7 @@ pub fn lower_full(
                 let ret = cx.resolve(&m.ret)?;
                 let sym = format!("{}_{}", td.name, m.name);
                 let fid = cx.b.declare_func(&sym, params, ret);
+                cx.b.m.funcs[fid.0 as usize].line = m.span.line;
                 let sig = Sig {
                     fid,
                     this: this.is_some(),
@@ -1512,6 +1513,10 @@ impl<'a> FnLower<'a> {
     }
 
     fn stmt(&mut self, s: &ast::Stmt) -> Result<(), String> {
+        // A marker per source statement: this is the line table.
+        if s.span.line > 0 {
+            self.push(Stmt::Line(s.span.line));
+        }
         match &s.kind {
             ast::StmtKind::Local {
                 name, ty, value, ..

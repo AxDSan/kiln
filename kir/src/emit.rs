@@ -20,6 +20,10 @@ pub fn emit(m: &Module) -> String {
         strings: Vec::new(),
         externs: BTreeSet::new(),
         needs_gc: false,
+        debug: m
+            .source
+            .as_deref()
+            .map(|s| crate::debug::Debug::new(s, concat!("Kiln 2 ", env!("CARGO_PKG_VERSION")))),
     };
     let mut funcs = String::new();
     for f in &m.funcs {
@@ -35,6 +39,8 @@ struct Emit<'a> {
     strings: Vec<String>,
     externs: BTreeSet<String>,
     needs_gc: bool,
+    /// Present when the module names the file it came from.
+    debug: Option<crate::debug::Debug>,
 }
 
 impl Emit<'_> {
@@ -115,6 +121,11 @@ impl Emit<'_> {
         if let Some(entry) = entry {
             out.push_str(entry);
         }
+        if let Some(d) = &self.debug {
+            if !d.is_empty() {
+                out.push_str(&d.render());
+            }
+        }
         out
     }
 
@@ -160,6 +171,10 @@ impl Emit<'_> {
 struct FnEmit<'a, 'b> {
     e: &'a mut Emit<'b>,
     f: &'a Func,
+    /// The subprogram this function's instructions belong to.
+    scope: Option<usize>,
+    /// The location the next instruction carries.
+    loc: Option<usize>,
     head: String,
     body: String,
     tmp: usize,
@@ -179,6 +194,8 @@ impl<'a, 'b> FnEmit<'a, 'b> {
         FnEmit {
             e,
             f,
+            scope: None,
+            loc: None,
             head: String::new(),
             body: String::new(),
             tmp: 0,
@@ -207,6 +224,27 @@ impl<'a, 'b> FnEmit<'a, 'b> {
         format!("%l.{}", id.0)
     }
 
+    /// Attach the current source location to every instruction written since
+    /// the last line marker. Doing it as a pass over the finished text keeps
+    /// the two hundred places that write an instruction from having to know
+    /// about debug information at all.
+    fn tag_line(&mut self, from: usize) {
+        let Some(loc) = self.loc else { return };
+        let tail = self.body.split_off(from);
+        for line in tail.lines() {
+            let t = line.trim_start();
+            // Labels and terminator-less lines take no location; a plain
+            // instruction does.
+            if t.is_empty() || t.ends_with(':') {
+                self.body.push_str(line);
+                self.body.push('\n');
+                continue;
+            }
+            self.body.push_str(line);
+            self.body.push_str(&format!(", !dbg !{loc}\n"));
+        }
+    }
+
     fn run(&mut self) -> String {
         // Signature.
         let cc = match self.f.conv {
@@ -227,6 +265,14 @@ impl<'a, 'b> FnEmit<'a, 'b> {
             Linkage::Internal => "internal ",
             Linkage::Exported => "",
         };
+
+        // A function the user wrote gets a subprogram; a synthetic one — a
+        // thunk, a lifted lambda — has no source position worth stopping in.
+        if !self.f.synthetic {
+            if let Some(d) = self.e.debug.as_mut() {
+                self.scope = Some(d.subprogram(&self.f.symbol, self.f.line));
+            }
+        }
 
         // Allocas for every local; spill parameters into their slots.
         for (i, l) in self.f.locals.iter().enumerate() {
@@ -267,9 +313,13 @@ impl<'a, 'b> FnEmit<'a, 'b> {
         }
 
         let mut out = String::new();
+        let dbg = match self.scope {
+            Some(n) => format!(" !dbg !{n}"),
+            None => String::new(),
+        };
         writeln!(
             out,
-            "define {linkage}{cc}{ret} @{}({}) {{",
+            "define {linkage}{cc}{ret} @{}({}){dbg} {{",
             self.f.symbol,
             params.join(", ")
         )
@@ -296,7 +346,24 @@ impl<'a, 'b> FnEmit<'a, 'b> {
     }
 
     fn stmt(&mut self, s: &Stmt) -> bool {
+        // A marker only moves the current location; it emits nothing.
+        if let Stmt::Line(line) = s {
+            if let (Some(scope), Some(d)) = (self.scope, self.e.debug.as_mut()) {
+                self.loc = Some(d.location(*line, scope));
+            }
+            return true;
+        }
+        let from = self.body.len();
+        let fell_through = self.stmt_inner(s);
+        if self.loc.is_some() {
+            self.tag_line(from);
+        }
+        fell_through
+    }
+
+    fn stmt_inner(&mut self, s: &Stmt) -> bool {
         match s {
+            Stmt::Line(_) => true,
             Stmt::Let { local, value } => {
                 let v = self.expr(value);
                 let lt = self.tt().llvm(self.f.locals[local.0 as usize].ty);
@@ -341,6 +408,12 @@ impl<'a, 'b> FnEmit<'a, 'b> {
             }
             Stmt::If { cond, then, els } => self.emit_if(cond, then, els),
             Stmt::Loop { body } => self.emit_loop(body),
+            Stmt::Line(line) => {
+                if let (Some(scope), Some(d)) = (self.scope, self.e.debug.as_mut()) {
+                    self.loc = Some(d.location(*line, scope));
+                }
+                true
+            }
             Stmt::Break => {
                 let target = self.loops.last().expect("break outside loop").1.clone();
                 writeln!(self.body, "  br label %{target}").unwrap();

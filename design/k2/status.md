@@ -11,6 +11,7 @@ Updated 2026-09-13. Tracks what of the [spec](spec.md) is actually built, so the
 | `k2` | lexer + parser + lowerer (k2-syntax/k2-lower, one crate for now) | runnable subset, 6 end-to-end tests |
 | `backend` | 1.x → LLVM, split into `lower/` modules | unchanged behaviour, 61 tests |
 | `k2::print` | the canonical printer — `kiln fmt` | fixed point, comments carried, meaning unchanged |
+| `kir::debug` | DWARF line tables | a K2 binary is steppable in gdb |
 | `cli::lsp_k2` | the language server's K2 half | diagnostics, outline, formatting |
 | `k2::edit` | `kiln edit` — tree-level changes to a form | Studio's writer; everything untouched comes back unchanged |
 | `k2::migrate` | `kiln migrate` — 1.x source → K2 source | all 41 1.x examples convert to valid K2 |
@@ -65,6 +66,11 @@ clang and checks stdout):
   An event wires to a **method group or a lambda written at the wiring site** —
   a form's state is in globals, so a handler lambda needs no environment
   pointer and binds on the ABI as it stands
+- **Debug information**: a K2 binary carries a DWARF line table — a compile
+  unit naming the source, a subprogram per function, and a location on every
+  instruction — so `gdb` breaks on a K2 line, steps from one to the next, and
+  prints a backtrace naming both frames. `LineTablesOnly`, so a debugger is
+  told exactly what it is given; variables and types come later
 - **Editor grammars**: the VS Code and Kate definitions highlight K2 — `//` and
   `/* */` comments, the keyword and type sets, `[Attributes]`, `$"…{x}…"`
   interpolation — while still highlighting 1.x, since both share `.kiln` during
@@ -172,7 +178,7 @@ clang and checks stdout):
 5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
 6. binding the generated SQL to `libs/db` and returning rows (the statement text is generated; execution needs the runtime)
 7. ABI v5 proper: a handler that captures a *local*; Studio itself calling `kiln edit` (the command exists; the C++ side still splices 1.x text)
-8. debugger display for K2 types; hover and completion still read the 1.x index
+8. variables and types in the debugger (the line table is emitted); hover and completion still read the 1.x index
 
 ## Milestone: the RAD half runs
 

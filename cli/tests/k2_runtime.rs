@@ -213,3 +213,50 @@ fn a_failure_propagates_with_question_mark() {
     );
     assert_eq!(build_and_run("try", &src), "1 AB\n0\n");
 }
+
+#[test]
+fn a_k2_binary_carries_a_line_table() {
+    // Debug information is what makes a binary steppable. The module names the
+    // file it came from, each statement emits a line marker, and each function
+    // gets a subprogram — so a debugger can stop on a line and name the frame.
+    let path = tmp("dbg.kiln");
+    let exe = tmp("dbgbin");
+    std::fs::write(
+        &path,
+        "namespace Dbg;\npublic static class P\n{\n    static int Twice(int n)\n    {\n        var doubled = n * 2;\n        return doubled;\n    }\n\n    public static void Main()\n    {\n        var a = 20;\n        Console.WriteLine($\"{Twice(a)}\");\n    }\n}\n",
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["k2", path.to_str().unwrap(), "-o", exe.to_str().unwrap()])
+        .output()
+        .expect("kiln k2");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // The IR carries the metadata a debugger reads.
+    let ir = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["k2", path.to_str().unwrap(), "--emit-ir"])
+        .output()
+        .expect("kiln k2 --emit-ir");
+    let ll = String::from_utf8_lossy(&ir.stdout);
+    assert!(ll.contains("DICompileUnit"), "no compile unit:\n{ll}");
+    assert!(
+        ll.contains("DISubprogram(name: \"P_Twice\""),
+        "no subprogram:\n{ll}"
+    );
+    assert!(
+        ll.contains("DILocation(line: 6"),
+        "no location for line 6:\n{ll}"
+    );
+    assert!(
+        ll.contains("!dbg !"),
+        "instructions carry no location:\n{ll}"
+    );
+
+    // And the program still runs.
+    let run = Command::new(&exe).output().expect("runs");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "40\n");
+}

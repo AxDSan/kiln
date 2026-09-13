@@ -52,10 +52,23 @@ pub fn compile_full(
     runtime: Runtime,
     registry: Option<&kiln_ir::Registry>,
 ) -> Result<kiln_kir::Module, String> {
+    compile_named(src, runtime, registry, None)
+}
+
+/// Parse and lower, naming the file it came from so the binary carries debug
+/// information a debugger can step through. `None` emits none.
+pub fn compile_named(
+    src: &str,
+    runtime: Runtime,
+    registry: Option<&kiln_ir::Registry>,
+    source: Option<&str>,
+) -> Result<kiln_kir::Module, String> {
     let toks = lexer::lex(src).map_err(|e| format!("{}:{}: {}", e.line, e.col, e.msg))?;
     let program =
         parser::parse(toks).map_err(|e| format!("{}:{}: {}", e.span.line, e.span.col, e.msg))?;
-    lower::lower_full(&program, runtime, registry)
+    let mut m = lower::lower_full(&program, runtime, registry)?;
+    m.source = source.map(|s| s.to_string());
+    Ok(m)
 }
 
 /// Parse and lower to textual LLVM IR for a chosen runtime.
