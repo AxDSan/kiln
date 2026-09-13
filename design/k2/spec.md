@@ -299,7 +299,10 @@ switch (Load("app.json"))
 - Members: `IsOk`, `IsErr`, `Value` (flow-narrowed like `T?`), `Error`,
   `Map`, `Then` (bind), `OrElse`.
 - Ignoring a `Result` from a call statement is a **compile error**; discard
-  explicitly with `_ = Save();`.
+  explicitly with `Save().Ignore();` (reads as intent) or `_ = Save();` (C#).
+  Both are accepted; `Ignore()` is the idiom in fire-and-forget GUI handlers
+  where `_ =` on every line is noise. *(Provisional — the `LuaHook` sketch used
+  a `?? Skip` spelling that this replaces.)*
 - **Lowering**: a library command that can fail returns its value and writes
   the error slot (1.x ABI, unchanged). The K2 wrapper surface types it as
   `Result<T>`; `?`/`??`/`switch` directly on a call lower to an error-slot test,
@@ -399,6 +402,14 @@ ordinary K2 declarations. No attribute is visible at runtime.
 [CLayout]
 public struct Rect { public int Left, Top, Right, Bottom; }
 
+[CLayout]
+public struct ProcessEntry32
+{
+    public uint Size;
+    // …
+    [Fixed(260)] public byte[] ExeFile;   // char szExeFile[MAX_PATH], inline
+}
+
 public static partial class User32
 {
     [Dll("user32", Convention = CallConv.StdCall)]
@@ -406,10 +417,20 @@ public static partial class User32
 }
 ```
 
-`ref`/`out` on extern parameters pass an address. `Ptr` arithmetic:
-`p + offset` (0-based `nint`). Callbacks: a `static` lambda or method group
-converts to a C function pointer for an extern parameter of a `delegate
-unmanaged` type.
+- `ref`/`out` on extern parameters pass an address. `Ptr` arithmetic:
+  `p + offset` (0-based `nint`). Callbacks: a `static` lambda or method group
+  converts to a C function pointer for an extern parameter of a `delegate
+  unmanaged` type.
+- **`[Fixed(n)]`** on a `[CLayout]` array field lays the array *inline* (`n`
+  elements, not a pointer) — the fixed-size buffers real C structs are full of
+  (`char name[260]`). Read it with `Bytes.ReadCString(field)` / index it;
+  `sizeof(T)` accounts for it.
+- **`Ptr` sentinels**: `Ptr.Null` is address 0; `Ptr.Invalid` is all-ones
+  (Win32 `INVALID_HANDLE_VALUE`, `-1`), since a handle API returns that, not
+  null. `Handle.Invalid` is an alias. `p.IsNull` tests 0.
+- **`Bytes` interop helpers**: `Bytes.OfCString(s)` (a NUL-terminated copy of a
+  `string`), `Bytes.ReadCString(bytes)` (up to the first NUL), `bytes.Address`
+  (a `Ptr` to the buffer, for `WriteProcessMemory` and friends).
 
 ## 14. Settled open items
 
