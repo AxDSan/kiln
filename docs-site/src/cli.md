@@ -11,6 +11,7 @@ USAGE:
   kiln build|run --release         …optimised, hardened and stripped
   kiln build --emit-ir             …keeping the .ll it handed clang
   kiln build --os windows          …for Windows x86-64 (needs mingw-w64)
+  kiln build --os windows --arch x86  …for Windows 32-bit (i686; needs mingw32)
   kiln build --target sharedlib    …a library, with its C header beside it
   [--header <path>]                 where the header goes (default <module>.h)
   kiln emit  <in.kiln>              print generated LLVM IR

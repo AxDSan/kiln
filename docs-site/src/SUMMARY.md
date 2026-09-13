@@ -15,6 +15,7 @@
 - [Components](./components.md)
 - [Networking](./networking.md)
 - [Databases](./databases.md)
+- [Reading the client's own files](./data-files.md)
 - [Memory](./memory.md)
 - [Build targets](./build-targets.md)
 - [Kits](./kits.md)

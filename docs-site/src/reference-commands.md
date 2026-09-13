@@ -274,6 +274,8 @@ end
 | [`db_columns`](#db_columns) | int | int |
 | [`db_commit`](#db_commit) | int | bool |
 | [`db_double`](#db_double) | int, int | double |
+| [`db_exec_async`](#db_exec_async) | int, text, text[] | int |
+| [`db_exec_async_n`](#db_exec_async_n) | int, text, text[], bool[] | int |
 | [`db_exec`](#db_exec) | int, text, text[] | int |
 | [`db_exec_n`](#db_exec_n) | int, text, text[], bool[] | int |
 | [`db_int64`](#db_int64) | int, int | int64 |
@@ -282,8 +284,17 @@ end
 | [`db_last_insert_id`](#db_last_insert_id) | int | int64 |
 | [`db_next`](#db_next) | int | bool |
 | [`db_open`](#db_open) | text | int |
+| [`db_query_async`](#db_query_async) | int, text, text[] | int |
+| [`db_query_async_n`](#db_query_async_n) | int, text, text[], bool[] | int |
 | [`db_query`](#db_query) | int, text, text[] | int |
 | [`db_query_n`](#db_query_n) | int, text, text[], bool[] | int |
+| [`db_req_columns`](#db_req_columns) | int | int |
+| [`db_req_error`](#db_req_error) | int | text |
+| [`db_req_free`](#db_req_free) | int | bool |
+| [`db_req_is_null`](#db_req_is_null) | int, int, int | bool |
+| [`db_req_ready`](#db_req_ready) | int | bool |
+| [`db_req_rows`](#db_req_rows) | int | int |
+| [`db_req_text`](#db_req_text) | int, int, int | text |
 | [`db_result_close`](#db_result_close) | int | bool |
 | [`db_rollback`](#db_rollback) | int | bool |
 | [`db_text`](#db_text) | int, int | text |
@@ -439,6 +450,40 @@ sub main
   let h: int = db_open("sqlite::memory:")
   call db_exec(h, "create table t (name text)", [])
   call print_int(db_exec(h, "insert into t values (?)", ["Ada"]))
+end
+```
+
+### `db_exec_async`
+
+`db_exec_async(int, text, text[]) -> int`
+
+Queue an INSERT, UPDATE or DELETE on a worker thread and answer a request id, so the pump keeps turning.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  let job: int = db_exec_async(h, "create table t (a int)", [])
+  call print_text("queued {job}")
+end
+```
+
+### `db_exec_async_n`
+
+`db_exec_async_n(int, text, text[], bool[]) -> int`
+
+The same, with a bool per parameter saying which of them bind SQL NULL.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  let job: int = db_exec_async_n(h, "insert into t values (?)", ["1"], [true])
+  call print_text("queued {job}")
 end
 ```
 
@@ -604,6 +649,40 @@ sub main
 end
 ```
 
+### `db_query_async`
+
+`db_query_async(int, text, text[]) -> int`
+
+Queue a SELECT on a worker thread and answer a request id; the rows are collected by the time it is ready.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  let job: int = db_query_async(h, "select 1", [])
+  call print_text("queued {job}")
+end
+```
+
+### `db_query_async_n`
+
+`db_query_async_n(int, text, text[], bool[]) -> int`
+
+The same, with a bool per parameter saying which of them bind SQL NULL.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  let job: int = db_query_async_n(h, "select ?", ["ada"], [false])
+  call print_text("queued {job}")
+end
+```
+
 ### `db_query_n`
 
 `db_query_n(int, text, text[], bool[]) -> int`
@@ -620,6 +699,126 @@ sub main
   let rows: int = db_query_n(h, "select ip from t where ip is ?", [""], [true])
   call print_int(db_columns(rows))
   call db_result_close(rows)
+end
+```
+
+### `db_req_columns`
+
+`db_req_columns(int) -> int`
+
+How many columns a finished query collected.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  let job: int = db_query_async(h, "select 1", [])
+  call print_int(db_req_columns(job))
+end
+```
+
+### `db_req_error`
+
+`db_req_error(int) -> text`
+
+Why a finished statement failed, or "" when it succeeded.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  let job: int = db_exec_async(h, "select * from nosuchtable", [])
+  call print_text(db_req_error(job))
+end
+```
+
+### `db_req_free`
+
+`db_req_free(int) -> bool`
+
+Release a finished request and everything it collected; refused while it is still running.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  let job: int = db_exec_async(h, "create table t (a int)", [])
+  call print_text("freed: {db_req_free(job)}")
+end
+```
+
+### `db_req_is_null`
+
+`db_req_is_null(int, int, int) -> bool`
+
+Whether a cell of a finished query is SQL NULL, which an empty string cannot say.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  let job: int = db_query_async(h, "select null", [])
+  call print_text("null: {db_req_is_null(job, 1, 1)}")
+end
+```
+
+### `db_req_ready`
+
+`db_req_ready(int) -> bool`
+
+Whether a queued statement has finished; false while it is still running, and the error slot stays clear.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  let job: int = db_exec_async(h, "create table t (a int)", [])
+  let done: bool = db_req_ready(job)
+  call print_text("finished: {done}")
+end
+```
+
+### `db_req_rows`
+
+`db_req_rows(int) -> int`
+
+Rows changed by a finished execute, rows in a finished query, and -1 when it failed.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  let job: int = db_exec_async(h, "create table t (a int)", [])
+  call print_int(db_req_rows(job))
+end
+```
+
+### `db_req_text`
+
+`db_req_text(int, int, int) -> text`
+
+One cell of a finished query, rows and columns counting from 1, and "" for SQL NULL.
+
+```kiln
+module example
+use db
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  let job: int = db_query_async(h, "select 1", [])
+  call print_text(db_req_text(job, 1, 1))
 end
 ```
 
@@ -693,6 +892,85 @@ end
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
+
+## encoding
+
+`use encoding`
+
+| Command | Parameters | Returns |
+| --- | --- | --- |
+| [`encoding_decode`](#encoding_decode) | bytes, text | text |
+| [`encoding_decode_lossy`](#encoding_decode_lossy) | bytes, text | text |
+| [`encoding_encode`](#encoding_encode) | text, text | bytes |
+| [`encoding_known`](#encoding_known) | text | bool |
+
+### `encoding_decode`
+
+`encoding_decode(bytes, text) -> text`
+
+Turn a byte-set in a named encoding into UTF-8 text, or answer "" and name the byte that is not of it.
+
+```kiln
+module example
+use encoding
+
+sub main
+  let raw: bytes = bytes_new(2)
+  call bytes_set(raw, 1, 214)
+  call bytes_set(raw, 2, 208)
+  call print_text(encoding_decode(raw, "gbk"))
+end
+```
+
+### `encoding_decode_lossy`
+
+`encoding_decode_lossy(bytes, text) -> text`
+
+The same, but a byte that is not of the encoding becomes U+FFFD instead of failing the whole read.
+
+```kiln
+module example
+use encoding
+
+sub main
+  let raw: bytes = bytes_new(3)
+  call bytes_set(raw, 1, 65)
+  call bytes_set(raw, 2, 255)
+  call bytes_set(raw, 3, 66)
+  call print_text(encoding_decode_lossy(raw, "gbk"))
+end
+```
+
+### `encoding_encode`
+
+`encoding_encode(text, text) -> bytes`
+
+Write text back in a named encoding as a byte-set, for the client to read.
+
+```kiln
+module example
+use encoding
+
+sub main
+  call print_int(bytes_count(encoding_encode("中文", "gbk")))
+end
+```
+
+### `encoding_known`
+
+`encoding_known(text) -> bool`
+
+Whether this build can convert a named encoding, so a start-up check can say so before a player asks.
+
+```kiln
+module example
+use encoding
+
+sub main
+  let ok: bool = encoding_known("gbk")
+  call print_text("gbk: {ok}")
+end
+```
 
 ## file
 
@@ -1536,3 +1814,325 @@ end
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
+
+## xml
+
+`use xml`
+
+| Command | Parameters | Returns |
+| --- | --- | --- |
+| [`xml_attr_at`](#xml_attr_at) | int, int, int | text |
+| [`xml_attr_count`](#xml_attr_count) | int, int | int |
+| [`xml_attr`](#xml_attr) | int, int, text | text |
+| [`xml_attr_name`](#xml_attr_name) | int, int, int | text |
+| [`xml_child`](#xml_child) | int, int, int | int |
+| [`xml_close_all`](#xml_close_all) | — | int |
+| [`xml_close`](#xml_close) | int | bool |
+| [`xml_count`](#xml_count) | int, int | int |
+| [`xml_descend`](#xml_descend) | int, int, text | int |
+| [`xml_first`](#xml_first) | int, int, text | int |
+| [`xml_has_attr`](#xml_has_attr) | int, int, text | bool |
+| [`xml_line`](#xml_line) | int, int | int |
+| [`xml_name`](#xml_name) | int, int | text |
+| [`xml_parent`](#xml_parent) | int, int | int |
+| [`xml_parse`](#xml_parse) | bytes | int |
+| [`xml_root`](#xml_root) | int | int |
+| [`xml_sibling`](#xml_sibling) | int, int, text | int |
+| [`xml_text`](#xml_text) | int, int | text |
+
+### `xml_attr`
+
+`xml_attr(int, int, text) -> text`
+
+An attribute's value, or "" when it is not there — xml_has_attr tells those apart.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<row id="1007" Attack="396,428"/>"""))
+  call print_text(xml_attr(h, xml_root(h), "Attack"))
+end
+```
+
+### `xml_attr_at`
+
+`xml_attr_at(int, int, int) -> text`
+
+The value of an element's i-th attribute, counting from 1.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<row id="1007"/>"""))
+  call print_text(xml_attr_at(h, xml_root(h), 1))
+end
+```
+
+### `xml_attr_count`
+
+`xml_attr_count(int, int) -> int`
+
+How many attributes an element carries.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<row id="1007" Attack="1"/>"""))
+  call print_int(xml_attr_count(h, xml_root(h)))
+end
+```
+
+### `xml_attr_name`
+
+`xml_attr_name(int, int, int) -> text`
+
+The name of an element's i-th attribute, counting from 1.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<row id="1007"/>"""))
+  call print_text(xml_attr_name(h, xml_root(h), 1))
+end
+```
+
+### `xml_child`
+
+`xml_child(int, int, int) -> int`
+
+The i-th child element, counting from 1, or 0 when there is none.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<items><row id="1"/></items>"""))
+  call print_int(xml_child(h, xml_root(h), 1))
+end
+```
+
+### `xml_close`
+
+`xml_close(int) -> bool`
+
+Close a document and free it; false when the handle was not one.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<a/>"""))
+  let ok: bool = xml_close(h)
+  call print_text("closed: {ok}")
+end
+```
+
+### `xml_close_all`
+
+`xml_close_all() -> int`
+
+Close every open document and answer how many there were.
+
+```kiln
+module example
+use xml
+
+sub main
+  call print_int(xml_close_all())
+end
+```
+
+### `xml_count`
+
+`xml_count(int, int) -> int`
+
+How many child elements a node has; -1 on a bad handle or node id.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<items><row id="1"/><row id="2"/></items>"""))
+  call print_int(xml_count(h, xml_root(h)))
+end
+```
+
+### `xml_descend`
+
+`xml_descend(int, int, text) -> int`
+
+The first element at any depth under a node with that name, or 0 when there is none.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<root><group><row id="7"/></group></root>"""))
+  call print_int(xml_descend(h, xml_root(h), "row"))
+end
+```
+
+### `xml_first`
+
+`xml_first(int, int, text) -> int`
+
+The first child of a node with that name — "" meaning any name — or 0 when there is none.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<items><row id="1"/></items>"""))
+  call print_int(xml_first(h, xml_root(h), "row"))
+end
+```
+
+### `xml_has_attr`
+
+`xml_has_attr(int, int, text) -> bool`
+
+Whether an element carries an attribute, which an empty value cannot say.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<row id="1007"/>"""))
+  if xml_has_attr(h, xml_root(h), "Attack") = false
+    call print_text("no Attack")
+  end
+end
+```
+
+### `xml_line`
+
+`xml_line(int, int) -> int`
+
+The 1-based line an element's start tag begins on, for diagnostics.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<items>
+  <row/>
+  </items>"""))
+  let r: int = xml_first(h, xml_root(h), "row")
+  call print_int(xml_line(h, r))
+end
+```
+
+### `xml_name`
+
+`xml_name(int, int) -> text`
+
+An element's own name, which is the tag it was written with.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<items><row id="1"/></items>"""))
+  let r: int = xml_first(h, xml_root(h), "row")
+  call print_text(xml_name(h, r))
+end
+```
+
+### `xml_parent`
+
+`xml_parent(int, int) -> int`
+
+The element a node sits inside, or 0 when it is top level.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<items><row id="1"/></items>"""))
+  let r: int = xml_first(h, xml_root(h), "row")
+  call print_int(xml_parent(h, r))
+end
+```
+
+### `xml_parse`
+
+`xml_parse(bytes) -> int`
+
+Parse a document from a byte-set and answer its handle, or 0 with the line and reason in the error slot.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<items count="2"/>"""))
+  call print_int(h)
+end
+```
+
+### `xml_root`
+
+`xml_root(int) -> int`
+
+The first top-level element, or 0 for a document that holds none.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<items><row id="1"/></items>"""))
+  call print_int(xml_root(h))
+end
+```
+
+### `xml_sibling`
+
+`xml_sibling(int, int, text) -> int`
+
+The next element after a node with that name, which is how the next row is found.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<items><row id="1"/><row id="2"/></items>"""))
+  var r: int = xml_first(h, xml_root(h), "row")
+  r = xml_sibling(h, r, "row")
+  call print_text(xml_attr(h, r, "id"))
+end
+```
+
+### `xml_text`
+
+`xml_text(int, int) -> text`
+
+An element's own text with the surrounding whitespace removed, or "" when it holds only elements.
+
+```kiln
+module example
+use xml
+
+sub main
+  let h: int = xml_parse(bytes_from_text(r"""<name>Kryss</name>"""))
+  call print_text(xml_text(h, xml_root(h)))
+end
+```

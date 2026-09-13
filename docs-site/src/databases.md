@@ -133,14 +133,68 @@ DOUBLE or DECIMAL column and `db_bool` for a BOOLEAN or TINYINT(1) — `1`,
 answers a column's name or alias, for a program reading a row whose SELECT it
 did not write.
 
+## Statements that do not hold the loop
+
+Every command above is synchronous: a query inside a server's event handler
+holds every other client until it answers. On loopback that is a millisecond
+and invisible, which is how a timing bug survives every local test. A server
+that writes on every kill, pickup or equip wants the other shape:
+
+```
+var job: int = 0
+
+timer poller
+  interval = 20
+  on tick: on_tick
+end
+
+sub main
+  let h: int = db_open("sqlite::memory:")
+  call db_exec(h, "create table items (id int)", [])
+  job = db_query_async(h, "select count(*) from items", [])
+  # the loop carries on from here; the answer is collected on a tick
+end
+
+sub on_tick(n: int)
+  if db_req_ready(job) = false
+    return
+  end
+  let rows: int = db_req_rows(job)
+  let cols: int = db_req_columns(job)
+  let cell: text = db_req_text(job, 1, 1)
+  let bad: text = db_req_error(job)
+  call print_text("{rows} row(s), {cols} column(s), first cell {cell}, error '{bad}'")
+  call db_req_free(job)
+end
+```
+
+`db_exec_async`, `db_exec_async_n`, `db_query_async` and `db_query_async_n`
+queue a statement on a worker thread and answer a request id, then return.
+`db_req_ready` is the poll; `db_req_rows`, `db_req_columns`, `db_req_text`,
+`db_req_is_null` and `db_req_error` are the reading side; `db_req_free`
+releases it, and is refused while it is still running.
+
+**The worker never touches the runtime**, so the answer is a value the program
+claims rather than a cursor over a driver that is gone — which is why the
+reading surface above did not change, and why a query's rows are all in memory
+by the time it is ready. **A connection with a request in flight belongs to the
+worker**: `db_exec`, `db_query`, the transactions and `db_close` refuse it by
+name. Two threads on one connection is a crash in one client and corruption in
+the other, not a race to be survived.
+
+Measured rather than promised: a three-million-row query taking 780 ms, with a
+20 ms timer counting turns of the loop, lets the timer fire **39 times**. A
+synchronous call gets one turn, because the statement runs inside it.
+
 ## What is not here
 
-No bulk insert, no connection pool, one connection per handle, and every
-command is synchronous: a query inside a server's event handler holds every
-other client until it answers. The surface is the one a login path and a game
-server's data layer need — SELECT, UPDATE, DELETE and INSERT with bound
-parameters, and transactions around them — and it grows when something real
-needs more, not before.
+No bulk insert, no connection pool, one connection per handle, and one worker
+thread — two slow statements queue behind each other. The thread is started on
+the first asynchronous call, so a program that never uses one never creates
+one. The surface is the one a login path and a game server's data layer need —
+SELECT, UPDATE, DELETE and INSERT with bound parameters, transactions around
+them, and the choice of paying for them now or later — and it grows when
+something real needs more, not before.
 
 For MySQL, a query's rows are fetched into memory at once rather than streamed.
 That is the right trade for the statements this exists to run; a `select *` over

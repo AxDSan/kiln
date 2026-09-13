@@ -68,6 +68,15 @@ game drawing at 60 Hz can, and its recourse today is `collect_garbage()` at a
 moment it chooses. Generational and incremental collection are the fix and are
 not written yet.
 
+**A database statement on a worker thread is one thread, and the Windows side of
+it is unverified.** `db_exec_async` and `db_query_async` run on a single worker,
+so two slow statements queue behind each other; there is no pool. That POSIX side
+is exercised by the suite
+(`cli/tests/db.rs::a_slow_statement_does_not_hold_the_event_loop`), and the Win32
+branch of the thread shim has never been compiled here, because `libs/db` cannot
+be cross-built on a machine with the MySQL client headers — an honest gap rather
+than a proof.
+
 **The debugger is Linux-only, and stops at the statement.** Breakpoints,
 stepping, the call stack, variables and hover all work — but the engine is
 `ptrace`, so a Windows build has no debugger yet, and there is no expression
@@ -161,8 +170,8 @@ of the intended shape but are not implemented, and adding one tells you so
 rather than placing something that does not work.
 
 A `grid` shows what a `datasource` holds, and a datasource holds text —
-rows separated by newlines, cells by tabs. There is no database kit yet to
-fill one from a query.
+rows separated by newlines, cells by tabs, so filling one from a query is the
+program's own loop over `db_next` — `use db` is where the rows come from.
 
 ## The IDE
 

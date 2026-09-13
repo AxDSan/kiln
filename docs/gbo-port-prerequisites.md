@@ -66,7 +66,7 @@ an open unit as a unit. Recorded in `docs-site/src/language.md` and `limitations
 units (`cipher`, `string_shift`, `protocol`, `accounts`, `settings`, `logging`); `shift_test.kiln`
 uses the shared unit instead of a copy; the probe above produces the same bytes after the split.
 
-### Item 6 — every `db_*` call is synchronous inside the event loop — **open, deliberately**
+### Item 6 — every `db_*` call is synchronous inside the event loop — **done, 2026-09-12**
 
 The one thing a game server port will hit that the login server did not. `.NET`'s GameServer
 `await`s every query; a Kiln handler that calls `db_query` holds the `tcpserver` pump — every
@@ -74,9 +74,14 @@ other client's frames — until MariaDB answers. On loopback that is a milliseco
 which is exactly how the 0x2711 timing bug survived every local run. Not built now, because the
 right shape (a worker thread with a completion event, or a connection pool with `db_query_async`
 answering a handle the pump polls) should be chosen against a measured stall, not a guessed one.
-**Done-when:** a probe that holds one client's query for a second while a second client's login
-completes unhindered. Until then, the game server port's first handler that touches the database
-should be written as if this were solved, and the number measured.
+**Done-when met, one level down.** `libs/db` now carries an asynchronous surface —
+`db_exec_async`, `db_query_async`, `db_req_ready`, `db_req_rows`, `db_req_text`,
+`db_req_error`, `db_req_free` — running the statements on a worker thread that never calls
+into the runtime, with the connection refusing synchronous use while a request is in flight.
+The number: a three-million-row query taking 780 ms, with a 20 ms timer counting turns of the
+loop, lets the timer fire **39 times** — where a synchronous call gets one. It is
+`cli/tests/db.rs::a_slow_statement_does_not_hold_the_event_loop` rather than a two-client
+session, so it runs on every build. See `kiln-port-blockers.md` section 2.
 
 ---
 
