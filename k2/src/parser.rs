@@ -309,6 +309,7 @@ impl Parser {
                         is_static: false,
                         name: mname,
                         type_params: Vec::new(),
+                        constraints: Vec::new(),
                         params,
                         ret,
                         body: Vec::new(),
@@ -551,6 +552,7 @@ impl Parser {
                 is_static: true,
                 name: "$ctor".into(),
                 type_params: Vec::new(),
+                constraints: Vec::new(),
                 params,
                 ret: TypeRef::Named(type_name.to_string()),
                 body,
@@ -568,7 +570,7 @@ impl Parser {
         let type_params = self.opt_type_params()?;
         if self.peek() == &Tok::LParen {
             let params = self.params()?;
-            self.opt_where_clause()?;
+            let constraints = self.opt_where_clause()?;
             let (body, expr_body) = if is_extern {
                 self.expect(&Tok::Semi)?;
                 (Vec::new(), None)
@@ -582,6 +584,7 @@ impl Parser {
                 is_static,
                 name,
                 type_params,
+                constraints,
                 params,
                 ret: ty,
                 body,
@@ -644,22 +647,23 @@ impl Parser {
         Ok(out)
     }
 
-    /// `where T : I1, U : I2` — parsed and dropped (constraints are not yet enforced).
-    fn opt_where_clause(&mut self) -> Result<(), ParseError> {
+    /// `where T : I1, U : I2` — the constraints a type argument must satisfy.
+    fn opt_where_clause(&mut self) -> Result<Vec<(String, String)>, ParseError> {
+        let mut out = Vec::new();
         if self.peek() != &Tok::Ident("where".into()) {
-            return Ok(());
+            return Ok(out);
         }
         self.bump();
         loop {
-            self.ident()?; // type param
+            let tp = self.ident()?;
             self.expect(&Tok::Colon)?;
             loop {
-                self.type_ref()?;
+                if let TypeRef::Named(n) = self.type_ref()? {
+                    out.push((tp.clone(), n));
+                }
                 if !self.eat(&Tok::Comma) {
                     break;
                 }
-                // a comma may separate constraints or the next `T :` clause;
-                // if the next token is an ident followed by `:`, it's a new clause
                 if matches!(self.peek(), Tok::Ident(_)) && self.peek_at(1) == &Tok::Colon {
                     break;
                 }
@@ -671,13 +675,12 @@ impl Parser {
                 self.bump();
                 continue;
             }
-            // another `T :` clause without a `where` keyword repeat
             if matches!(self.peek(), Tok::Ident(_)) && self.peek_at(1) == &Tok::Colon {
                 continue;
             }
             break;
         }
-        Ok(())
+        Ok(out)
     }
 
     fn params(&mut self) -> Result<Vec<Param>, ParseError> {

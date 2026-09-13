@@ -1036,3 +1036,50 @@ public partial form MainWindow { int n; }
     assert!(ll.contains("@MainWindow__state_n"), "{ll}");
     assert!(ll.contains("@MainWindow__count"), "{ll}");
 }
+
+#[test]
+fn generic_instance_methods_and_interface_constraints() {
+    let src = r#"
+namespace GI;
+
+public interface INamed { string Name(); }
+
+public record Tagged(string Label) : INamed
+{
+    public string Name() => Label;
+    // A generic method on an instance: the receiver comes through as `this`.
+    public string With<T>(T extra) => $"{Label}/{extra}";
+}
+
+public static class P
+{
+    // The constraint is enforced when the type argument is chosen.
+    public static string Show<T>(T x) where T : INamed => $"[{x.Name()}]";
+
+    public static void Main()
+    {
+        var t = new Tagged("core");
+        Console.WriteLine(t.With(7));
+        Console.WriteLine(t.With("extra"));
+        Console.WriteLine(Show(t));
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "core/7\ncore/extra\n[core]\n");
+}
+
+#[test]
+fn an_unsatisfied_constraint_is_a_compile_error() {
+    let src = r#"
+namespace GI2;
+public interface INamed { string Name(); }
+public record Plain(int N);
+public static class P
+{
+    public static string Show<T>(T x) where T : INamed => "x";
+    public static void Main() { Console.WriteLine(Show(new Plain(1))); }
+}
+"#;
+    let err = kiln_k2::compile_to_llvm(src).unwrap_err();
+    assert!(err.contains("to implement `INamed`"), "got: {err}");
+}

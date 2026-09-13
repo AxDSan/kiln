@@ -61,6 +61,9 @@ clang and checks stdout):
   An event wires to a **method group or a lambda written at the wiring site** —
   a form's state is in globals, so a handler lambda needs no environment
   pointer and binds on the ABI as it stands
+- **Generic instance methods** (`t.With(7)`), and **interface constraints
+  enforced**: `where T : INamed` is checked when the type argument is chosen,
+  and a type that does not implement it is a compile error naming both
 - **Generic types**: `record Pair<A, B>` and `class Box<T>` instantiate per set
   of type arguments — fields substituted, methods declared and lowered per
   instance, with the template's own name meaning that instance inside it
@@ -113,7 +116,7 @@ clang and checks stdout):
 
 1. `HashSet<T>`; hashing for `Dictionary` (lookup is a linear scan); moving strings, lists and dictionaries onto the runtime's own text/array commands and the collector (the link path now exists; the data structures still use libc)
 2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
-3. generic *instance* methods, and interface constraints on generics (parsed, not enforced)
+3. constraints beyond interfaces (`where T : class`, `new()`) are parsed and ignored
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)
 5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
 6. binding the generated SQL to `libs/db` and returning rows (the statement text is generated; execution needs the runtime)

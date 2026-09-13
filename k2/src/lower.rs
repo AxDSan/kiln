@@ -1222,6 +1222,7 @@ impl Cx {
                             is_static: true,
                             name: sym.clone(),
                             type_params: Vec::new(),
+                            constraints: Vec::new(),
                             params: Vec::new(),
                             ret: ast::TypeRef::Void,
                             body: match &lam.body {
@@ -2750,17 +2751,16 @@ impl<'a> FnLower<'a> {
         // A generic method: lower the arguments first (their types are what the
         // type parameters are inferred from), then instantiate.
         if self.cx.generics.contains_key(&key) {
-            if this_arg.is_some() {
-                return Err(format!(
-                    "generic instance method `{key}` is not supported yet — make it static"
-                ));
-            }
             let mut lowered = Vec::new();
             for a in args {
                 lowered.push(self.expr(a, None)?);
             }
             let sig = self.instantiate(&key, &lowered)?;
-            let kargs = lowered.into_iter().map(|(e, _)| e).collect();
+            let mut kargs: Vec<Expr> = Vec::new();
+            if let Some(this) = this_arg {
+                kargs.push(this);
+            }
+            kargs.extend(lowered.into_iter().map(|(e, _)| e));
             return Ok((
                 Expr::Call(Box::new(Call::Direct {
                     func: sig.fid,
@@ -3557,6 +3557,7 @@ impl<'a> FnLower<'a> {
             is_static: true,
             name: sym.clone(),
             type_params: Vec::new(),
+            constraints: Vec::new(),
             params: l
                 .params
                 .iter()
@@ -3656,6 +3657,28 @@ impl<'a> FnLower<'a> {
                 }
             }
         }
+        // `where T : I` — the type argument must actually implement I.
+        for (tp, iface) in &m.constraints {
+            let Some(bound) = tvars.get(tp) else { continue };
+            if !self.cx.interfaces.contains_key(iface) {
+                continue; // not an interface constraint (`class`, `new()`, …)
+            }
+            let ok = self
+                .cx
+                .record_name(*bound)
+                .map(|n| self.cx.impls.contains_key(&(n, iface.clone())))
+                .unwrap_or(false);
+            if !ok {
+                let shown = self
+                    .cx
+                    .record_name(*bound)
+                    .unwrap_or_else(|| format!("{:?}", self.cx.b.m.types.kind(*bound)));
+                return Err(format!(
+                    "`{key}` needs `{tp}` to implement `{iface}`, and `{shown}` does not"
+                ));
+            }
+        }
+
         let cache_key = (key.to_string(), targs.clone());
         if let Some(sig) = self.cx.mono.get(&cache_key) {
             return Ok(sig.clone());
@@ -3672,16 +3695,21 @@ impl<'a> FnLower<'a> {
             let ret = self.cx.resolve(&m.ret)?;
             let suffix: Vec<String> = targs.iter().map(|t| format!("{}", t.0)).collect();
             let sym = format!("{}_{}${}", t.owner, m.name, suffix.join("_"));
-            let params: Vec<(&str, TyId)> = m
-                .params
-                .iter()
-                .zip(ptys.iter())
-                .map(|(p, t)| (p.name.as_str(), *t))
-                .collect();
+            let mut params: Vec<(&str, TyId)> = Vec::new();
+            if t.this {
+                let this_ty = self.cx.record_ty(&t.owner);
+                params.push(("this", this_ty));
+            }
+            params.extend(
+                m.params
+                    .iter()
+                    .zip(ptys.iter())
+                    .map(|(p, t)| (p.name.as_str(), *t)),
+            );
             let fid = self.cx.b.declare_func(&sym, params, ret);
             Ok(Sig {
                 fid,
-                this: false,
+                this: t.this,
                 params: ptys,
                 ret,
             })
@@ -3696,7 +3724,7 @@ impl<'a> FnLower<'a> {
             fid: sig.fid,
             method: t.method.clone(),
             tvars,
-            this: false,
+            this: t.this,
             env: None,
             ctor: None,
         });

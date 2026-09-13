@@ -164,6 +164,8 @@ pub struct Method {
     pub name: String,
     /// Generic type parameters (`Max<T>`), empty for a non-generic method.
     pub type_params: Vec<String>,
+    /// `where T : I` constraints, as `(type parameter, interface)`.
+    pub constraints: Vec<(String, String)>,
     pub params: Vec<Param>,
     pub ret: TypeRef,
     pub body: Vec<Stmt>,
