@@ -558,3 +558,34 @@ public static class P
         "count 10\nfirst 1 last 100\nsum 385\nada\ngrace\n"
     );
 }
+
+#[test]
+fn where_and_select_over_a_list() {
+    let src = r#"
+namespace Q;
+public static class P
+{
+    public static void Main()
+    {
+        var xs = new List<int>();
+        foreach (var i in 1..10)
+            xs.Add(i);
+
+        var evens = xs.Where(x => x % 2 == 0);
+        Console.WriteLine($"{evens.Count}");
+        foreach (var e in evens)
+            Console.Write($"{e} ");
+        Console.WriteLine("");
+
+        var squares = xs.Select(x => x * x);
+        Console.WriteLine($"{squares[1]} {squares[10]}");
+
+        // chained, and a Select that changes the element type
+        var labels = xs.Where(x => x > 8).Select(x => $"n{x}");
+        foreach (var l in labels)
+            Console.WriteLine(l);
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "5\n2 4 6 8 10 \n1 100\nn9\nn10\n");
+}

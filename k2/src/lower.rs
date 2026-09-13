@@ -1621,98 +1621,27 @@ impl<'a> FnLower<'a> {
         if let ast::ExprKind::Member(recv, name) = &callee.kind {
             if name == "Add" {
                 let (lv, lty) = self.expr_raw(recv, None)?;
-                if let Some((lrid, elem)) = self.cx.as_list(lty) {
+                if self.cx.as_list(lty).is_some() {
                     if args.len() != 1 {
                         return Err("List.Add takes one argument".into());
                     }
+                    let (_, elem) = self.cx.as_list(lty).unwrap();
                     let (val, _) = self.expr(&args[0], Some(elem))?;
                     let holder = self.new_local("$list", lty);
                     self.push(Stmt::Let {
                         local: holder,
                         value: lv,
                     });
-                    let l = || Expr::Local(holder);
-                    let len = || Expr::Field(Box::new(l()), LIST_LEN);
-                    let cap = || Expr::Field(Box::new(l()), LIST_CAP);
-                    let esize = self.cx.scalar_size(elem);
-
-                    // if (len == cap) { cap = cap == 0 ? 4 : cap * 2; data = realloc(data, cap*esize) }
-                    let newcap = self.new_local("$newcap", TyTable::I32);
-                    let grow = vec![
-                        Stmt::If {
-                            cond: Expr::Bin(
-                                BinOp::Eq,
-                                Box::new(cap()),
-                                Box::new(Expr::Int(0, TyTable::I32)),
-                                TyTable::I32,
-                            ),
-                            then: vec![Stmt::Assign {
-                                place: Place::Local(newcap),
-                                value: Expr::Int(4, TyTable::I32),
-                            }],
-                            els: vec![Stmt::Assign {
-                                place: Place::Local(newcap),
-                                value: Expr::Bin(
-                                    BinOp::Mul,
-                                    Box::new(cap()),
-                                    Box::new(Expr::Int(2, TyTable::I32)),
-                                    TyTable::I32,
-                                ),
-                            }],
-                        },
-                        Stmt::Assign {
-                            place: Place::Field(Box::new(l()), LIST_DATA),
-                            value: Expr::Call(Box::new(Call::Dll {
-                                library: "c".into(),
-                                symbol: "realloc".into(),
-                                conv: CallConv::Cdecl,
-                                args: vec![
-                                    Expr::Cast {
-                                        value: Box::new(Expr::Field(Box::new(l()), LIST_DATA)),
-                                        to: TyTable::PTR,
-                                    },
-                                    Expr::Cast {
-                                        value: Box::new(Expr::Bin(
-                                            BinOp::Mul,
-                                            Box::new(Expr::Local(newcap)),
-                                            Box::new(Expr::Int(esize as i128, TyTable::I32)),
-                                            TyTable::I32,
-                                        )),
-                                        to: TyTable::I64,
-                                    },
-                                ],
-                                arg_tys: vec![TyTable::PTR, TyTable::I64],
-                                ret: self.cx.b.m.record(lrid).fields[LIST_DATA].ty,
-                                varargs: false,
-                            })),
-                        },
-                        Stmt::Assign {
-                            place: Place::Field(Box::new(l()), LIST_CAP),
-                            value: Expr::Local(newcap),
-                        },
-                    ];
-                    self.push(Stmt::If {
-                        cond: Expr::Bin(BinOp::Eq, Box::new(len()), Box::new(cap()), TyTable::I32),
-                        then: grow,
-                        els: vec![],
-                    });
-                    self.push(Stmt::Assign {
-                        place: Place::Index(
-                            Box::new(Expr::Field(Box::new(l()), LIST_DATA)),
-                            Box::new(len()),
-                        ),
-                        value: val,
-                    });
-                    self.push(Stmt::Assign {
-                        place: Place::Field(Box::new(l()), LIST_LEN),
-                        value: Expr::Bin(
-                            BinOp::Add,
-                            Box::new(len()),
-                            Box::new(Expr::Int(1, TyTable::I32)),
-                            TyTable::I32,
-                        ),
-                    });
+                    self.list_add(holder, lty, val);
                     return Ok((Expr::Int(0, TyTable::VOID), TyTable::VOID));
+                }
+            }
+            // `list.Where(pred)` / `list.Select(f)` — written here rather than
+            // in K2 until the standard library exists.
+            if name == "Where" || name == "Select" {
+                let (lv, lty) = self.expr_raw(recv, None)?;
+                if self.cx.as_list(lty).is_some() {
+                    return self.list_query(name, lv, lty, args);
                 }
             }
         }
@@ -1782,6 +1711,230 @@ impl<'a> FnLower<'a> {
             })),
             sig.ret,
         ))
+    }
+
+    /// Append to a list held in `holder`: grow the buffer when it is full, then
+    /// store and bump the length.
+    fn list_add(&mut self, holder: LocalId, lty: TyId, val: Expr) {
+        let (lrid, elem) = self.cx.as_list(lty).expect("a list");
+        let l = || Expr::Local(holder);
+        let len = || Expr::Field(Box::new(l()), LIST_LEN);
+        let cap = || Expr::Field(Box::new(l()), LIST_CAP);
+        let esize = self.cx.scalar_size(elem);
+        let data_ty = self.cx.b.m.record(lrid).fields[LIST_DATA].ty;
+        let newcap = self.new_local("$newcap", TyTable::I32);
+        let grow = vec![
+            Stmt::If {
+                cond: Expr::Bin(
+                    BinOp::Eq,
+                    Box::new(cap()),
+                    Box::new(Expr::Int(0, TyTable::I32)),
+                    TyTable::I32,
+                ),
+                then: vec![Stmt::Assign {
+                    place: Place::Local(newcap),
+                    value: Expr::Int(4, TyTable::I32),
+                }],
+                els: vec![Stmt::Assign {
+                    place: Place::Local(newcap),
+                    value: Expr::Bin(
+                        BinOp::Mul,
+                        Box::new(cap()),
+                        Box::new(Expr::Int(2, TyTable::I32)),
+                        TyTable::I32,
+                    ),
+                }],
+            },
+            Stmt::Assign {
+                place: Place::Field(Box::new(l()), LIST_DATA),
+                value: Expr::Call(Box::new(Call::Dll {
+                    library: "c".into(),
+                    symbol: "realloc".into(),
+                    conv: CallConv::Cdecl,
+                    args: vec![
+                        Expr::Cast {
+                            value: Box::new(Expr::Field(Box::new(l()), LIST_DATA)),
+                            to: TyTable::PTR,
+                        },
+                        Expr::Cast {
+                            value: Box::new(Expr::Bin(
+                                BinOp::Mul,
+                                Box::new(Expr::Local(newcap)),
+                                Box::new(Expr::Int(esize as i128, TyTable::I32)),
+                                TyTable::I32,
+                            )),
+                            to: TyTable::I64,
+                        },
+                    ],
+                    arg_tys: vec![TyTable::PTR, TyTable::I64],
+                    ret: data_ty,
+                    varargs: false,
+                })),
+            },
+            Stmt::Assign {
+                place: Place::Field(Box::new(l()), LIST_CAP),
+                value: Expr::Local(newcap),
+            },
+        ];
+        self.push(Stmt::If {
+            cond: Expr::Bin(BinOp::Eq, Box::new(len()), Box::new(cap()), TyTable::I32),
+            then: grow,
+            els: vec![],
+        });
+        self.push(Stmt::Assign {
+            place: Place::Index(
+                Box::new(Expr::Field(Box::new(l()), LIST_DATA)),
+                Box::new(len()),
+            ),
+            value: val,
+        });
+        self.push(Stmt::Assign {
+            place: Place::Field(Box::new(l()), LIST_LEN),
+            value: Expr::Bin(
+                BinOp::Add,
+                Box::new(len()),
+                Box::new(Expr::Int(1, TyTable::I32)),
+                TyTable::I32,
+            ),
+        });
+    }
+
+    /// `Where` keeps the elements a predicate accepts; `Select` maps each one.
+    /// The result type of a `Select` comes from probing the lambda body.
+    fn list_query(
+        &mut self,
+        which: &str,
+        src_val: Expr,
+        src_ty: TyId,
+        args: &[ast::Expr],
+    ) -> Result<(Expr, TyId), String> {
+        let (_, elem) = self.cx.as_list(src_ty).expect("a list");
+        if args.len() != 1 {
+            return Err(format!("List.{which} takes one argument"));
+        }
+        // The lambda's type: Where is T -> bool; Select is T -> R, and R is
+        // found by lowering the body into a scratch block that is discarded.
+        let out_elem = if which == "Where" {
+            TyTable::BOOL
+        } else {
+            self.probe_lambda_result(&args[0], elem)?
+        };
+        let fn_ty = self.cx.b.m.types.intern(TyKind::Func {
+            params: vec![elem],
+            ret: out_elem,
+        });
+        let (f, _) = self.expr(&args[0], Some(fn_ty))?;
+        let fl = self.new_local("$fn", fn_ty);
+        self.push(Stmt::Let {
+            local: fl,
+            value: f,
+        });
+
+        let src = self.new_local("$src", src_ty);
+        self.push(Stmt::Let {
+            local: src,
+            value: src_val,
+        });
+        let result_elem = if which == "Where" { elem } else { out_elem };
+        let out_rid = self.cx.list_record(result_elem);
+        let out_ty = self.cx.b.m.types.intern(TyKind::Record(out_rid));
+        let out_data_ty = self.cx.b.m.record(out_rid).fields[LIST_DATA].ty;
+        let out = self.new_local("$out", out_ty);
+        self.push(Stmt::Let {
+            local: out,
+            value: Expr::MakeRecord(
+                out_rid,
+                vec![
+                    Expr::Int(0, TyTable::I32),
+                    Expr::Int(0, TyTable::I32),
+                    Expr::Null(out_data_ty),
+                ],
+            ),
+        });
+
+        let i = self.new_local("$qi", TyTable::I32);
+        self.push(Stmt::Let {
+            local: i,
+            value: Expr::Int(0, TyTable::I32),
+        });
+        let item = self.new_local("$qitem", elem);
+        let call = |item_local: LocalId| {
+            Expr::Call(Box::new(Call::Indirect {
+                callee: Box::new(Expr::Local(fl)),
+                args: vec![Expr::Local(item_local)],
+                sig: fn_ty,
+            }))
+        };
+        let mut inner = vec![
+            Stmt::If {
+                cond: Expr::Not(Box::new(Expr::Bin(
+                    BinOp::Lt,
+                    Box::new(Expr::Local(i)),
+                    Box::new(Expr::Field(Box::new(Expr::Local(src)), LIST_LEN)),
+                    TyTable::I32,
+                ))),
+                then: vec![Stmt::Break],
+                els: vec![],
+            },
+            Stmt::Assign {
+                place: Place::Local(item),
+                value: Expr::Index(
+                    Box::new(Expr::Field(Box::new(Expr::Local(src)), LIST_DATA)),
+                    Box::new(Expr::Local(i)),
+                ),
+            },
+        ];
+        // The append is built in a scratch block so it can be nested.
+        self.blocks.push(Vec::new());
+        if which == "Where" {
+            self.list_add(out, out_ty, Expr::Local(item));
+            let add = self.blocks.pop().unwrap();
+            inner.push(Stmt::If {
+                cond: call(item),
+                then: add,
+                els: vec![],
+            });
+        } else {
+            let mapped = self.new_local("$mapped", out_elem);
+            self.push(Stmt::Let {
+                local: mapped,
+                value: call(item),
+            });
+            self.list_add(out, out_ty, Expr::Local(mapped));
+            let add = self.blocks.pop().unwrap();
+            inner.extend(add);
+        }
+        inner.push(Stmt::Assign {
+            place: Place::Local(i),
+            value: Expr::Bin(
+                BinOp::Add,
+                Box::new(Expr::Local(i)),
+                Box::new(Expr::Int(1, TyTable::I32)),
+                TyTable::I32,
+            ),
+        });
+        self.push(Stmt::Loop { body: inner });
+        Ok((Expr::Local(out), out_ty))
+    }
+
+    /// Lower a lambda body once into a discarded block just to learn its result
+    /// type, so `Select` knows the element type of the list it produces.
+    fn probe_lambda_result(&mut self, e: &ast::Expr, param_ty: TyId) -> Result<TyId, String> {
+        let ast::ExprKind::Lambda(l) = &e.kind else {
+            return Err("List.Select needs a lambda".into());
+        };
+        let ast::LambdaBody::Expr(body) = &l.body else {
+            return Err("List.Select needs an expression lambda".into());
+        };
+        let saved_scope = self.scope.clone();
+        let name = l.params.first().map(|(n, _)| n.clone()).unwrap_or_default();
+        let tmp = self.new_local("$probe", param_ty);
+        self.scope.insert(name, (tmp, param_ty));
+        self.blocks.push(Vec::new());
+        let r = self.expr(body, None);
+        self.blocks.pop();
+        self.scope = saved_scope;
+        Ok(r?.1)
     }
 
     /// A `switch` expression: the subject is held once, then the arms become an

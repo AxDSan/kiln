@@ -51,6 +51,10 @@ clang and checks stdout):
 - **`List<T>`**: `new List<T>()`, `.Add(x)` (buffer grows 4 → 8 → 16 …),
   `.Count`, 1-based indexing `xs[1]`, and `foreach` over one. KIR gained real
   indexed element access for this
+- **`Where` / `Select`** over a `List<T>`, taking a lambda and chaining;
+  `Select` infers its result element type from the lambda body, so
+  `xs.Where(x => x > 8).Select(x => $"n{x}")` turns a list of int into a list
+  of string
 - **`switch` expressions**: `x switch { 1 => …, < 10 => …, _ => … }` with
   constant and relational patterns, lowered to an if-chain into one temporary
 - **`defer`**: runs when its block is left — falling off the end, `return`,
