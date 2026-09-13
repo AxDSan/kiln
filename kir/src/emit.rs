@@ -444,6 +444,7 @@ impl<'a, 'b> FnEmit<'a, 'b> {
 
     fn stmt_inner(&mut self, s: &Stmt) -> bool {
         match s {
+            // `stmt` consumes a line marker before dispatching here.
             Stmt::Line(_) => true,
             Stmt::Let { local, value } => {
                 let v = self.expr(value);
@@ -489,12 +490,6 @@ impl<'a, 'b> FnEmit<'a, 'b> {
             }
             Stmt::If { cond, then, els } => self.emit_if(cond, then, els),
             Stmt::Loop { body } => self.emit_loop(body),
-            Stmt::Line(line) => {
-                if let (Some(scope), Some(d)) = (self.scope, self.e.debug.as_mut()) {
-                    self.loc = Some(d.location(*line, scope));
-                }
-                true
-            }
             Stmt::Break => {
                 let target = self.loops.last().expect("break outside loop").1.clone();
                 writeln!(self.body, "  br label %{target}").unwrap();

@@ -349,6 +349,71 @@ impl Module {
         }
     }
 
+    /// Whether anything in the module calls a support-library command.
+    ///
+    /// A command is reached over the slot ABI and lives in the runtime, so a
+    /// module that calls one cannot be linked against libc alone — whatever
+    /// the front end chose for printing. The driver asks this rather than
+    /// making the reader know which of `s.Length` and `s + t` is a command.
+    pub fn calls_commands(&self) -> bool {
+        fn in_expr(e: &Expr) -> bool {
+            match e {
+                Expr::Call(c) => match &**c {
+                    Call::Command { .. } => true,
+                    Call::Direct { args, .. } => args.iter().any(in_expr),
+                    Call::Dll { args, .. } => args.iter().any(in_expr),
+                    Call::Indirect { callee, args, .. } => {
+                        in_expr(callee) || args.iter().any(in_expr)
+                    }
+                },
+                Expr::Field(x, _)
+                | Expr::Not(x)
+                | Expr::Neg(x, _)
+                | Expr::Cast { value: x, .. }
+                | Expr::OptionalHasValue(x)
+                | Expr::OptionalGet(x)
+                | Expr::MakeClosure { env: x, .. } => in_expr(x),
+                Expr::MakeOptional(_, x) => x.as_deref().is_some_and(in_expr),
+                Expr::Index(a, b)
+                | Expr::ElemPtr(a, b)
+                | Expr::Bin(_, a, b, _)
+                | Expr::FuncValue { fn_ptr: a, env: b } => in_expr(a) || in_expr(b),
+                Expr::MakeRecord(_, xs) | Expr::MakeArray(_, xs) | Expr::MakeTuple(xs) => {
+                    xs.iter().any(in_expr)
+                }
+                Expr::Int(..)
+                | Expr::Float(..)
+                | Expr::Bool(_)
+                | Expr::Str(_)
+                | Expr::Null(_)
+                | Expr::Local(_)
+                | Expr::Global(_)
+                | Expr::FuncPtr(_) => false,
+            }
+        }
+        fn in_place(p: &Place) -> bool {
+            match p {
+                Place::Local(_) | Place::Global(_) => false,
+                Place::Field(e, _) => in_expr(e),
+                Place::Index(a, b) => in_expr(a) || in_expr(b),
+            }
+        }
+        fn in_stmts(body: &[Stmt]) -> bool {
+            body.iter().any(|s| match s {
+                Stmt::Let { value, .. } => in_expr(value),
+                Stmt::Assign { place, value } => in_place(place) || in_expr(value),
+                Stmt::Expr(e) => in_expr(e),
+                Stmt::If { cond, then, els } => {
+                    in_expr(cond) || in_stmts(then) || in_stmts(els)
+                }
+                Stmt::Loop { body } => in_stmts(body),
+                Stmt::Return(e) => e.as_ref().is_some_and(in_expr),
+                Stmt::Break | Stmt::Continue | Stmt::Line(_) => false,
+            })
+        }
+        self.funcs.iter().any(|f| in_stmts(&f.body))
+    }
+
     pub fn record(&self, id: RecordId) -> &RecordDef {
         &self.records[id.0 as usize]
     }

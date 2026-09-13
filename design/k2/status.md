@@ -205,8 +205,16 @@ record, a `List<T>`, a `Select` lambda and a `switch` over an enum.
 - **`Console.WriteLine` is `printf`**, strings are built with
   `snprintf`/`malloc`, and `List<T>` uses `malloc`/`realloc` — not the Kiln text
   runtime or collector. Nothing built this way is freed. Replaced in Phase 4.
-- **The K2 path links libc only** via a generated `main` shim; no runtime, no
-  collector roots. Folded into `kiln build` (with runtime linking) later.
+- **The K2 path links libc only** via a generated `main` shim — unless the
+  program calls a command, which the driver detects (`Module::calls_commands`)
+  and links the runtime for. Folded into `kiln build` later.
+- **No collector roots are registered.** `needs_gc` is never set, so
+  `kn_gc_set_roots` is never called: the collector finds a runtime-allocated
+  value through a conservative stack scan, but not through a K2 *global*. A
+  global holding a command's result can therefore be swept once the program
+  allocates past the collection threshold. Not yet reachable in practice — a
+  form's state is ints and the collections are `malloc` — and it lands with the
+  runtime allocator work, but it is the one place the two heaps meet wrongly.
 - **One `k2` crate** holds syntax + lowering; splits into `k2-syntax`/`k2-sema`/
   `k2-lower` as `k2-sema` grows (it is currently folded into the lowerer).
 - Comments are carried as *leading* trivia, so one written at the end of a line

@@ -21,6 +21,7 @@
 - [Kits](./kits.md)
 - [Interop](./interop.md)
 - [The `win` kit](./win-kit.md)
+- [Kiln 2](./kiln-2.md)
 
 # Studio
 

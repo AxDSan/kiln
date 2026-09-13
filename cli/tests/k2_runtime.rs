@@ -215,6 +215,32 @@ fn a_failure_propagates_with_question_mark() {
 }
 
 #[test]
+fn a_command_links_the_runtime_without_being_asked() {
+    // `s.Length` is core's `length` command, reached with no `using` at all —
+    // so a program that never says `--runtime` still needs the runtime linked.
+    // The reader should not have to know which members are commands, and this
+    // is the third configuration: libc printing with the runtime linked.
+    let path = tmp("autolink.kiln");
+    let exe = tmp("autolink");
+    std::fs::write(
+        &path,
+        "namespace Auto;\npublic static class P\n{\n    public static void Main()\n    {\n        var s = \"kiln\";\n        Console.WriteLine($\"{s.Length}\");\n    }\n}\n",
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["k2", path.to_str().unwrap(), "-o", exe.to_str().unwrap()])
+        .output()
+        .expect("kiln k2");
+    assert!(
+        out.status.success(),
+        "a command should link the runtime on its own:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let run = Command::new(&exe).output().expect("runs");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "4\n");
+}
+
+#[test]
 fn a_k2_binary_carries_a_line_table() {
     // Debug information is what makes a binary steppable. The module names the
     // file it came from, each statement emits a line marker, and each function

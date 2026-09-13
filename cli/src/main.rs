@@ -723,6 +723,10 @@ fn cmd_k2(rest: &[String]) -> i32 {
     // A program with a form is a GUI program: it needs the ui library, and the
     // runtime enters its event loop.
     let is_gui = module.kind == kiln_k2::ModuleKind::Gui;
+    // A command lives in the runtime, and some are reached without a `using`:
+    // `s.Length` is core's `length`. Link the runtime whenever one is called,
+    // rather than making the reader know which members are commands.
+    let use_runtime = use_runtime || module.calls_commands();
     let ll = kiln_kir::emit::emit(&module);
     if emit_ir {
         print!("{ll}");
@@ -743,7 +747,7 @@ fn cmd_k2(rest: &[String]) -> i32 {
     // support libraries behind the slot ABI.
     if use_runtime || is_gui {
         let Some(root) = find_repo_root() else {
-            eprintln!("kiln k2: --runtime needs the Kiln runtime sources");
+            eprintln!("kiln k2: this program needs the Kiln runtime, and its sources are not here");
             return 1;
         };
         let mut uses = k2_uses(&src);

@@ -51,7 +51,37 @@ for i, m in enumerate(re.finditer(r'<pre>(.*?)</pre>', text, re.S)):
         open(f'{work}/landing_{i}.kiln', 'w', encoding='utf-8').write(body + '\n')
 PY
 
+# Kiln 2 samples are tagged ```k2 and built with `kiln k2`. They are whole
+# programs by construction — a fragment is not tagged.
+for doc in docs-site/src/*.md README.md docs/*.md; do
+    [ -f "$doc" ] || continue
+    python3 - "$doc" "$WORK" <<'PY'
+import re, sys, os
+doc, work = sys.argv[1], sys.argv[2]
+text = open(doc, encoding='utf-8').read()
+stem = os.path.basename(doc).replace('.', '_')
+for i, m in enumerate(re.finditer(r'^```k2\n(.*?)^```', text, re.S | re.M)):
+    open(os.path.join(work, f'k2_{stem}_{i}.k2'), 'w', encoding='utf-8').write(m.group(1))
+PY
+done
+
 shopt -s nullglob
+for sample in "$WORK"/*.k2; do
+    name="$(basename "$sample" .k2)"
+    # `kiln k2` links the runtime itself when the program calls a command.
+    kiln2="$WORK/$name.kiln"
+    cp "$sample" "$kiln2"
+    if out=$("$KILN" k2 "$kiln2" -o "$WORK/$name.bin" 2>&1); then
+        printf '  %-44s PASS\n' "$name"
+        pass=$((pass + 1))
+    else
+        printf '  %-44s FAIL\n' "$name"
+        sed 's/^/      /' <<<"$out" | head -6
+        fail=$((fail + 1))
+    fi
+    rm -f "$kiln2"
+done
+
 for sample in "$WORK"/*.kiln; do
     name="$(basename "$sample" .kiln)"
     # Build when we can — that checks the whole chain including the link. On a
