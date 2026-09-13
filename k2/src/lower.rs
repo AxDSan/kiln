@@ -21,6 +21,8 @@ const DICT_LEN: usize = 0;
 const DICT_CAP: usize = 1;
 const DICT_KEYS: usize = 2;
 const DICT_VALUES: usize = 3;
+/// Open-addressed index: slot → entry number plus one, `0` meaning empty.
+const DICT_INDEX: usize = 4;
 
 /// Field indices of a synthesised `List` record.
 const LIST_LEN: usize = 0;
@@ -914,6 +916,7 @@ impl Cx {
         }
         let keys_ty = self.b.m.types.intern(TyKind::Array(k));
         let vals_ty = self.b.m.types.intern(TyKind::Array(v));
+        let index_ty = self.b.m.types.intern(TyKind::Array(TyTable::I32));
         let n = self.b.m.records.len();
         let rid = self.b.c_record(
             &format!("$Dict{n}"),
@@ -922,6 +925,7 @@ impl Cx {
                 ("cap", TyTable::I32),
                 ("keys", keys_ty),
                 ("values", vals_ty),
+                ("index", index_ty),
             ],
             Equality::ByRef,
         );
@@ -3508,7 +3512,101 @@ impl<'a> FnLower<'a> {
         Ok(found)
     }
 
-    /// Scan a dictionary for `key`, yielding a local holding its index or -1.
+    /// A hash of `key`, as a local holding a non-negative i32.
+    ///
+    /// A string is hashed FNV-1a over its bytes; anything else is multiplied by
+    /// Knuth's constant. Both are cheap and spread well enough for probing.
+    fn hash_of(&mut self, key: LocalId, kty: TyId) -> LocalId {
+        let h = self.new_local("$hash", TyTable::U32);
+        if kty == TyTable::STR {
+            self.push(Stmt::Let {
+                local: h,
+                value: Expr::Int(2_166_136_261, TyTable::U32),
+            });
+            let i = self.new_local("$hi", TyTable::I32);
+            self.push(Stmt::Let {
+                local: i,
+                value: Expr::Int(0, TyTable::I32),
+            });
+            let u8arr = self.cx.b.m.types.intern(TyKind::Array(TyTable::U8));
+            let byte = Expr::Index(
+                Box::new(Expr::Cast {
+                    value: Box::new(Expr::Local(key)),
+                    to: u8arr,
+                }),
+                Box::new(Expr::Local(i)),
+            );
+            let b = self.new_local("$hb", TyTable::U8);
+            let body = vec![
+                Stmt::Let {
+                    local: b,
+                    value: byte,
+                },
+                Stmt::If {
+                    cond: Expr::Bin(
+                        BinOp::Eq,
+                        Box::new(Expr::Local(b)),
+                        Box::new(Expr::Int(0, TyTable::U8)),
+                        TyTable::U8,
+                    ),
+                    then: vec![Stmt::Break],
+                    els: vec![],
+                },
+                Stmt::Assign {
+                    place: Place::Local(h),
+                    value: Expr::Bin(
+                        BinOp::Xor,
+                        Box::new(Expr::Local(h)),
+                        Box::new(Expr::Cast {
+                            value: Box::new(Expr::Local(b)),
+                            to: TyTable::U32,
+                        }),
+                        TyTable::U32,
+                    ),
+                },
+                Stmt::Assign {
+                    place: Place::Local(h),
+                    value: Expr::Bin(
+                        BinOp::Mul,
+                        Box::new(Expr::Local(h)),
+                        Box::new(Expr::Int(16_777_619, TyTable::U32)),
+                        TyTable::U32,
+                    ),
+                },
+                Stmt::Assign {
+                    place: Place::Local(i),
+                    value: Expr::Bin(
+                        BinOp::Add,
+                        Box::new(Expr::Local(i)),
+                        Box::new(Expr::Int(1, TyTable::I32)),
+                        TyTable::I32,
+                    ),
+                },
+            ];
+            self.push(Stmt::Loop { body });
+        } else {
+            self.push(Stmt::Let {
+                local: h,
+                value: Expr::Bin(
+                    BinOp::Mul,
+                    Box::new(Expr::Cast {
+                        value: Box::new(Expr::Local(key)),
+                        to: TyTable::U32,
+                    }),
+                    Box::new(Expr::Int(2_654_435_761u32 as i128, TyTable::U32)),
+                    TyTable::U32,
+                ),
+            });
+        }
+        h
+    }
+
+    /// Find `key` in a dictionary, yielding a local holding its entry number
+    /// or -1.
+    ///
+    /// The index is open-addressed over a power-of-two capacity, holding entry
+    /// numbers plus one so that zero means empty. Nothing is ever removed, so
+    /// no tombstones are needed and a probe stops at the first empty slot.
     fn dict_find(&mut self, holder: LocalId, dty: TyId, key: Expr) -> Result<LocalId, String> {
         let (_, kty, _) = self.cx.as_dict(dty).expect("a dictionary");
         let k = self.new_local("$key", kty);
@@ -3521,133 +3619,291 @@ impl<'a> FnLower<'a> {
             local: found,
             value: Expr::Int(-1, TyTable::I32),
         });
-        let i = self.new_local("$di", TyTable::I32);
-        self.push(Stmt::Let {
-            local: i,
-            value: Expr::Int(0, TyTable::I32),
-        });
-        let cur = Expr::Index(
-            Box::new(Expr::Field(Box::new(Expr::Local(holder)), DICT_KEYS)),
-            Box::new(Expr::Local(i)),
-        );
-        let eq = self.key_equal(cur, Expr::Local(k), kty);
-        let body = vec![
-            Stmt::If {
-                cond: Expr::Not(Box::new(Expr::Bin(
-                    BinOp::Lt,
-                    Box::new(Expr::Local(i)),
-                    Box::new(Expr::Field(Box::new(Expr::Local(holder)), DICT_LEN)),
-                    TyTable::I32,
-                ))),
-                then: vec![Stmt::Break],
-                els: vec![],
-            },
-            Stmt::If {
-                cond: eq,
-                then: vec![
-                    Stmt::Assign {
-                        place: Place::Local(found),
-                        value: Expr::Local(i),
-                    },
-                    Stmt::Break,
-                ],
-                els: vec![],
-            },
-            Stmt::Assign {
-                place: Place::Local(i),
-                value: Expr::Bin(
-                    BinOp::Add,
-                    Box::new(Expr::Local(i)),
+        // An empty dictionary has no index to probe.
+        let cap = || Expr::Field(Box::new(Expr::Local(holder)), DICT_CAP);
+        let h = self.hash_of(k, kty);
+        let slot = self.new_local("$slot", TyTable::I32);
+        let probe = {
+            let mask = Expr::Bin(
+                BinOp::Sub,
+                Box::new(cap()),
+                Box::new(Expr::Int(1, TyTable::I32)),
+                TyTable::I32,
+            );
+            let start = Expr::Bin(
+                BinOp::And,
+                Box::new(Expr::Cast {
+                    value: Box::new(Expr::Local(h)),
+                    to: TyTable::I32,
+                }),
+                Box::new(mask),
+                TyTable::I32,
+            );
+            let entry = self.new_local("$entry", TyTable::I32);
+            let index = || Expr::Field(Box::new(Expr::Local(holder)), DICT_INDEX);
+            let cur_key = Expr::Index(
+                Box::new(Expr::Field(Box::new(Expr::Local(holder)), DICT_KEYS)),
+                Box::new(Expr::Bin(
+                    BinOp::Sub,
+                    Box::new(Expr::Local(entry)),
                     Box::new(Expr::Int(1, TyTable::I32)),
                     TyTable::I32,
-                ),
-            },
-        ];
-        self.push(Stmt::Loop { body });
+                )),
+            );
+            let eq = self.key_equal(cur_key, Expr::Local(k), kty);
+            vec![
+                Stmt::Let {
+                    local: slot,
+                    value: start,
+                },
+                Stmt::Loop {
+                    body: vec![
+                        Stmt::Let {
+                            local: entry,
+                            value: Expr::Index(Box::new(index()), Box::new(Expr::Local(slot))),
+                        },
+                        // An empty slot means the key is not here.
+                        Stmt::If {
+                            cond: Expr::Bin(
+                                BinOp::Eq,
+                                Box::new(Expr::Local(entry)),
+                                Box::new(Expr::Int(0, TyTable::I32)),
+                                TyTable::I32,
+                            ),
+                            then: vec![Stmt::Break],
+                            els: vec![],
+                        },
+                        Stmt::If {
+                            cond: eq,
+                            then: vec![
+                                Stmt::Assign {
+                                    place: Place::Local(found),
+                                    value: Expr::Bin(
+                                        BinOp::Sub,
+                                        Box::new(Expr::Local(entry)),
+                                        Box::new(Expr::Int(1, TyTable::I32)),
+                                        TyTable::I32,
+                                    ),
+                                },
+                                Stmt::Break,
+                            ],
+                            els: vec![],
+                        },
+                        Stmt::Assign {
+                            place: Place::Local(slot),
+                            value: Expr::Bin(
+                                BinOp::And,
+                                Box::new(Expr::Bin(
+                                    BinOp::Add,
+                                    Box::new(Expr::Local(slot)),
+                                    Box::new(Expr::Int(1, TyTable::I32)),
+                                    TyTable::I32,
+                                )),
+                                Box::new(Expr::Bin(
+                                    BinOp::Sub,
+                                    Box::new(cap()),
+                                    Box::new(Expr::Int(1, TyTable::I32)),
+                                    TyTable::I32,
+                                )),
+                                TyTable::I32,
+                            ),
+                        },
+                    ],
+                },
+            ]
+        };
+        self.push(Stmt::If {
+            cond: Expr::Bin(
+                BinOp::Gt,
+                Box::new(cap()),
+                Box::new(Expr::Int(0, TyTable::I32)),
+                TyTable::I32,
+            ),
+            then: probe,
+            els: vec![],
+        });
         Ok(found)
     }
 
-    /// Grow both buffers and append a key/value pair.
+    /// Append a key and value, growing and reindexing when the table is full.
+    ///
+    /// Capacity is a power of two, so a probe can mask rather than divide. On
+    /// growth every entry is reinserted into the fresh index — there is no
+    /// removal, so that is the only time the index is rebuilt.
     fn dict_append(&mut self, holder: LocalId, dty: TyId, key: Expr, val: Expr) {
         let (drid, kty, vty) = self.cx.as_dict(dty).expect("a dictionary");
         let d = || Expr::Local(holder);
         let len = || Expr::Field(Box::new(d()), DICT_LEN);
         let cap = || Expr::Field(Box::new(d()), DICT_CAP);
+        let index = || Expr::Field(Box::new(d()), DICT_INDEX);
         let ksize = self.cx.scalar_size(kty);
         let vsize = self.cx.scalar_size(vty);
         let keys_ty = self.cx.b.m.record(drid).fields[DICT_KEYS].ty;
         let vals_ty = self.cx.b.m.record(drid).fields[DICT_VALUES].ty;
+        let index_ty = self.cx.b.m.record(drid).fields[DICT_INDEX].ty;
         let newcap = self.new_local("$dcap", TyTable::I32);
-        let realloc = |s: &Self, buf: Expr, elem: i64, cap: Expr, ret: TyId| {
-            s.realloc(
-                buf,
-                Expr::Bin(
+
+        // ── grow ────────────────────────────────────────────────────────────
+        let mut grow = vec![Stmt::If {
+            cond: Expr::Bin(
+                BinOp::Eq,
+                Box::new(cap()),
+                Box::new(Expr::Int(0, TyTable::I32)),
+                TyTable::I32,
+            ),
+            then: vec![Stmt::Assign {
+                place: Place::Local(newcap),
+                value: Expr::Int(8, TyTable::I32),
+            }],
+            els: vec![Stmt::Assign {
+                place: Place::Local(newcap),
+                value: Expr::Bin(
                     BinOp::Mul,
-                    Box::new(cap),
-                    Box::new(Expr::Int(elem as i128, TyTable::I32)),
+                    Box::new(cap()),
+                    Box::new(Expr::Int(2, TyTable::I32)),
                     TyTable::I32,
                 ),
-                ret,
+            }],
+        }];
+        let mul = |a: Expr, b: i64| {
+            Expr::Bin(
+                BinOp::Mul,
+                Box::new(a),
+                Box::new(Expr::Int(b as i128, TyTable::I32)),
+                TyTable::I32,
             )
         };
-        let grow = vec![
-            Stmt::If {
-                cond: Expr::Bin(
-                    BinOp::Eq,
-                    Box::new(cap()),
-                    Box::new(Expr::Int(0, TyTable::I32)),
-                    TyTable::I32,
-                ),
-                then: vec![Stmt::Assign {
-                    place: Place::Local(newcap),
-                    value: Expr::Int(4, TyTable::I32),
-                }],
-                els: vec![Stmt::Assign {
-                    place: Place::Local(newcap),
+        grow.push(Stmt::Assign {
+            place: Place::Field(Box::new(d()), DICT_KEYS),
+            value: self.realloc(
+                Expr::Field(Box::new(d()), DICT_KEYS),
+                mul(Expr::Local(newcap), ksize),
+                keys_ty,
+            ),
+        });
+        grow.push(Stmt::Assign {
+            place: Place::Field(Box::new(d()), DICT_VALUES),
+            value: self.realloc(
+                Expr::Field(Box::new(d()), DICT_VALUES),
+                mul(Expr::Local(newcap), vsize),
+                vals_ty,
+            ),
+        });
+        // A fresh, zeroed index of the new capacity.
+        grow.push(Stmt::Assign {
+            place: Place::Field(Box::new(d()), DICT_INDEX),
+            value: self.alloc(
+                Expr::Cast {
+                    value: Box::new(mul(Expr::Local(newcap), 4)),
+                    to: TyTable::I64,
+                },
+                index_ty,
+            ),
+        });
+        let z = self.new_local("$zi", TyTable::I32);
+        grow.push(Stmt::Let {
+            local: z,
+            value: Expr::Int(0, TyTable::I32),
+        });
+        grow.push(Stmt::Loop {
+            body: vec![
+                Stmt::If {
+                    cond: Expr::Not(Box::new(Expr::Bin(
+                        BinOp::Lt,
+                        Box::new(Expr::Local(z)),
+                        Box::new(Expr::Local(newcap)),
+                        TyTable::I32,
+                    ))),
+                    then: vec![Stmt::Break],
+                    els: vec![],
+                },
+                Stmt::Assign {
+                    place: Place::Index(Box::new(index()), Box::new(Expr::Local(z))),
+                    value: Expr::Int(0, TyTable::I32),
+                },
+                Stmt::Assign {
+                    place: Place::Local(z),
                     value: Expr::Bin(
-                        BinOp::Mul,
-                        Box::new(cap()),
-                        Box::new(Expr::Int(2, TyTable::I32)),
+                        BinOp::Add,
+                        Box::new(Expr::Local(z)),
+                        Box::new(Expr::Int(1, TyTable::I32)),
                         TyTable::I32,
                     ),
-                }],
-            },
-            Stmt::Assign {
-                place: Place::Field(Box::new(d()), DICT_KEYS),
-                value: realloc(
-                    self,
-                    Expr::Field(Box::new(d()), DICT_KEYS),
-                    ksize,
-                    Expr::Local(newcap),
-                    keys_ty,
-                ),
-            },
-            Stmt::Assign {
-                place: Place::Field(Box::new(d()), DICT_VALUES),
-                value: realloc(
-                    self,
-                    Expr::Field(Box::new(d()), DICT_VALUES),
-                    vsize,
-                    Expr::Local(newcap),
-                    vals_ty,
-                ),
-            },
-            Stmt::Assign {
-                place: Place::Field(Box::new(d()), DICT_CAP),
-                value: Expr::Local(newcap),
-            },
-        ];
+                },
+            ],
+        });
+        grow.push(Stmt::Assign {
+            place: Place::Field(Box::new(d()), DICT_CAP),
+            value: Expr::Local(newcap),
+        });
+        // Reinsert every existing entry into the new index.
+        let e = self.new_local("$re", TyTable::I32);
+        grow.push(Stmt::Let {
+            local: e,
+            value: Expr::Int(0, TyTable::I32),
+        });
+        self.blocks.push(Vec::new());
+        let ekey = self.new_local("$rekey", kty);
+        self.push(Stmt::Let {
+            local: ekey,
+            value: Expr::Index(
+                Box::new(Expr::Field(Box::new(d()), DICT_KEYS)),
+                Box::new(Expr::Local(e)),
+            ),
+        });
+        self.index_insert(holder, ekey, kty, Expr::Local(e));
+        let reinsert = self.blocks.pop().unwrap();
+        let mut re_body = vec![Stmt::If {
+            cond: Expr::Not(Box::new(Expr::Bin(
+                BinOp::Lt,
+                Box::new(Expr::Local(e)),
+                Box::new(len()),
+                TyTable::I32,
+            ))),
+            then: vec![Stmt::Break],
+            els: vec![],
+        }];
+        re_body.extend(reinsert);
+        re_body.push(Stmt::Assign {
+            place: Place::Local(e),
+            value: Expr::Bin(
+                BinOp::Add,
+                Box::new(Expr::Local(e)),
+                Box::new(Expr::Int(1, TyTable::I32)),
+                TyTable::I32,
+            ),
+        });
+        grow.push(Stmt::Loop { body: re_body });
+
+        // Grow when the table is full, keeping the load factor at a half.
         self.push(Stmt::If {
-            cond: Expr::Bin(BinOp::Eq, Box::new(len()), Box::new(cap()), TyTable::I32),
+            cond: Expr::Bin(
+                BinOp::Ge,
+                Box::new(Expr::Bin(
+                    BinOp::Mul,
+                    Box::new(len()),
+                    Box::new(Expr::Int(2, TyTable::I32)),
+                    TyTable::I32,
+                )),
+                Box::new(cap()),
+                TyTable::I32,
+            ),
             then: grow,
             els: vec![],
+        });
+
+        // ── append ──────────────────────────────────────────────────────────
+        let kh = self.new_local("$akey", kty);
+        self.push(Stmt::Let {
+            local: kh,
+            value: key,
         });
         self.push(Stmt::Assign {
             place: Place::Index(
                 Box::new(Expr::Field(Box::new(d()), DICT_KEYS)),
                 Box::new(len()),
             ),
-            value: key,
+            value: Expr::Local(kh),
         });
         self.push(Stmt::Assign {
             place: Place::Index(
@@ -3656,11 +3912,78 @@ impl<'a> FnLower<'a> {
             ),
             value: val,
         });
+        self.index_insert(holder, kh, kty, len());
         self.push(Stmt::Assign {
             place: Place::Field(Box::new(d()), DICT_LEN),
             value: Expr::Bin(
                 BinOp::Add,
                 Box::new(len()),
+                Box::new(Expr::Int(1, TyTable::I32)),
+                TyTable::I32,
+            ),
+        });
+    }
+
+    /// Put entry number `entry` into the index under `key`'s hash, at the first
+    /// empty slot from there.
+    fn index_insert(&mut self, holder: LocalId, key: LocalId, kty: TyId, entry: Expr) {
+        let h = self.hash_of(key, kty);
+        let cap = || Expr::Field(Box::new(Expr::Local(holder)), DICT_CAP);
+        let index = || Expr::Field(Box::new(Expr::Local(holder)), DICT_INDEX);
+        let mask = || {
+            Expr::Bin(
+                BinOp::Sub,
+                Box::new(cap()),
+                Box::new(Expr::Int(1, TyTable::I32)),
+                TyTable::I32,
+            )
+        };
+        let slot = self.new_local("$islot", TyTable::I32);
+        self.push(Stmt::Let {
+            local: slot,
+            value: Expr::Bin(
+                BinOp::And,
+                Box::new(Expr::Cast {
+                    value: Box::new(Expr::Local(h)),
+                    to: TyTable::I32,
+                }),
+                Box::new(mask()),
+                TyTable::I32,
+            ),
+        });
+        self.push(Stmt::Loop {
+            body: vec![
+                Stmt::If {
+                    cond: Expr::Bin(
+                        BinOp::Eq,
+                        Box::new(Expr::Index(Box::new(index()), Box::new(Expr::Local(slot)))),
+                        Box::new(Expr::Int(0, TyTable::I32)),
+                        TyTable::I32,
+                    ),
+                    then: vec![Stmt::Break],
+                    els: vec![],
+                },
+                Stmt::Assign {
+                    place: Place::Local(slot),
+                    value: Expr::Bin(
+                        BinOp::And,
+                        Box::new(Expr::Bin(
+                            BinOp::Add,
+                            Box::new(Expr::Local(slot)),
+                            Box::new(Expr::Int(1, TyTable::I32)),
+                            TyTable::I32,
+                        )),
+                        Box::new(mask()),
+                        TyTable::I32,
+                    ),
+                },
+            ],
+        });
+        self.push(Stmt::Assign {
+            place: Place::Index(Box::new(index()), Box::new(Expr::Local(slot))),
+            value: Expr::Bin(
+                BinOp::Add,
+                Box::new(entry),
                 Box::new(Expr::Int(1, TyTable::I32)),
                 TyTable::I32,
             ),
@@ -4220,6 +4543,7 @@ impl<'a> FnLower<'a> {
         if let Some((drid, _, _)) = self.cx.as_dict(ty) {
             let keys_ty = self.cx.b.m.record(drid).fields[DICT_KEYS].ty;
             let vals_ty = self.cx.b.m.record(drid).fields[DICT_VALUES].ty;
+            let index_ty = self.cx.b.m.record(drid).fields[DICT_INDEX].ty;
             return Ok((
                 Expr::MakeRecord(
                     drid,
@@ -4228,6 +4552,7 @@ impl<'a> FnLower<'a> {
                         Expr::Int(0, TyTable::I32),
                         Expr::Null(keys_ty),
                         Expr::Null(vals_ty),
+                        Expr::Null(index_ty),
                     ],
                 ),
                 ty,

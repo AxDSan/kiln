@@ -1429,3 +1429,41 @@ public static class P
     // i % 4 over 1..10 yields {1,2,3,0} — four distinct values.
     assert_eq!(run_k2(src), "4\n1 0\n2\nada\ngrace\n");
 }
+
+#[test]
+fn a_dictionary_stays_correct_through_rehashing() {
+    // The index is open-addressed over a power-of-two capacity and rebuilt on
+    // every growth. Two thousand keys cross several rebuilds, and every one
+    // must still find its own value.
+    let src = r#"
+namespace Rehash;
+public static class P
+{
+    public static void Main()
+    {
+        var d = new Dictionary<int, int>();
+        foreach (var i in 1..2000)
+            d[i] = i * 3;
+        Console.WriteLine($"{d.Count}");
+
+        var wrong = 0;
+        foreach (var i in 1..2000)
+            if ((d.Get(i) ?? -1) != i * 3)
+                wrong = wrong + 1;
+        Console.WriteLine($"wrong {wrong}");
+
+        // Overwriting replaces rather than appending.
+        d[7] = 999;
+        Console.WriteLine($"{d.Count} {d.Get(7) ?? 0}");
+
+        // String keys hash by content.
+        var s = new Dictionary<string, int>();
+        s["ada"] = 1;
+        s["grace"] = 2;
+        s["ada"] = 4;
+        Console.WriteLine($"{s.Count} {s.Get("ada") ?? 0} {s.ContainsKey("nobody")}");
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "2000\nwrong 0\n2000 999\n2 4 0\n");
+}
