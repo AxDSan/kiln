@@ -135,3 +135,22 @@ fn the_standard_library_is_reachable() {
     let out = build_and_run("stdlib", &src);
     assert_eq!(out, "written by Kiln 2\nexists: 1\nKILN TWO\n", "{out}");
 }
+
+#[test]
+fn a_command_can_be_reached_as_an_instance_member() {
+    // `length(s)` is written `s.Length`, and `uppercase(s)` as `s.Uppercase()`
+    // — the receiver becomes the command's first argument. A name in scope is
+    // a value, so `s.Uppercase()` is not read as a static `uppercase`.
+    let src = "namespace Inst;\n\
+               using Kiln.Text;\n\
+               public static class P\n\
+               {\n\
+               \x20   public static void Main()\n\
+               \x20   {\n\
+               \x20       var s = \"kiln two\";\n\
+               \x20       Console.WriteLine($\"{s.Length}\");\n\
+               \x20       Console.WriteLine(s.Uppercase());\n\
+               \x20   }\n\
+               }\n";
+    assert_eq!(build_and_run("instance", src), "8\nKILN TWO\n");
+}

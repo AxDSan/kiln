@@ -2501,6 +2501,22 @@ impl<'a> FnLower<'a> {
                 return Ok((Expr::Field(Box::new(base), idx), fty));
             }
         }
+        // `s.Length` — a command taking just the receiver.
+        if let Some((sym, params, ret, tags)) = self.lookup_instance_command(bty, member, 0) {
+            let slots = vec![SlotTy {
+                tag: tags[0],
+                ty: params[0],
+            }];
+            return Ok((
+                Expr::Call(Box::new(Call::Command {
+                    symbol: sym,
+                    args: vec![base],
+                    arg_slots: slots,
+                    ret,
+                })),
+                ret,
+            ));
+        }
         Err(format!("no member `{member}` on this value"))
     }
 
@@ -2777,7 +2793,13 @@ impl<'a> FnLower<'a> {
         // name is reversed and looked up.
         if let ast::ExprKind::Member(recv, member) = &callee.kind {
             if let ast::ExprKind::Ident(owner) = &recv.kind {
-                if !self.is_type_name(owner) || owner == "Console" {
+                // `Owner` must name a library, not a value in scope: `s.Uppercase()`
+                // is an instance call on `s`, not the static command `uppercase`.
+                let is_value = self.scope.contains_key(owner.as_str())
+                    || self.cells.contains_key(owner.as_str())
+                    || self.cx.form_state.contains_key(owner.as_str())
+                    || self.cx.components.contains_key(owner.as_str());
+                if !is_value && (!self.is_type_name(owner) || owner == "Console") {
                     if let Some((sym, params, ret, tags)) = self.lookup_command(owner, member) {
                         if args.len() != params.len() {
                             return Err(format!(
@@ -2891,6 +2913,32 @@ impl<'a> FnLower<'a> {
             ));
         }
 
+        // `value.Member(args)` may be a command taking the receiver first.
+        if let (Some(this), ast::ExprKind::Member(_, member)) = (&this_arg, &callee.kind) {
+            let recv_ty = self.expr_ty_of(this);
+            if let Some((sym, params, ret, tags)) =
+                self.lookup_instance_command(recv_ty, member, args.len())
+            {
+                let mut kargs = vec![this.clone()];
+                for (a, pty) in args.iter().zip(params.iter().skip(1)) {
+                    kargs.push(self.expr(a, Some(*pty))?.0);
+                }
+                let slots = params
+                    .iter()
+                    .zip(tags.iter())
+                    .map(|(ty, tag)| SlotTy { tag: *tag, ty: *ty })
+                    .collect();
+                return Ok((
+                    Expr::Call(Box::new(Call::Command {
+                        symbol: sym,
+                        args: kargs,
+                        arg_slots: slots,
+                        ret,
+                    })),
+                    ret,
+                ));
+            }
+        }
         let sig = self
             .cx
             .methods
@@ -3154,6 +3202,28 @@ impl<'a> FnLower<'a> {
             })),
             sig.ret,
         ))
+    }
+
+    /// The type an already-lowered expression carries, for the few places that
+    /// need it after the fact.
+    fn expr_ty_of(&self, e: &Expr) -> TyId {
+        match e {
+            Expr::Local(l) => self.cx.b.m.func(self.fid).locals[l.0 as usize].ty,
+            Expr::Global(g) => self.cx.b.m.global(*g).ty,
+            Expr::Str(_) => TyTable::STR,
+            Expr::Int(_, t) | Expr::Float(_, t) | Expr::Null(t) | Expr::Neg(_, t) => *t,
+            Expr::Bool(_) => TyTable::BOOL,
+            Expr::Cast { to, .. } => *to,
+            Expr::Bin(_, _, _, t) => *t,
+            Expr::MakeRecord(rid, _) => self
+                .cx
+                .b
+                .m
+                .types
+                .find(&TyKind::Record(*rid))
+                .unwrap_or(TyTable::PTR),
+            _ => TyTable::PTR,
+        }
     }
 
     /// Allocate `size` bytes: from the collector when it is linked, from libc
@@ -3959,6 +4029,36 @@ impl<'a> FnLower<'a> {
             ctor: None,
         });
         Ok(sig)
+    }
+
+    /// Resolve `value.Member(...)` to a command whose first parameter is the
+    /// receiver: `length(s)` is written `s.Length`, `db_exec(db, …)` is written
+    /// `db.Exec(…)`. The receiver's type must match that first parameter, which
+    /// is what keeps `x.Count` on a list from finding some unrelated command.
+    fn lookup_instance_command(
+        &mut self,
+        recv_ty: TyId,
+        member: &str,
+        extra_args: usize,
+    ) -> Option<(String, Vec<TyId>, TyId, Vec<i32>)> {
+        let bare = snake_case(member);
+        let reg = self.cx.registry.as_ref()?;
+        let cmd = reg.get(&bare)?;
+        let sig = cmd.sig.clone();
+        if sig.params.len() != extra_args + 1 {
+            return None;
+        }
+        let symbol = cmd.symbol.clone();
+        let params: Vec<TyId> = sig.params.iter().map(|t| ir_ty(*t, &mut self.cx)).collect();
+        if params[0] != recv_ty {
+            return None;
+        }
+        let tags: Vec<i32> = sig.params.iter().map(|t| t.sdt_tag()).collect();
+        let ret = match sig.ret {
+            Some(t) => ir_ty(t, &mut self.cx),
+            None => TyTable::VOID,
+        };
+        Some((symbol, params, ret, tags))
     }
 
     /// Resolve `Owner.Member` to a standard-library command: its symbol, its

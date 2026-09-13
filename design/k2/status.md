@@ -110,7 +110,10 @@ clang and checks stdout):
   naming rule read backwards at the call site, with the bare name tried too for
   libraries that do not prefix (`Text.Uppercase` → `uppercase`). Arguments and
   the result cross the slot ABI with the signature's own tags, so the whole
-  command set is reachable rather than a hand-written handful
+  command set is reachable rather than a hand-written handful. A command whose
+  first parameter is the receiver is written as a member: `length(s)` is
+  `s.Length`, `uppercase(s)` is `s.Uppercase()`. A name in scope is a value, so
+  `s.Uppercase()` is never mistaken for a static call
 - **The Kiln runtime, opt-in**: `kiln k2 --runtime` links the runtime and
   support libraries exactly as a 1.x build does; `Console.WriteLine` becomes
   the `print_text` command over the slot ABI, and **every allocation comes from
