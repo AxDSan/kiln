@@ -81,6 +81,7 @@ fn run(args: &[String]) -> i32 {
         "k2" => cmd_k2(rest),
         "fmt" => cmd_fmt(rest),
         "migrate" => cmd_migrate(rest),
+        "edit" => cmd_edit(rest),
         "emit" => cmd_emit(rest),
         "inspect" => cmd_inspect(rest),
         "dap" => dap::run(),
@@ -451,6 +452,70 @@ fn parse_io_args(rest: &[String]) -> Result<Io, String> {
         header,
         project_output: None,
     })
+}
+
+/// Change a form's designer block through the tree.
+///
+/// Studio calls this rather than editing text: everything the change did not
+/// touch — comments included — comes back exactly as it was. The CLI has always
+/// been the only reader of a project file; this makes it the only writer too.
+fn cmd_edit(rest: &[String]) -> i32 {
+    let usage = "usage: kiln edit <file> set <component|.> <Property> <value>\n   \
+                 or: kiln edit <file> add <Type> <id>\n   \
+                 or: kiln edit <file> remove <id>\n   \
+                 or: kiln edit <file> rename <id> <new-id>\n   \
+                 or: kiln edit <file> on <id> <Event> <Method>";
+    let Some((file, op)) = rest.split_first() else {
+        eprintln!("{usage}");
+        return 2;
+    };
+    let edit = match op.split_first() {
+        Some((verb, a)) if verb == "set" && a.len() == 3 => kiln_k2::Edit::SetProperty {
+            target: if a[0] == "." { String::new() } else { a[0].clone() },
+            name: a[1].clone(),
+            value: a[2].clone(),
+        },
+        Some((verb, a)) if verb == "add" && a.len() == 2 => kiln_k2::Edit::AddComponent {
+            type_name: a[0].clone(),
+            id: a[1].clone(),
+        },
+        Some((verb, a)) if verb == "remove" && a.len() == 1 => kiln_k2::Edit::RemoveComponent {
+            id: a[0].clone(),
+        },
+        Some((verb, a)) if verb == "rename" && a.len() == 2 => kiln_k2::Edit::RenameComponent {
+            from: a[0].clone(),
+            to: a[1].clone(),
+        },
+        Some((verb, a)) if verb == "on" && a.len() == 3 => kiln_k2::Edit::AddHandler {
+            target: a[0].clone(),
+            event: a[1].clone(),
+            method: a[2].clone(),
+        },
+        _ => {
+            eprintln!("{usage}");
+            return 2;
+        }
+    };
+    let src = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("kiln edit: cannot read {file}: {e}");
+            return 1;
+        }
+    };
+    match kiln_k2::edit(&src, &edit) {
+        Ok(out) => {
+            if let Err(e) = std::fs::write(file, &out) {
+                eprintln!("kiln edit: cannot write {file}: {e}");
+                return 1;
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("kiln edit: {file}: {e}");
+            1
+        }
+    }
 }
 
 /// Convert a Kiln 1.x program to Kiln 2 source.

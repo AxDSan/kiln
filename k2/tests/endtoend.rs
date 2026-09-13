@@ -1318,3 +1318,86 @@ end
     // And it is valid K2.
     kiln_k2::format(&out).unwrap();
 }
+
+#[test]
+fn kiln_edit_changes_a_form_through_the_tree() {
+    // What Studio calls instead of splicing text. Everything the edit did not
+    // touch — comments included — must come back unchanged.
+    let src = r#"// a file comment
+namespace E;
+
+// the designer's half
+public partial form MainWindow
+{
+    Title = "Before";
+    Label count { Text = "0"; }
+}
+
+public partial form MainWindow
+{
+    // your half, untouched by edits
+    int n;
+    void OnAdd() { n = n + 1; }
+}
+"#;
+    // Add a component, give it properties, wire it, retitle the window.
+    let s = kiln_k2::edit(
+        src,
+        &kiln_k2::Edit::AddComponent {
+            type_name: "Button".into(),
+            id: "add".into(),
+        },
+    )
+    .unwrap();
+    let s = kiln_k2::edit(
+        &s,
+        &kiln_k2::Edit::SetProperty {
+            target: "add".into(),
+            name: "Text".into(),
+            value: "Add one".into(),
+        },
+    )
+    .unwrap();
+    let s = kiln_k2::edit(
+        &s,
+        &kiln_k2::Edit::AddHandler {
+            target: "add".into(),
+            event: "Click".into(),
+            method: "OnAdd".into(),
+        },
+    )
+    .unwrap();
+    let s = kiln_k2::edit(
+        &s,
+        &kiln_k2::Edit::SetProperty {
+            target: String::new(),
+            name: "Title".into(),
+            value: "After".into(),
+        },
+    )
+    .unwrap();
+
+    assert!(s.contains("Button add"), "{s}");
+    assert!(s.contains("Text = \"Add one\";"), "{s}");
+    assert!(s.contains("Click += OnAdd;"), "{s}");
+    assert!(s.contains("Title = \"After\";"), "{s}");
+    // Nothing else moved.
+    for kept in [
+        "// a file comment",
+        "// the designer's half",
+        "// your half, untouched by edits",
+        "Label count",
+        "void OnAdd()",
+    ] {
+        assert!(s.contains(kept), "lost {kept}:\n{s}");
+    }
+    // Setting an existing property replaces rather than duplicates it.
+    assert_eq!(s.matches("Title =").count(), 1, "{s}");
+    // And the result is a GUI program that still lowers.
+    let m = kiln_k2::compile(&s).unwrap();
+    assert_eq!(m.kind, kiln_k2::ModuleKind::Gui);
+
+    // Removing puts it back the way it was.
+    let s = kiln_k2::edit(&s, &kiln_k2::Edit::RemoveComponent { id: "add".into() }).unwrap();
+    assert!(!s.contains("Button add"), "{s}");
+}

@@ -11,6 +11,7 @@
 //! interfaces and forms grow in later phases.
 
 pub mod ast;
+pub mod edit;
 pub mod lexer;
 pub mod lower;
 pub mod migrate;
@@ -18,6 +19,13 @@ pub mod parser;
 pub mod print;
 
 pub use kiln_kir::ModuleKind;
+
+pub use edit::Edit;
+
+/// Apply a tree-level edit to a form and return the rewritten source.
+pub fn edit(src: &str, e: &Edit) -> Result<String, String> {
+    edit::apply(src, e)
+}
 
 /// Convert a Kiln 1.x program to Kiln 2 source — `kiln migrate`.
 pub fn migrate(src: &str) -> Result<String, String> {
