@@ -59,17 +59,17 @@ fn demo_builds_and_runs() {
         lines,
         vec![
             "HELLO, KILN", // uppercase(concat)
-            "11",             // length("Hello, Kiln")
-            "a/b/c/d",        // replace "-" -> "/"
-            "padded",         // trim
-            "desserts",       // reverse("stressed")
-            "9",              // max_int(3,9)
-            "1024",           // pow_int(2,10)
-            "2",              // mod_int(17,5)
-            "1.41421",        // sqrt(2)
-            "2",              // round(pow(sqrt2, 2))
-            "n = 42",         // conversions round-trip
-            "1970",           // year(epoch)
+            "11",          // length("Hello, Kiln")
+            "a/b/c/d",     // replace "-" -> "/"
+            "padded",      // trim
+            "desserts",    // reverse("stressed")
+            "9",           // max_int(3,9)
+            "1024",        // pow_int(2,10)
+            "2",           // mod_int(17,5)
+            "1.41421",     // sqrt(2)
+            "2",           // round(pow(sqrt2, 2))
+            "n = 42",      // conversions round-trip
+            "1970",        // year(epoch)
         ],
         "unexpected demo output:\n{stdout}"
     );
@@ -121,13 +121,13 @@ fn subs_build_and_run() {
     assert_eq!(
         lines,
         vec![
-            "5",          // add(2, 3)
-            "7",          // add(add(1, 2), 4)
-            "720",        // factorial(6)
-            "610",        // fib(15) — recursion
-            "ADA!",       // text in, text out
-            "negative",   // an early bare `return`
-            "4 is even",  // a sub calling another sub
+            "5",         // add(2, 3)
+            "7",         // add(add(1, 2), 4)
+            "720",       // factorial(6)
+            "610",       // fib(15) — recursion
+            "ADA!",      // text in, text out
+            "negative",  // an early bare `return`
+            "4 is even", // a sub calling another sub
             "7 is odd",
             "79", // add(factorial(4), fib(10)) = 24 + 55
         ],
@@ -492,12 +492,12 @@ fn operators_build_and_run() {
     assert_eq!(
         lines,
         vec![
-            "-40",     // a negative literal
-            "40",      // negating a negative
-            "-250",    // negating a variable
-            "1.5",     // fneg on a double
-            "2",       // 17 % 5
-            "-2",      // -17 % 5 — the sign follows the dividend, as srem does
+            "-40",  // a negative literal
+            "40",   // negating a negative
+            "-250", // negating a variable
+            "1.5",  // fneg on a double
+            "2",    // 17 % 5
+            "-2",   // -17 % 5 — the sign follows the dividend, as srem does
             "6 is even",
             "7 is odd",
             "Hello, Ada — you are 36 today.",
@@ -1220,7 +1220,11 @@ fn shared_library_exports_plain_names_and_no_entry() {
         "a library must not define a program entry: {text}"
     );
 
-    let undef = Command::new("nm").args(["-D", "-u"]).arg(&lib).output().expect("nm");
+    let undef = Command::new("nm")
+        .args(["-D", "-u"])
+        .arg(&lib)
+        .output()
+        .expect("nm");
     assert!(
         !String::from_utf8_lossy(&undef.stdout).contains("ECodeStart"),
         "unresolved ECodeStart would make the .so unloadable"
@@ -1353,13 +1357,18 @@ fn the_console_template_runs() {
 
     let bin = dir.join("app");
     let src = dir.join("main.kiln");
-    assert!(kiln(&["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()])
-        .status
-        .success());
+    assert!(
+        kiln(&["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+            .status
+            .success()
+    );
     let out = Command::new(&bin).output().expect("run template app");
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("Hello from Kiln"), "got: {text}");
-    assert!(text.contains("six times seven is 42"), "arithmetic line missing: {text}");
+    assert!(
+        text.contains("six times seven is 42"),
+        "arithmetic line missing: {text}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1421,12 +1430,19 @@ fn text_commands_are_utf8_correct() {
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
         .expect("run kiln");
-    assert!(out.status.success(), "build failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let text = run(&bin);
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines[0], "5", "length counts characters, not bytes: {text}");
-    assert_eq!(lines[1], "olléh", "reverse must not split a character: {text}");
+    assert_eq!(
+        lines[1], "olléh",
+        "reverse must not split a character: {text}"
+    );
     assert_eq!(lines[2], "hé", "substr must not cut mid-character: {text}");
     assert_eq!(lines[3], "3", "three characters, nine bytes: {text}");
     assert_eq!(lines[4], "本", "slicing multi-byte text: {text}");
@@ -1450,8 +1466,16 @@ fn support_library_examples_pass_their_own_checks() {
     // `net` is excluded deliberately: its example reaches the network, and a
     // test that fails on a train is a test people learn to ignore.
     const LIBS: &[&str] = &[
-        "filelib", "systemlib", "textlib", "timelib", "randomlib", "hashlib",
-        "configlib", "processlib", "jsonlib", "mathlib",
+        "filelib",
+        "systemlib",
+        "textlib",
+        "timelib",
+        "randomlib",
+        "hashlib",
+        "configlib",
+        "processlib",
+        "jsonlib",
+        "mathlib",
     ];
     for name in LIBS {
         let stdout = run(&build_as(name, "selfcheck"));
@@ -1599,7 +1623,12 @@ fn a_zero_index_is_a_compile_error() {
     )
     .expect("write");
     let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", src.to_str().unwrap(), "-o", dir.join("z").to_str().unwrap()])
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "-o",
+            dir.join("z").to_str().unwrap(),
+        ])
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
         .expect("run kiln");
@@ -1641,14 +1670,22 @@ fn a_malformed_colour_literal_is_a_compile_error() {
         let path = dir.join(file);
         std::fs::write(&path, src).expect("write");
         Command::new(env!("CARGO_BIN_EXE_kiln"))
-            .args(["build", path.to_str().unwrap(), "-o", dir.join(file).with_extension("").to_str().unwrap()])
+            .args([
+                "build",
+                path.to_str().unwrap(),
+                "-o",
+                dir.join(file).with_extension("").to_str().unwrap(),
+            ])
             .env("KILN_RUNTIME_DIR", repo.join("runtime"))
             .output()
             .expect("run kiln")
     };
 
     let bad = build("bad.kiln", &program("#44444", "#12345"));
-    assert!(!bad.status.success(), "a five-digit colour must not compile");
+    assert!(
+        !bad.status.success(),
+        "a five-digit colour must not compile"
+    );
     let msg = String::from_utf8_lossy(&bad.stderr);
     for want in [
         "`win.greeting`: property `color` value \"#44444\" is not a colour (use #rgb, #rrggbb or #rrggbbaa)",
@@ -2591,7 +2628,13 @@ fn grid_example_counts_its_rows() {
 #[test]
 fn a_documented_command_carries_its_doc_and_example() {
     let repo = repo();
-    let bin = repo.join("target").join(if cfg!(debug_assertions) { "debug" } else { "release" })
+    let bin = repo
+        .join("target")
+        .join(if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        })
         .join("kiln");
     let out = Command::new(&bin)
         .arg("commands")

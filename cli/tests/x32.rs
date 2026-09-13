@@ -98,7 +98,11 @@ fn x32_sharedlib_is_a_pe32_i386_image_with_no_mingw_dll_imports() {
     assert!(status.success(), "kiln build --arch x86 failed");
 
     let bytes = std::fs::read(&dll).expect("read the built DLL");
-    assert_eq!(pe_machine(&bytes), 0x014c, "the image must be i386, not x86-64");
+    assert_eq!(
+        pe_machine(&bytes),
+        0x014c,
+        "the image must be i386, not x86-64"
+    );
     // The mingw runtime DLLs a `long long` divide would otherwise pull in. The
     // image is copied to a machine that has no mingw sysroot, so these must not
     // be in its import table.

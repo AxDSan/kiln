@@ -177,7 +177,10 @@ end
     assert!(out.contains("in tx id=1"), "{out}");
     assert!(out.contains("nested begin refused"), "{out}");
     assert!(out.contains("after rollback count=0"), "{out}");
-    assert!(out.contains("name=Ada ratio=0.75 banned=true col=flag"), "{out}");
+    assert!(
+        out.contains("name=Ada ratio=0.75 banned=true col=flag"),
+        "{out}"
+    );
     assert!(out.contains("stray commit refused"), "{out}");
 }
 
@@ -225,7 +228,10 @@ end
 "#,
         "inject",
     );
-    assert!(!out.contains("MATCHED"), "a parameter reached SQL as syntax:\n{out}");
+    assert!(
+        !out.contains("MATCHED"),
+        "a parameter reached SQL as syntax:\n{out}"
+    );
     assert!(out.contains("no match\nno match 2\nada"), "{out}");
 }
 
@@ -270,9 +276,15 @@ end
         "handles",
     );
     assert!(out.contains("stale next: false"), "{out}");
-    assert!(out.contains("still here"), "the program crashed on a bad handle:\n{out}");
+    assert!(
+        out.contains("still here"),
+        "the program crashed on a bad handle:\n{out}"
+    );
     // Every bad handle reports rather than answering as though it worked.
-    assert!(out.contains("-1"), "a wrong-kind handle answered as a result:\n{out}");
+    assert!(
+        out.contains("-1"),
+        "a wrong-kind handle answered as a result:\n{out}"
+    );
 }
 
 /// A build with no database client still builds, and says so at run time
@@ -301,7 +313,6 @@ end
     );
     assert!(out.starts_with("0\n10006"), "{out}");
 }
-
 
 /// The reason the asynchronous surface exists, asserted rather than described:
 /// a statement that takes a while must not stop the event loop.
@@ -395,13 +406,19 @@ end
         }
     }
 
-    assert!(!early, "the query answered before the loop started, so nothing was proven");
+    assert!(
+        !early,
+        "the query answered before the loop started, so nothing was proven"
+    );
     assert_eq!(cell, "400000", "the collected cell was wrong:\n{out}");
     assert!(
         ticks >= 3,
         "the loop only had {ticks} turn(s) while the statement ran, so it was held:\n{out}"
     );
-    assert!(error.starts_with("' freed true"), "the request was not freed: {out}");
+    assert!(
+        error.starts_with("' freed true"),
+        "the request was not freed: {out}"
+    );
     assert!(
         out.contains("asynchronous request in flight"),
         "a synchronous call was allowed on a busy connection:\n{out}"

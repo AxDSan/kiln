@@ -112,7 +112,14 @@ end
     assert_eq!(
         out,
         vec![
-            "item", "items", "A", "B", "C", "99", "5", "in an argument: yes",
+            "item",
+            "items",
+            "A",
+            "B",
+            "C",
+            "99",
+            "5",
+            "in an argument: yes",
         ],
         "the conditional value picked the wrong arm"
     );
@@ -127,9 +134,7 @@ fn a_conditional_with_mismatched_arms_is_a_build_error() {
         "module bad\nsub main\n  let x: int = if true then 1 else \"two\"\nend\n",
     );
     assert!(
-        stderr.contains("must have one type")
-            && stderr.contains("int")
-            && stderr.contains("text"),
+        stderr.contains("must have one type") && stderr.contains("int") && stderr.contains("text"),
         "the diagnostic must name both arm types, got:\n{stderr}"
     );
 }

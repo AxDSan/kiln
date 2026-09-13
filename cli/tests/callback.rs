@@ -135,11 +135,19 @@ fn a_non_c_representable_sub_is_a_named_build_error() {
     )
     .expect("write bad.kiln");
     let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", src.to_str().unwrap(), "-o", dir.join("x").to_str().unwrap()])
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "-o",
+            dir.join("x").to_str().unwrap(),
+        ])
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
         .expect("run kiln");
-    assert!(!out.status.success(), "a non-C-representable callback must not build");
+    assert!(
+        !out.status.success(),
+        "a non-C-representable callback must not build"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("`bad`") && stderr.contains("int[]"),
@@ -160,7 +168,12 @@ fn address_of_a_non_sub_is_a_named_build_error() {
     )
     .expect("write bad.kiln");
     let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", src.to_str().unwrap(), "-o", dir.join("x").to_str().unwrap()])
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "-o",
+            dir.join("x").to_str().unwrap(),
+        ])
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
         .expect("run kiln");
@@ -204,7 +217,13 @@ fn cb_cross_builds_for_windows_and_runs_under_wine() {
 
     let image = dir.join("cb.exe");
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", repo().join("examples/dll/cb.kiln").to_str().unwrap(), "--os", "windows", "-o"])
+        .args([
+            "build",
+            repo().join("examples/dll/cb.kiln").to_str().unwrap(),
+            "--os",
+            "windows",
+            "-o",
+        ])
         .arg(&image)
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()

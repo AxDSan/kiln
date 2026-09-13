@@ -90,8 +90,14 @@ fn write_dependency(dep: &Path) {
         &dep.join("include/opt_dep.h"),
         "int opt_dep_archive(void);\nint opt_dep_source(void);\n",
     );
-    write(&dep.join("src/opt_dep_source.c"), "int opt_dep_source(void) { return 4; }\n");
-    write(&dep.join("archive/opt_dep_archive.c"), "int opt_dep_archive(void) { return 3; }\n");
+    write(
+        &dep.join("src/opt_dep_source.c"),
+        "int opt_dep_source(void) { return 4; }\n",
+    );
+    write(
+        &dep.join("archive/opt_dep_archive.c"),
+        "int opt_dep_archive(void) { return 3; }\n",
+    );
 
     let obj = dep.join("archive/opt_dep_archive.o");
     let ok = Command::new("clang")
@@ -240,7 +246,10 @@ fn the_command_surface_is_the_same_in_both_states() {
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
     let without = listing(&absent);
-    assert!(without.contains("opt_answer"), "the command must exist without the dependency");
+    assert!(
+        without.contains("opt_answer"),
+        "the command must exist without the dependency"
+    );
     assert_eq!(without, listing(&present));
 }
 
@@ -269,9 +278,17 @@ fn a_missing_hard_requirement_still_fails_loudly() {
     let out = kiln(
         &root,
         &home,
-        &["build", src.to_str().unwrap(), "-o", root.join("hard").to_str().unwrap()],
+        &[
+            "build",
+            src.to_str().unwrap(),
+            "-o",
+            root.join("hard").to_str().unwrap(),
+        ],
     );
-    assert!(!out.status.success(), "a missing `requires` path must fail the build");
+    assert!(
+        !out.status.success(),
+        "a missing `requires` path must fail the build"
+    );
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("tools/fetch-widgets.sh") && err.contains("libwidgets.a"),
@@ -333,7 +350,9 @@ fn https_is_served_or_refused_and_never_downgraded() {
         .and_then(|l| l.trim().parse().ok())
         .expect("the program printed an error code");
 
-    let vendored = repo().join("vendor/mbedtls/build/library/libmbedtls.a").exists();
+    let vendored = repo()
+        .join("vendor/mbedtls/build/library/libmbedtls.a")
+        .exists();
     if vendored {
         // The dial happened, so the scheme was accepted. 10006 here would mean
         // the URL was refused on a build that can serve it.
@@ -373,7 +392,10 @@ fn without_tls_an_https_url_is_refused_on_any_machine() {
     std::fs::create_dir_all(&kit).expect("create kit");
     for entry in std::fs::read_dir(repo().join("libs/net")).expect("read libs/net") {
         let src = entry.expect("entry").path();
-        if matches!(src.extension().and_then(|e| e.to_str()), Some("c") | Some("h")) {
+        if matches!(
+            src.extension().and_then(|e| e.to_str()),
+            Some("c") | Some("h")
+        ) {
             std::fs::copy(&src, kit.join(src.file_name().unwrap())).expect("copy net source");
         }
     }

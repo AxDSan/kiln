@@ -89,8 +89,10 @@ pub fn run() -> i32 {
             match read_message(&mut input) {
                 Ok(Some(message)) => {
                     if let Some(request) = Request::parse(&message) {
-                        if matches!(request.command.as_str(), "pause" | "terminate" | "disconnect")
-                        {
+                        if matches!(
+                            request.command.as_str(),
+                            "pause" | "terminate" | "disconnect"
+                        ) {
                             let handle: Option<Interrupt> =
                                 *reading.lock().expect("interrupt handle");
                             if let Some(handle) = handle {
@@ -305,7 +307,10 @@ fn event(name: &str, body: Option<Json>) -> Json {
 /// them differently, and conflating them makes a compiler error look like
 /// something the program printed.
 fn output(category: &str, text: &str) -> Json {
-    event("output", Some(json!({ "category": category, "output": text })))
+    event(
+        "output",
+        Some(json!({ "category": category, "output": text })),
+    )
 }
 
 // --- The seam to the engine -------------------------------------------------
@@ -493,7 +498,9 @@ struct Live {
 
 impl Debuggee for Live {
     fn set_breakpoints(&mut self, lines: &[u32]) -> Result<Vec<Breakpoint>, String> {
-        self.session.set_breakpoints(lines).map_err(|e| e.to_string())
+        self.session
+            .set_breakpoints(lines)
+            .map_err(|e| e.to_string())
     }
 
     fn resume(&mut self) -> Result<Stopped, String> {
@@ -754,7 +761,11 @@ impl Adapter {
 
     /// A line as the debug information counts them, which is always from 1.
     fn engine_line(&self, line: i64) -> u32 {
-        let line = if self.lines_start_at_1 { line } else { line + 1 };
+        let line = if self.lines_start_at_1 {
+            line
+        } else {
+            line + 1
+        };
         line.max(0) as u32
     }
 
@@ -807,10 +818,7 @@ impl Adapter {
             return;
         };
         let program = PathBuf::from(program);
-        let cwd = request
-            .arg("cwd")
-            .and_then(Json::as_str)
-            .map(PathBuf::from);
+        let cwd = request.arg("cwd").and_then(Json::as_str).map(PathBuf::from);
         let binary = match request.arg("binary").and_then(Json::as_str) {
             Some(path) => PathBuf::from(path),
             None => default_binary(&program),
@@ -836,10 +844,7 @@ impl Adapter {
                 "console",
                 &format!("Building {}…\n", program.display()),
             ));
-            if let Err(diagnostic) = self
-                .backend
-                .build(&program, &binary, cwd.as_deref(), out)
-            {
+            if let Err(diagnostic) = self.backend.build(&program, &binary, cwd.as_deref(), out) {
                 out.send(failure(request, "the build failed", &diagnostic));
                 // The session is over before it began, and a client that is
                 // not told so leaves its debug toolbar enabled for good.
@@ -1184,7 +1189,11 @@ impl Adapter {
 
     fn on_step(&mut self, request: &Request, kind: Step, out: &mut dyn Sink) {
         if self.debuggee.is_none() {
-            out.send(failure(request, "not running", "there is no program to step"));
+            out.send(failure(
+                request,
+                "not running",
+                "there is no program to step",
+            ));
             return;
         }
         out.send(response(request, true, None));
@@ -1193,7 +1202,11 @@ impl Adapter {
 
     fn on_pause(&mut self, request: &Request, out: &mut dyn Sink) {
         if self.debuggee.is_none() {
-            out.send(failure(request, "not running", "there is no program to pause"));
+            out.send(failure(
+                request,
+                "not running",
+                "there is no program to pause",
+            ));
             return;
         }
         // Answered, and nothing more. The thread that reads requests has
@@ -1519,9 +1532,7 @@ mod tests {
         }
 
         fn resume(&mut self) -> Result<Stopped, String> {
-            self.outcomes
-                .pop_front()
-                .unwrap_or(Ok(Stopped::Exited(0)))
+            self.outcomes.pop_front().unwrap_or(Ok(Stopped::Exited(0)))
         }
 
         fn step(&mut self, _kind: Step) -> Result<Stopped, String> {
@@ -1595,7 +1606,11 @@ mod tests {
             }
         }
 
-        fn launch(&mut self, _binary: &Path, _args: &[String]) -> Result<Box<dyn Debuggee>, String> {
+        fn launch(
+            &mut self,
+            _binary: &Path,
+            _args: &[String],
+        ) -> Result<Box<dyn Debuggee>, String> {
             match self.debuggee.take() {
                 Some(d) => Ok(Box::new(d)),
                 None => Err("no program".to_string()),
@@ -1617,7 +1632,11 @@ mod tests {
         let mut out = Recorder::new();
         adapter.handle(&request(1, "initialize", json!({})), &mut out);
         adapter.handle(
-            &request(2, "launch", json!({ "program": "/tmp/x.kiln", "stopOnEntry": true })),
+            &request(
+                2,
+                "launch",
+                json!({ "program": "/tmp/x.kiln", "stopOnEntry": true }),
+            ),
             &mut out,
         );
         adapter.handle(&request(3, "configurationDone", json!({})), &mut out);
@@ -1664,7 +1683,11 @@ mod tests {
         let mut out = Recorder::new();
         adapter.handle(&request(1, "initialize", json!({})), &mut out);
         adapter.handle(
-            &request(2, "launch", json!({ "program": "/tmp/x.kiln", "stopOnEntry": true })),
+            &request(
+                2,
+                "launch",
+                json!({ "program": "/tmp/x.kiln", "stopOnEntry": true }),
+            ),
             &mut out,
         );
 
@@ -1779,7 +1802,10 @@ mod tests {
         let lines: Vec<i64> = bound.iter().map(|b| b["line"].as_i64().unwrap()).collect();
         assert_eq!(lines, vec![9, 2]);
         assert!(bound.iter().all(|b| b["verified"] == false));
-        assert_eq!(bound[0]["message"], "this program has no code from this file");
+        assert_eq!(
+            bound[0]["message"],
+            "this program has no code from this file"
+        );
     }
 
     #[test]
@@ -1823,7 +1849,11 @@ mod tests {
             &mut out,
         );
         adapter.handle(
-            &request(2, "launch", json!({ "program": "/tmp/x.kiln", "stopOnEntry": true })),
+            &request(
+                2,
+                "launch",
+                json!({ "program": "/tmp/x.kiln", "stopOnEntry": true }),
+            ),
             &mut out,
         );
         adapter.handle(&request(3, "configurationDone", json!({})), &mut out);
@@ -1980,14 +2010,21 @@ mod tests {
 
         let stopped = out.find_event("stopped").unwrap();
         assert_eq!(stopped["body"]["reason"], "exception");
-        assert_eq!(stopped["body"]["description"], "index 4 is outside the array");
+        assert_eq!(
+            stopped["body"]["description"],
+            "index 4 is outside the array"
+        );
         assert_eq!(stopped["body"]["text"], "index 4 is outside the array");
     }
 
     #[test]
     fn a_stack_names_its_frames_and_never_numbers_one_zero() {
         let frame = |pc: u64, cfa: u64| Frame {
-            registers: Registers { pc, sp: cfa - 16, bp: cfa - 8 },
+            registers: Registers {
+                pc,
+                sp: cfa - 16,
+                bp: cfa - 8,
+            },
             cfa,
         };
         let (mut adapter, mut out) = started(FakeDebuggee {
@@ -1996,7 +2033,10 @@ mod tests {
             source: Some("/tmp/x.kiln".to_string()),
             ..Default::default()
         });
-        adapter.handle(&request(20, "stackTrace", json!({ "threadId": 1 })), &mut out);
+        adapter.handle(
+            &request(20, "stackTrace", json!({ "threadId": 1 })),
+            &mut out,
+        );
 
         let body = &out.response("stackTrace")["body"];
         assert_eq!(body["totalFrames"], 2);
@@ -2192,7 +2232,12 @@ mod tests {
     fn requests_that_need_a_program_fail_without_one() {
         let mut adapter = Adapter::new(Box::new(FakeBackend::with(FakeDebuggee::default())));
         let mut out = Recorder::new();
-        for (seq, command) in [(1, "continue"), (2, "next"), (3, "pause"), (4, "stackTrace")] {
+        for (seq, command) in [
+            (1, "continue"),
+            (2, "next"),
+            (3, "pause"),
+            (4, "stackTrace"),
+        ] {
             adapter.handle(&request(seq, command, json!({})), &mut out);
             assert_eq!(
                 out.response(command)["success"],
@@ -2211,12 +2256,19 @@ mod tests {
         let mut out = Recorder::new();
         adapter.handle(&request(1, "initialize", json!({})), &mut out);
         adapter.handle(
-            &request(2, "launch", json!({ "program": "/tmp/x.kiln", "stopOnEntry": true })),
+            &request(
+                2,
+                "launch",
+                json!({ "program": "/tmp/x.kiln", "stopOnEntry": true }),
+            ),
             &mut out,
         );
         adapter.handle(&request(3, "configurationDone", json!({})), &mut out);
 
-        assert_eq!(out.find_event("stopped").unwrap()["body"]["reason"], "entry");
+        assert_eq!(
+            out.find_event("stopped").unwrap()["body"]["reason"],
+            "entry"
+        );
         assert!(
             out.find_event("exited").is_none(),
             "it must not have been let go"
@@ -2365,7 +2417,10 @@ mod tests {
 
     #[test]
     fn a_binary_defaults_to_the_source_without_its_extension() {
-        assert_eq!(default_binary(Path::new("/tmp/x.kiln")), Path::new("/tmp/x"));
+        assert_eq!(
+            default_binary(Path::new("/tmp/x.kiln")),
+            Path::new("/tmp/x")
+        );
         // Never over the source itself.
         assert_eq!(default_binary(Path::new("/tmp/x")), Path::new("/tmp/x.bin"));
     }

@@ -118,7 +118,11 @@ fn sugar_tour_cross_builds_and_runs_under_wine() {
         .expect("run kiln build --os windows");
     assert!(status.success(), "kiln build --os windows failed");
     let image = dir.join("sugar_tour.exe");
-    assert!(image.is_file(), "expected {} to be written", image.display());
+    assert!(
+        image.is_file(),
+        "expected {} to be written",
+        image.display()
+    );
 
     if let Some(lines) = wine_lines(&image, &dir) {
         assert_eq!(lines, EXPECTED, "the Windows tour transcript did not match");

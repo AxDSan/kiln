@@ -100,8 +100,7 @@ end
 "#,
     );
     assert_eq!(
-        out,
-        "Dear reader,\nyou have 2 message(s).\n\none\ntwo\na \"quoted\" word\n",
+        out, "Dear reader,\nyou have 2 message(s).\n\none\ntwo\na \"quoted\" word\n",
         "the block string did not come out as written"
     );
 }
@@ -182,10 +181,7 @@ sub main
 end
 "#,
     );
-    assert_eq!(
-        out,
-        vec!["60", "10", "30", "40", "0", "7", "0", "41", "2"]
-    );
+    assert_eq!(out, vec!["60", "10", "30", "40", "0", "7", "0", "41", "2"]);
 }
 
 /// `s[a..b]` is inclusive at both ends and counts from 1, over text, over a

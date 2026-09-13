@@ -22,7 +22,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 fn repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf()
 }
 
 fn on_path(tool: &str) -> bool {
@@ -86,25 +89,30 @@ fn a_bit_chooses_the_slot_and_the_address_is_called() {
     );
 
     // From `dir`, because the program opens `./libops.so`.
-    let out = Command::new(&bin).current_dir(&dir).output().expect("run the program");
+    let out = Command::new(&bin)
+        .current_dir(&dir)
+        .output()
+        .expect("run the program");
     assert!(
         out.status.success(),
         "the program exited non-zero:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let lines: Vec<String> =
-        String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect();
+    let lines: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect();
     assert_eq!(
         lines,
         vec![
-            "ok and = 4",                                    // 0xDEADBEEF & 4
-            "ok or = -559038737",                            // 0xDEADBEEF | 4
-            "ok xor = -559038741",                           // 0xDEADBEEF ^ 4
-            "skipped shl",                                   // its bit was clear
-            "ok ushr = 233495534",                           // zero-filled
+            "ok and = 4",          // 0xDEADBEEF & 4
+            "ok or = -559038737",  // 0xDEADBEEF | 4
+            "ok xor = -559038741", // 0xDEADBEEF ^ 4
+            "skipped shl",         // its bit was clear
+            "ok ushr = 233495534", // zero-filled
             "ok shr keeps the sign where ushr does not",
-            "ok shl = -354685200",                           // the bit, turned back on
-            "0",                                             // dlclose
+            "ok shl = -354685200", // the bit, turned back on
+            "0",                   // dlclose
         ],
         "unexpected transcript from the dispatch table"
     );
@@ -134,14 +142,22 @@ fn the_win_kit_calls_an_address_and_tests_its_own_flags_under_wine() {
     }
     let dir = scratch("windows");
     let out = dir.join("flags");
-    let built = build(&repo().join("examples/win/flags.kiln"), &out, &["--os", "windows"]);
+    let built = build(
+        &repo().join("examples/win/flags.kiln"),
+        &out,
+        &["--os", "windows"],
+    );
     assert!(
         built.status.success(),
         "flags.kiln did not cross-build:\n{}",
         String::from_utf8_lossy(&built.stderr)
     );
     let image = dir.join("flags.exe");
-    assert!(image.is_file(), "expected {} to be written", image.display());
+    assert!(
+        image.is_file(),
+        "expected {} to be written",
+        image.display()
+    );
 
     if !on_path("wine") {
         eprintln!("wine is not installed; the PE was built but not run");
@@ -173,8 +189,10 @@ fn the_win_kit_calls_an_address_and_tests_its_own_flags_under_wine() {
         run.status.code(),
         String::from_utf8_lossy(&run.stderr)
     );
-    let lines: Vec<String> =
-        stdout.lines().map(|l| l.trim_end_matches('\r').to_string()).collect();
+    let lines: Vec<String> = stdout
+        .lines()
+        .map(|l| l.trim_end_matches('\r').to_string())
+        .collect();
     assert_eq!(
         lines,
         vec![

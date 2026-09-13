@@ -145,10 +145,7 @@ end
 "
         ),
     );
-    assert_eq!(
-        out,
-        ["a:80 in 5000", "b:8080 in 5000", "c:8080 in 1"]
-    );
+    assert_eq!(out, ["a:80 in 5000", "b:8080 in 5000", "c:8080 in 1"]);
 }
 
 #[test]
@@ -273,13 +270,7 @@ end
     );
     assert_eq!(
         out,
-        [
-            "a:1 in 2",
-            "b:1 in 2",
-            "c:80 in 9",
-            "d:80 in 7",
-            "e:1 in 7",
-        ]
+        ["a:1 in 2", "b:1 in 2", "c:80 in 9", "d:80 in 7", "e:1 in 7",]
     );
 }
 

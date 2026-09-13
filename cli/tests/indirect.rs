@@ -16,7 +16,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 fn repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf()
 }
 
 fn on_path(tool: &str) -> bool {
@@ -95,13 +98,19 @@ fn dlopen_dlsym_and_call_through() {
     );
 
     // From `dir`, because the program opens `./libplug.so`.
-    let out = Command::new(&bin).current_dir(&dir).output().expect("run the program");
+    let out = Command::new(&bin)
+        .current_dir(&dir)
+        .output()
+        .expect("run the program");
     assert!(
         out.status.success(),
         "the program exited non-zero:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let lines: Vec<String> = String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect();
+    let lines: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect();
     assert_eq!(
         lines,
         vec![
@@ -163,8 +172,14 @@ fn a_value_use_needs_a_return_type() {
 fn an_argument_without_a_c_shape_is_refused() {
     let dir = scratch("args");
     for (decl, needle) in [
-        ("var xs: int[] = [1]\n  call through p(xs)", "cannot cross the C boundary"),
-        ("var d: int{} = {}\n  call through p(d)", "cannot cross the C boundary"),
+        (
+            "var xs: int[] = [1]\n  call through p(xs)",
+            "cannot cross the C boundary",
+        ),
+        (
+            "var d: int{} = {}\n  call through p(d)",
+            "cannot cross the C boundary",
+        ),
     ] {
         let (ok, said) = build_source(
             &dir,
@@ -239,10 +254,24 @@ end
         "geo.kiln did not build:\n{}",
         String::from_utf8_lossy(&built.stderr)
     );
-    let out = Command::new(&bin).current_dir(&dir).output().expect("run geo");
-    assert!(out.status.success(), "geo exited non-zero:\n{}", String::from_utf8_lossy(&out.stderr));
-    let lines: Vec<String> = String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect();
-    assert_eq!(lines, vec!["13", "24"], "C did not write through the struct pointer");
+    let out = Command::new(&bin)
+        .current_dir(&dir)
+        .output()
+        .expect("run geo");
+    assert!(
+        out.status.success(),
+        "geo exited non-zero:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let lines: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect();
+    assert_eq!(
+        lines,
+        vec!["13", "24"],
+        "C did not write through the struct pointer"
+    );
 }
 
 /// `through` is a soft keyword: it means something only straight after `call`,
@@ -307,14 +336,22 @@ fn loadlibrary_getprocaddress_and_call_through_under_wine() {
     assert!(status.success(), "mingw failed to build plug.dll");
 
     let out = dir.join("plugwin");
-    let built = build(&repo().join("examples/dll/plugwin.kiln"), &out, &["--os", "windows"]);
+    let built = build(
+        &repo().join("examples/dll/plugwin.kiln"),
+        &out,
+        &["--os", "windows"],
+    );
     assert!(
         built.status.success(),
         "plugwin.kiln did not cross-build:\n{}",
         String::from_utf8_lossy(&built.stderr)
     );
     let image = dir.join("plugwin.exe");
-    assert!(image.is_file(), "expected {} to be written", image.display());
+    assert!(
+        image.is_file(),
+        "expected {} to be written",
+        image.display()
+    );
 
     if !on_path("wine") {
         eprintln!("wine is not installed; the PE was built but not run");
@@ -347,7 +384,10 @@ fn loadlibrary_getprocaddress_and_call_through_under_wine() {
         run.status.code(),
         String::from_utf8_lossy(&run.stderr)
     );
-    let lines: Vec<String> = stdout.lines().map(|l| l.trim_end_matches('\r').to_string()).collect();
+    let lines: Vec<String> = stdout
+        .lines()
+        .map(|l| l.trim_end_matches('\r').to_string())
+        .collect();
     assert_eq!(
         lines,
         vec!["15", "plug", "42", "42", "done"],

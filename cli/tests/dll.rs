@@ -80,13 +80,13 @@ fn mathdll_value_string_and_pointer_paths() {
     assert_eq!(
         lines,
         vec![
-            "42",            // add_ints(40, 2)
+            "42",         // add_ints(40, 2)
             "Kiln <-> C", // banner() copied out of C
-            "42",            // bump() wrote through the ptr: 41 -> 42
-            "50",            // tentimes(5) via `as "times_ten"`
-            "9000000001",    // add_bignums: int64 past the 32-bit range
-            "3.5",           // halve(7.0): a double in and out
-            "positive",      // is_positive(3): a C int read back as a bool
+            "42",         // bump() wrote through the ptr: 41 -> 42
+            "50",         // tentimes(5) via `as "times_ten"`
+            "9000000001", // add_bignums: int64 past the 32-bit range
+            "3.5",        // halve(7.0): a double in and out
+            "positive",   // is_positive(3): a C int read back as a bool
         ],
         "unexpected FFI output"
     );
@@ -138,14 +138,22 @@ fn a_missing_library_is_a_named_runtime_error() {
     .expect("write badlib.kiln");
     let out_bin = dir.join("badlib");
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", src.to_str().unwrap(), "-o", out_bin.to_str().unwrap()])
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "-o",
+            out_bin.to_str().unwrap(),
+        ])
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
         .expect("run kiln");
     assert!(status.success(), "the program should BUILD (load is lazy)");
 
     let out = Command::new(&out_bin).output().expect("run badlib program");
-    assert!(!out.status.success(), "a missing library must fail at the call");
+    assert!(
+        !out.status.success(),
+        "a missing library must fail at the call"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("an_absent_library") && stderr.contains("`f`"),
@@ -160,7 +168,10 @@ fn the_validator_rejects_a_bad_call() {
     let dir = scratch("validate");
     for (body, needle) in [
         ("call print_int(add_ints(1))", "expects 2 argument"),
-        ("call print_int(add_ints(1, \"two\"))", "expects int, got text"),
+        (
+            "call print_int(add_ints(1, \"two\"))",
+            "expects int, got text",
+        ),
     ] {
         let src = dir.join("bad.kiln");
         std::fs::write(
@@ -173,7 +184,12 @@ fn the_validator_rejects_a_bad_call() {
         )
         .expect("write bad.kiln");
         let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
-            .args(["build", src.to_str().unwrap(), "-o", dir.join("x").to_str().unwrap()])
+            .args([
+                "build",
+                src.to_str().unwrap(),
+                "-o",
+                dir.join("x").to_str().unwrap(),
+            ])
             .env("KILN_RUNTIME_DIR", repo().join("runtime"))
             .output()
             .expect("run kiln");
@@ -218,7 +234,13 @@ fn mathdll_cross_builds_for_windows_and_runs_under_wine() {
     // The program as a PE32+ image.
     let image = dir.join("mathdll.exe");
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", repo().join("examples/dll/mathdll.kiln").to_str().unwrap(), "--os", "windows", "-o"])
+        .args([
+            "build",
+            repo().join("examples/dll/mathdll.kiln").to_str().unwrap(),
+            "--os",
+            "windows",
+            "-o",
+        ])
         .arg(&image)
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
@@ -247,7 +269,15 @@ fn mathdll_cross_builds_for_windows_and_runs_under_wine() {
         .collect();
     assert_eq!(
         lines,
-        vec!["42", "Kiln <-> C", "42", "50", "9000000001", "3.5", "positive"],
+        vec![
+            "42",
+            "Kiln <-> C",
+            "42",
+            "50",
+            "9000000001",
+            "3.5",
+            "positive"
+        ],
         "unexpected FFI output under wine"
     );
 }

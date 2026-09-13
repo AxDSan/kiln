@@ -89,7 +89,11 @@ fn sugar09_tour_example_prints_its_transcript() {
         "the tour exited non-zero:\n{}",
         String::from_utf8_lossy(&run.stderr)
     );
-    assert_eq!(lines_of(&run.stdout), EXPECTED, "the transcript did not match");
+    assert_eq!(
+        lines_of(&run.stdout),
+        EXPECTED,
+        "the transcript did not match"
+    );
 }
 
 /// A release build compiles the tour's `assert` out. That must change nothing
@@ -131,7 +135,11 @@ fn sugar09_tour_cross_builds_and_runs_under_wine() {
     let dir = scratch("windows");
     build(&dir, &["--os", "windows"]);
     let image = dir.join("sugar09_tour.exe");
-    assert!(image.is_file(), "expected {} to be written", image.display());
+    assert!(
+        image.is_file(),
+        "expected {} to be written",
+        image.display()
+    );
 
     if !on_path("wine") {
         eprintln!("wine is not installed; the Windows image was built but not run");

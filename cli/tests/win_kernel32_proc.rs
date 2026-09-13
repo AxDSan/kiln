@@ -17,7 +17,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 fn repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf()
 }
 
 fn on_path(tool: &str) -> bool {
@@ -37,8 +40,11 @@ fn project(tag: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     let kit = dir.join("kits").join("winproc");
     std::fs::create_dir_all(&kit).expect("create the scratch kit directory");
-    std::fs::copy(repo().join("kits/win/kernel32_proc.kdecl"), kit.join("winproc.kdecl"))
-        .expect("copy kernel32_proc.kdecl into the scratch kit");
+    std::fs::copy(
+        repo().join("kits/win/kernel32_proc.kdecl"),
+        kit.join("winproc.kdecl"),
+    )
+    .expect("copy kernel32_proc.kdecl into the scratch kit");
     std::fs::write(
         kit.join("lib.json"),
         "{ \"display\": \"Win kernel32 process\", \"section\": \"System\", \
@@ -55,7 +61,14 @@ fn build_for_windows(dir: &Path, src: &str, out: &str) -> PathBuf {
     std::fs::write(&srcpath, src).expect("write the program source");
     let exe = dir.join(format!("{out}.exe"));
     let output = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", srcpath.to_str().unwrap(), "--os", "windows", "-o", exe.to_str().unwrap()])
+        .args([
+            "build",
+            srcpath.to_str().unwrap(),
+            "--os",
+            "windows",
+            "-o",
+            exe.to_str().unwrap(),
+        ])
         .current_dir(dir)
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
@@ -304,38 +317,38 @@ end
 /// same structures in `<windows.h>` and `<tlhelp32.h>`, so a transcription
 /// slip anywhere in a field list moves one of them.
 const SURFACE_EXPECTED: &[&str] = &[
-    "104",                   // sizeof(STARTUPINFOA)
-    "24",                    // sizeof(PROCESS_INFORMATION)
-    "304",                   // sizeof(PROCESSENTRY32)
-    "28",                    // sizeof(THREADENTRY32)
-    "568",                   // sizeof(MODULEENTRY32)
-    "40",                    // sizeof(CRITICAL_SECTION)
-    "24",                    // sizeof(SECURITY_ATTRIBUTES)
+    "104", // sizeof(STARTUPINFOA)
+    "24",  // sizeof(PROCESS_INFORMATION)
+    "304", // sizeof(PROCESSENTRY32)
+    "28",  // sizeof(THREADENTRY32)
+    "568", // sizeof(MODULEENTRY32)
+    "40",  // sizeof(CRITICAL_SECTION)
+    "24",  // sizeof(SECURITY_ATTRIBUTES)
     "pid-ok",
     "tid-ok",
     "self-handle-is-pseudo", // GetCurrentProcess() is (HANDLE)-1
     "cmdline-ok",
-    "258",                   // WAIT_TIMEOUT: the event is unsignalled
-    "0",                     // WAIT_OBJECT_0 after SetEvent
-    "258",                   // WAIT_TIMEOUT again after ResetEvent
+    "258", // WAIT_TIMEOUT: the event is unsignalled
+    "0",   // WAIT_OBJECT_0 after SetEvent
+    "258", // WAIT_TIMEOUT again after ResetEvent
     "event-ok",
     "mutex-ok",
-    "0",                     // the semaphore's one count is taken
-    "258",                   // ...and the next wait finds none
-    "0",                     // ReleaseSemaphore reports a previous count of 0
+    "0",   // the semaphore's one count is taken
+    "258", // ...and the next wait finds none
+    "0",   // ReleaseSemaphore reports a previous count of 0
     "semaphore-ok",
     "critsec-ok",
-    "0",                     // the thread finished
-    "4242",                  // ...and Windows kept the sub's return as its exit code
+    "0",    // the thread finished
+    "4242", // ...and Windows kept the sub's return as its exit code
     "threadid-ok",
     "thread-ok",
-    "259",                   // STILL_ACTIVE: we are the running process
+    "259", // STILL_ACTIVE: we are the running process
     "processid-matches",
     "openprocess-ok",
-    "surface.exe",           // szExeFile out of the tool-help entry
+    "surface.exe", // szExeFile out of the tool-help entry
     "process32-ok",
     "thread32-ok",
-    "surface.exe",           // szModule out of the module entry
+    "surface.exe", // szModule out of the module entry
     "module32-ok",
     "sleep-ok",
 ];
@@ -408,8 +421,8 @@ fn create_process_starts_a_child_and_reads_its_exit_code() {
     assert_eq!(
         run_under_wine(&exe, &dir),
         &[
-            "0",                  // WAIT_OBJECT_0: the child ended
-            "7",                  // ...with the exit code it was told to
+            "0", // WAIT_OBJECT_0: the child ended
+            "7", // ...with the exit code it was told to
             "child-pid-ok",
             "createprocess-ok",
         ],

@@ -34,7 +34,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 fn repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf()
 }
 
 fn on_path(tool: &str) -> bool {
@@ -80,8 +83,11 @@ fn project(tag: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     let kit = dir.join("kits").join("win");
     std::fs::create_dir_all(&kit).expect("create the scratch kit directory");
-    std::fs::copy(repo().join("kits/win/kernel32_mem.kdecl"), kit.join("kernel32_mem.kdecl"))
-        .expect("copy kernel32_mem.kdecl into the scratch kit");
+    std::fs::copy(
+        repo().join("kits/win/kernel32_mem.kdecl"),
+        kit.join("kernel32_mem.kdecl"),
+    )
+    .expect("copy kernel32_mem.kdecl into the scratch kit");
     std::fs::write(kit.join("siblings.kdecl"), SIBLING_STANDINS).unwrap();
     std::fs::write(
         kit.join("lib.json"),
@@ -98,7 +104,14 @@ fn build_for_windows(dir: &Path, name: &str, source: &str) -> Result<PathBuf, St
     std::fs::write(&src, source).expect("write the program source");
     let out = dir.join(name);
     let done = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", src.to_str().unwrap(), "--os", "windows", "-o", out.to_str().unwrap()])
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--os",
+            "windows",
+            "-o",
+            out.to_str().unwrap(),
+        ])
         .current_dir(dir)
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
@@ -107,10 +120,13 @@ fn build_for_windows(dir: &Path, name: &str, source: &str) -> Result<PathBuf, St
         return Err(String::from_utf8_lossy(&done.stderr).into_owned());
     }
     let image = dir.join(format!("{name}.exe"));
-    assert!(image.is_file(), "expected {} to be written", image.display());
+    assert!(
+        image.is_file(),
+        "expected {} to be written",
+        image.display()
+    );
     Ok(image)
 }
-
 
 /// The whole observable surface, run for real: allocate a page and ask Windows
 /// what it says about it, walk a heap block, move bytes with the Win32
@@ -553,17 +569,30 @@ fn the_running_surface_behaves_on_windows() {
     );
 
     let failed: Vec<&&str> = lines.iter().filter(|l| l.ends_with("FAILED")).collect();
-    assert!(failed.is_empty(), "checks failed under wine: {failed:?}\n{text}");
+    assert!(
+        failed.is_empty(),
+        "checks failed under wine: {failed:?}\n{text}"
+    );
 
     for want in MUST_PASS {
-        assert!(lines.contains(want), "the check {want:?} did not run:\n{text}");
+        assert!(
+            lines.contains(want),
+            "the check {want:?} did not run:\n{text}"
+        );
     }
-    assert_eq!(lines.last(), Some(&"done"), "the program stopped early:\n{text}");
+    assert_eq!(
+        lines.last(),
+        Some(&"done"),
+        "the program stopped early:\n{text}"
+    );
 
     // The program is a constant, so the number of checks it makes is one too:
     // a check that quietly stops being printed is a regression like any other.
     let oks = lines.iter().filter(|l| l.ends_with(" ok")).count();
-    assert_eq!(oks, 77, "the program made {oks} checks, not the 77 it writes:\n{text}");
+    assert_eq!(
+        oks, 77,
+        "the program made {oks} checks, not the 77 it writes:\n{text}"
+    );
 }
 
 /// Every declaration the running program cannot reach still has to be a
@@ -651,7 +680,10 @@ cAlternateFileName: byte[14]",
         "const: INVALID_FILE_SIZE int",
         "const: MAX_PATH int",
     ] {
-        assert!(has(want), "`{want}` is not in `commands --use win`:\n{text}");
+        assert!(
+            has(want),
+            "`{want}` is not in `commands --use win`:\n{text}"
+        );
     }
 }
 
@@ -781,7 +813,9 @@ fn the_borrowed_names_are_still_declared_by_a_sibling() {
     for (name, _) in BORROWED {
         for lead in ["dll ", "record ", "const "] {
             assert!(
-                !mine.lines().any(|l| l.starts_with(&format!("{lead}{name}"))),
+                !mine
+                    .lines()
+                    .any(|l| l.starts_with(&format!("{lead}{name}"))),
                 "kernel32_mem.kdecl declares `{name}`, which a sibling owns — one name, one file"
             );
         }
@@ -800,12 +834,22 @@ fn the_kit_is_refused_on_linux() {
     )
     .unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", src.to_str().unwrap(), "--os", "linux", "-o", dir.join("app").to_str().unwrap()])
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--os",
+            "linux",
+            "-o",
+            dir.join("app").to_str().unwrap(),
+        ])
         .current_dir(&dir)
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
         .expect("run kiln build");
-    assert!(!out.status.success(), "a windows-only kit must not build for linux");
+    assert!(
+        !out.status.success(),
+        "a windows-only kit must not build for linux"
+    );
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("kit `win`") && err.contains("--os windows"),

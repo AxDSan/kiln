@@ -95,8 +95,12 @@ fn kit_cwd(tag: &str) -> PathBuf {
     std::fs::create_dir_all(&kit).expect("create scratch kit dir");
     // gdi32.kdecl, plus a shared `common*.kdecl` if the integrator has moved the
     // names two subsystems both need — the mechanism the kit spec names.
-    std::fs::copy(repo().join("kits/win/gdi32.kdecl"), kit.join("gdi32.kdecl")).expect("copy gdi32.kdecl");
-    for entry in std::fs::read_dir(repo().join("kits/win")).expect("read kits/win").flatten() {
+    std::fs::copy(repo().join("kits/win/gdi32.kdecl"), kit.join("gdi32.kdecl"))
+        .expect("copy gdi32.kdecl");
+    for entry in std::fs::read_dir(repo().join("kits/win"))
+        .expect("read kits/win")
+        .flatten()
+    {
         let name = entry.file_name().to_string_lossy().into_owned();
         if name.starts_with("common") && name.ends_with(".kdecl") {
             std::fs::copy(entry.path(), kit.join(&name)).expect("copy common kdecl");
@@ -528,34 +532,34 @@ const DRAW_EXPECTED: &[&str] = &[
     "sizeof.XFORM=24",
     "sizeof.DOCINFOA=40",
     "dc.made=1",
-    "GetObjectA.bytes=32",      // GDI wrote a whole BITMAP through the pointer
+    "GetObjectA.bytes=32", // GDI wrote a whole BITMAP through the pointer
     "bitmap.width=4",
     "bitmap.height=4",
-    "bitmap.planes=1",          // a WORD field, read back as an int
-    "SetBkMode.prev=2",         // OPAQUE, the mode a fresh DC starts in
-    "GetBkMode=1",              // TRANSPARENT
-    "SetTextColor.prev=0",      // black
-    "GetTextColor=16711680",    // 255 * 65536 — blue, in COLORREF order
+    "bitmap.planes=1",       // a WORD field, read back as an int
+    "SetBkMode.prev=2",      // OPAQUE, the mode a fresh DC starts in
+    "GetBkMode=1",           // TRANSPARENT
+    "SetTextColor.prev=0",   // black
+    "GetTextColor=16711680", // 255 * 65536 — blue, in COLORREF order
     "FillRect=1",
-    "pixel.filled=16777215",    // white, through a stock brush and a RECT
+    "pixel.filled=16777215", // white, through a stock brush and a RECT
     "SetPixel.result=255",
     "pixel.set=255",
     "MoveToEx=1",
     "GetCurrentPositionEx=1",
-    "position.x=3",             // written into a POINT by GDI
+    "position.x=3", // written into a POINT by GDI
     "position.y=4",
     "GetTextMetricsA=1",
     "metrics.height=positive",
     "GetTextExtentPoint32A=1",
     "extent.cx=positive",
-    "SetGraphicsMode.prev=1",   // GM_COMPATIBLE
+    "SetGraphicsMode.prev=1", // GM_COMPATIBLE
     "SetWorldTransform=1",
     "GetWorldTransform=1",
-    "xform.m11=2.5",            // a 4-byte float field, round-tripped by GDI
+    "xform.m11=2.5", // a 4-byte float field, round-tripped by GDI
     "SetGraphicsMode.back=2",
-    "facename[1]=65",           // 'A' — a byte[32] filled with mem_copy
-    "facename[5]=108",          // 'l'
-    "font.type=6",              // OBJ_FONT
+    "facename[1]=65",  // 'A' — a byte[32] filled with mem_copy
+    "facename[5]=108", // 'l'
+    "font.type=6",     // OBJ_FONT
     "PtInRegion.inside=1",
     "PtInRegion.outside=0",
     "DeleteObject.region=1",
@@ -563,7 +567,7 @@ const DRAW_EXPECTED: &[&str] = &[
     "TextOutA=1",
     "FillRect.src=1",
     "BitBlt=1",
-    "pixel.blitted=16777215",   // the white square arrived in the other DC
+    "pixel.blitted=16777215", // the white square arrived in the other DC
     "PatBlt=1",
     "pixel.blackness=0",
     "DeleteObject.dstbmp=1",
@@ -576,7 +580,7 @@ const DRAW_EXPECTED: &[&str] = &[
 
 /// Every line the second program prints, in order.
 const REST_EXPECTED: &[&str] = &[
-    "caps.technology=1",        // DT_RASDISPLAY
+    "caps.technology=1", // DT_RASDISPLAY
     "caps.horzres=positive",
     "SetTextAlign.prev=0",      // TA_LEFT | TA_TOP
     "GetTextAlign=6",           // TA_CENTER
@@ -594,14 +598,14 @@ const REST_EXPECTED: &[&str] = &[
     "SetWindowExtEx=1",
     "SetViewportExtEx=1",
     "RestoreDC=1",
-    "GetMapMode.restored=1",    // RestoreDC put MM_TEXT back
-    "type.hatchbrush=2",        // OBJ_BRUSH
+    "GetMapMode.restored=1", // RestoreDC put MM_TEXT back
+    "type.hatchbrush=2",     // OBJ_BRUSH
     "type.patternbrush=2",
-    "type.pen=1",               // OBJ_PEN
-    "type.memdc=10",            // OBJ_MEMDC
-    "type.brushindirect=2",     // built from a LOGBRUSH
+    "type.pen=1",           // OBJ_PEN
+    "type.memdc=10",        // OBJ_MEMDC
+    "type.brushindirect=2", // built from a LOGBRUSH
     "GetObjectA.logpen=16",
-    "logpen.width.x=2",         // a nested POINT, written by us, read from GDI
+    "logpen.width.x=2", // a nested POINT, written by us, read from GDI
     "logpen.color=255",
     "GetObjectA.logfont=60",
     "logfont.height=14",
@@ -623,24 +627,24 @@ const REST_EXPECTED: &[&str] = &[
     "CloseFigure=1",
     "EndPath=1",
     "StrokePath=1",
-    "CombineRgn=3",             // COMPLEXREGION: a rectangle met an ellipse
+    "CombineRgn=3", // COMPLEXREGION: a rectangle met an ellipse
     "FillRgn=1",
     "FrameRgn=1",
-    "SelectClipRgn=2",          // SIMPLEREGION
+    "SelectClipRgn=2", // SIMPLEREGION
     "IntersectClipRect=2",
     "ExcludeClipRect=3",
     "GetClipBox=3",
     "clipbox.right=4",
     "SelectClipRgn.none=2",
     "DeleteObject.regions=4",
-    "dib.pixel=255",            // the bytes we wrote, read back as a COLORREF
+    "dib.pixel=255", // the bytes we wrote, read back as a COLORREF
     "StretchBlt=1",
     "GetDIBits=4",
     "SetDIBits=4",
     "StretchDIBits=4",
     "DeleteDC.dib=1",
     "DeleteObject.dib=1",
-    "type.bitmap=7",            // OBJ_BITMAP
+    "type.bitmap=7", // OBJ_BITMAP
     "DeleteObject.mono=1",
     "ExtTextOutA=1",
     "GdiFlush=1",
@@ -845,7 +849,10 @@ fn gdi32_draws_into_a_memory_dc() {
     let Some(lines) = wine_lines(&exe) else {
         return;
     };
-    assert_eq!(lines, DRAW_EXPECTED, "the drawing program said something else");
+    assert_eq!(
+        lines, DRAW_EXPECTED,
+        "the drawing program said something else"
+    );
 }
 
 /// The rest of the file: every state call, every object kind, the shapes, the
@@ -862,7 +869,10 @@ fn gdi32_exercises_the_rest_of_the_bundle() {
     let Some(lines) = wine_lines(&exe) else {
         return;
     };
-    assert_eq!(lines, REST_EXPECTED, "the second program said something else");
+    assert_eq!(
+        lines, REST_EXPECTED,
+        "the second program said something else"
+    );
 }
 
 /// `kiln commands --use win` is what Studio's completion and the generated

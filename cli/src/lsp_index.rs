@@ -235,7 +235,12 @@ impl Index {
                     if form_depth > 0 {
                         form_depth -= 1;
                         // The innermost open block is the one this closes.
-                        if let Some(b) = ix.blocks.iter_mut().rev().find(|b| b.end_line == usize::MAX) {
+                        if let Some(b) = ix
+                            .blocks
+                            .iter_mut()
+                            .rev()
+                            .find(|b| b.end_line == usize::MAX)
+                        {
                             b.end_line = toks[i].line;
                         }
                     } else {
@@ -296,9 +301,7 @@ impl Index {
                 // fields inside are skipped wholesale, because a field is not a
                 // variable and resolving `x: int` as one would send a rename of
                 // an unrelated `x` into the declaration.
-                Tok::Ident(w)
-                    if w == "record" && scope.is_none() && form_depth == 0 =>
-                {
+                Tok::Ident(w) if w == "record" && scope.is_none() && form_depth == 0 => {
                     if let Some((name, sp)) = ident_at(&toks, i + 1) {
                         if let Some(d) = doc_before(src, sp.line) {
                             ix.docs.insert(name.clone(), d);
@@ -549,7 +552,10 @@ mod tests {
         assert!(refs.iter().all(|o| o.scope.as_deref() == Some("a")));
 
         let def = ix.definition_of(in_a).unwrap();
-        assert_eq!(def.line, 4, "resolves to the local, not the global on line 2");
+        assert_eq!(
+            def.line, 4,
+            "resolves to the local, not the global on line 2"
+        );
 
         // The `x` on line 8 is the global, and must not pick up a's local.
         let in_b = ix.at(8, 3).unwrap();
@@ -565,7 +571,10 @@ mod tests {
     fn form_components_are_indexed_with_their_types() {
         let src = "module m\nform Main\n  button ok\n  end\n  label title\n  end\nend\n";
         let ix = Index::build(src);
-        assert_eq!(ix.component_types.get("ok").map(String::as_str), Some("button"));
+        assert_eq!(
+            ix.component_types.get("ok").map(String::as_str),
+            Some("button")
+        );
         assert_eq!(
             ix.component_types.get("title").map(String::as_str),
             Some("label"),
@@ -648,7 +657,9 @@ mod tests {
         // names: indexing them would make go-to-definition on `int` land in a
         // parameter list.
         assert!(
-            !ix.occurrences.iter().any(|o| o.name == "int" && o.line == 3),
+            !ix.occurrences
+                .iter()
+                .any(|o| o.name == "int" && o.line == 3),
             "the `sub` header's types must not be indexed as names"
         );
     }
@@ -676,7 +687,11 @@ mod tests {
             .map(|(n, _)| n)
             .collect();
         assert!(inside.contains(&"i"), "{inside:?}");
-        let outside: Vec<&str> = ix.names_in_scope(None).into_iter().map(|(n, _)| n).collect();
+        let outside: Vec<&str> = ix
+            .names_in_scope(None)
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
         assert!(!outside.contains(&"i"), "{outside:?}");
     }
 
@@ -696,7 +711,8 @@ mod tests {
     /// so that line has to be captured as the author wrote it.
     #[test]
     fn subroutine_headers_are_captured_as_written() {
-        let src = "module m\nsub greet(who: text, times: int): text  # says hello\n  return who\nend\n\
+        let src =
+            "module m\nsub greet(who: text, times: int): text  # says hello\n  return who\nend\n\
                    sub main\nend\n";
         let ix = Index::build(src);
         assert_eq!(
@@ -751,11 +767,7 @@ mod tests {
             "the record name must be a definition: {:?}",
             ix.occurrences
         );
-        let xs: Vec<&Occurrence> = ix
-            .occurrences
-            .iter()
-            .filter(|o| o.name == "x")
-            .collect();
+        let xs: Vec<&Occurrence> = ix.occurrences.iter().filter(|o| o.name == "x").collect();
         assert_eq!(xs.len(), 1, "only the local `x` may be indexed: {xs:?}");
         assert_eq!(xs[0].scope.as_deref(), Some("main"));
         // The block must close cleanly, or every subroutine after it would be
@@ -785,7 +797,10 @@ mod tests {
         // While the block is still being typed it has no `end`; it is still
         // the block the caret is in.
         let ix = Index::build("module m\ntimer t\n  on ");
-        assert_eq!(ix.block_at_line(3).map(|b| b.type_name.as_str()), Some("timer"));
+        assert_eq!(
+            ix.block_at_line(3).map(|b| b.type_name.as_str()),
+            Some("timer")
+        );
     }
 
     /// An unparseable file still lexes, and the index must still work — this is
@@ -794,7 +809,9 @@ mod tests {
     fn works_on_a_file_that_does_not_parse() {
         let ix = Index::build("module m\nsub main\n  let x: int =\nend\n");
         assert!(
-            ix.occurrences.iter().any(|o| o.name == "x" && o.is_definition),
+            ix.occurrences
+                .iter()
+                .any(|o| o.name == "x" && o.is_definition),
             "half-typed code must still index"
         );
     }

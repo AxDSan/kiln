@@ -47,18 +47,18 @@ fn ptr_example_builds_and_runs() {
     assert_eq!(
         lines,
         vec![
-            "42",           // ptr_read_int at offset 0
-            "9000000000",   // ptr_read_int64 at offset 8 (a value past i32)
-            "255",          // ptr_read_byte reads 0..255
-            "3.5",          // ptr_read_double round-trips the bytes
-            "hello, C",     // ptr_of_text -> ptr_read_text
-            "",             // ptr_read_text(ptr_null()) is the one safe null read
-            "7",            // ptr_write_ptr / ptr_read_ptr walk a chain
-            "7",            // ptr_from_int(ptr_to_int(p)) is the same address
-            "same",         // two names for one address compare equal
-            "null-ok",      // ptr_is_null(ptr_null())
-            "123",          // a write through ptr_offset is visible from the base
-            "Kiln",      // ptr_write_text copies a text (with its NUL)
+            "42",         // ptr_read_int at offset 0
+            "9000000000", // ptr_read_int64 at offset 8 (a value past i32)
+            "255",        // ptr_read_byte reads 0..255
+            "3.5",        // ptr_read_double round-trips the bytes
+            "hello, C",   // ptr_of_text -> ptr_read_text
+            "",           // ptr_read_text(ptr_null()) is the one safe null read
+            "7",          // ptr_write_ptr / ptr_read_ptr walk a chain
+            "7",          // ptr_from_int(ptr_to_int(p)) is the same address
+            "same",       // two names for one address compare equal
+            "null-ok",    // ptr_is_null(ptr_null())
+            "123",        // a write through ptr_offset is visible from the base
+            "Kiln",       // ptr_write_text copies a text (with its NUL)
         ],
         "unexpected ptr output:\n{stdout}"
     );

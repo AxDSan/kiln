@@ -76,7 +76,10 @@ fn pe_subsystem(image: &Path) -> u16 {
     assert!(bytes.len() > 0x40, "image is too short to be a PE file");
     assert_eq!(&bytes[0..2], b"MZ", "no DOS stub signature");
     let pe = u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize;
-    assert!(pe + 24 + 70 <= bytes.len(), "e_lfanew points outside the file");
+    assert!(
+        pe + 24 + 70 <= bytes.len(),
+        "e_lfanew points outside the file"
+    );
     assert_eq!(&bytes[pe..pe + 4], b"PE\0\0", "no PE signature at e_lfanew");
     let machine = u16::from_le_bytes([bytes[pe + 4], bytes[pe + 5]]);
     assert_eq!(machine, 0x8664, "machine is not x86-64");
@@ -100,7 +103,12 @@ fn dlls_beside(image: &Path) -> Vec<String> {
 /// Run under wine with its display drivers turned OFF, so no test here can
 /// put a window on the screen of whoever is working on this machine. `None`
 /// when wine is not here.
-fn wine(image: &Path, args: &[&str], cwd: &Path, env: &[(&str, &str)]) -> Option<std::process::Output> {
+fn wine(
+    image: &Path,
+    args: &[&str],
+    cwd: &Path,
+    env: &[(&str, &str)],
+) -> Option<std::process::Output> {
     if !on_path("wine") {
         eprintln!("wine is not installed; the Windows image was built but not run");
         return None;
@@ -147,8 +155,14 @@ fn portable_layer_probe_passes_on_the_host() {
         .arg(&exe)
         .status()
         .expect("run clang++");
-    assert!(status.success(), "designer/test_portable.cpp does not compile on the host");
-    let out = Command::new(&exe).env("TMPDIR", &dir).output().expect("run the probe");
+    assert!(
+        status.success(),
+        "designer/test_portable.cpp does not compile on the host"
+    );
+    let out = Command::new(&exe)
+        .env("TMPDIR", &dir)
+        .output()
+        .expect("run the probe");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success() && stdout.contains("0 failure(s)"),
@@ -163,7 +177,9 @@ fn portable_layer_probe_passes_on_the_host() {
 #[test]
 fn portable_layer_probe_passes_under_wine() {
     if !on_path("x86_64-w64-mingw32-g++") {
-        eprintln!("x86_64-w64-mingw32-g++ is not installed; skipping the Windows portable-layer probe");
+        eprintln!(
+            "x86_64-w64-mingw32-g++ is not installed; skipping the Windows portable-layer probe"
+        );
         return;
     }
     let dir = scratch("wine");
@@ -178,8 +194,13 @@ fn portable_layer_probe_passes_under_wine() {
         .arg(&exe)
         .status()
         .expect("run x86_64-w64-mingw32-g++");
-    assert!(status.success(), "designer/test_portable.cpp does not cross-compile for Windows");
-    let Some(out) = wine(&exe, &[], &dir, &[]) else { return };
+    assert!(
+        status.success(),
+        "designer/test_portable.cpp does not cross-compile for Windows"
+    );
+    let Some(out) = wine(&exe, &[], &dir, &[]) else {
+        return;
+    };
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -208,10 +229,22 @@ fn studio_cross_builds_to_a_gui_pe_with_its_dlls_and_loads_under_wine() {
     let image = dir.join("kiln-studio.exe");
     assert!(image.is_file(), "no kiln-studio.exe at {}", image.display());
 
-    assert_eq!(pe_subsystem(&image), 2, "Studio must link for the GUI subsystem");
+    assert_eq!(
+        pe_subsystem(&image),
+        2,
+        "Studio must link for the GUI subsystem"
+    );
     let dlls = dlls_beside(&image);
-    for want in ["SDL2.dll", "SDL2_image.dll", "libfreetype-6.dll", "SDL3.dll"] {
-        assert!(dlls.contains(&want.to_string()), "{want} is not beside Studio; found {dlls:?}");
+    for want in [
+        "SDL2.dll",
+        "SDL2_image.dll",
+        "libfreetype-6.dll",
+        "SDL3.dll",
+    ] {
+        assert!(
+            dlls.contains(&want.to_string()),
+            "{want} is not beside Studio; found {dlls:?}"
+        );
     }
 
     // A scripted session on a copy of an example, as the Linux Studio tests

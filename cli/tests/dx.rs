@@ -191,7 +191,10 @@ fn a_timer_program_outlives_main_and_quits_itself() {
         .read_to_string(&mut text)
         .expect("read output");
     assert!(text.contains("main returned"), "main never ran: {text}");
-    assert!(text.contains("tick 3"), "the tick handler never ran to the end: {text}");
+    assert!(
+        text.contains("tick 3"),
+        "the tick handler never ran to the end: {text}"
+    );
 }
 
 /// `kiln new` on a name that does not exist must say what does. A bare
@@ -243,7 +246,10 @@ fn a_windowed_program_is_refused_sleep_and_pointed_at_timer() {
     )
     .unwrap();
     let out = kiln(&root, &home, &["emit", src.to_str().unwrap()]);
-    assert!(!out.status.success(), "a sleep in a windowed program must not build");
+    assert!(
+        !out.status.success(),
+        "a sleep in a windowed program must not build"
+    );
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains(
@@ -260,5 +266,9 @@ fn a_windowed_program_is_refused_sleep_and_pointed_at_timer() {
     )
     .unwrap();
     let out = kiln(&root, &home, &["emit", src.to_str().unwrap()]);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }

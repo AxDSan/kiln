@@ -293,7 +293,10 @@ fn kit_templates_are_listed_and_can_be_created() {
     .unwrap();
 
     let listing = kiln(&root, &home, &["templates"]);
-    assert!(listing.contains("template: gadget-app console"), "{listing}");
+    assert!(
+        listing.contains("template: gadget-app console"),
+        "{listing}"
+    );
     assert!(listing.contains("name: gadget-app Gadget App"), "{listing}");
 
     // The bundled templates are untouched: the designer parses this listing.

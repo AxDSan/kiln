@@ -391,10 +391,7 @@ sub main
 end
 "#,
     );
-    assert_eq!(
-        out,
-        ["work 1", "end 1", "end 2", "end 3", "after"]
-    );
+    assert_eq!(out, ["work 1", "end 1", "end 2", "end 3", "after"]);
 }
 
 /// `defer` runs one simple statement. A block would have an end of its own, and

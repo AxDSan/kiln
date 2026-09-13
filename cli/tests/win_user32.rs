@@ -122,19 +122,43 @@ const LAYOUT: &[(&str, i64, &str)] = &[
     ("sizeof MSG", 48, "sizeof(MSG)"),
     ("offsetof MSG.pt", 36, "offsetof(MSG, pt)"),
     ("sizeof WNDCLASSEXA", 80, "sizeof(WNDCLASSEXA)"),
-    ("offsetof WNDCLASSEXA.wnd_extra", 20, "offsetof(WNDCLASSEXA, cbWndExtra)"),
-    ("offsetof WNDCLASSEXA.class_name", 64, "offsetof(WNDCLASSEXA, lpszClassName)"),
+    (
+        "offsetof WNDCLASSEXA.wnd_extra",
+        20,
+        "offsetof(WNDCLASSEXA, cbWndExtra)",
+    ),
+    (
+        "offsetof WNDCLASSEXA.class_name",
+        64,
+        "offsetof(WNDCLASSEXA, lpszClassName)",
+    ),
     ("sizeof WNDCLASSA", 72, "sizeof(WNDCLASSA)"),
     ("sizeof CREATESTRUCTA", 80, "sizeof(CREATESTRUCTA)"),
-    ("offsetof CREATESTRUCTA.style", 48, "offsetof(CREATESTRUCTA, style)"),
-    ("offsetof CREATESTRUCTA.name", 56, "offsetof(CREATESTRUCTA, lpszName)"),
+    (
+        "offsetof CREATESTRUCTA.style",
+        48,
+        "offsetof(CREATESTRUCTA, style)",
+    ),
+    (
+        "offsetof CREATESTRUCTA.name",
+        56,
+        "offsetof(CREATESTRUCTA, lpszName)",
+    ),
     ("sizeof MINMAXINFO", 40, "sizeof(MINMAXINFO)"),
     ("sizeof WINDOWPLACEMENT", 44, "sizeof(WINDOWPLACEMENT)"),
     ("sizeof WINDOWPOS", 40, "sizeof(WINDOWPOS)"),
     ("sizeof KBDLLHOOKSTRUCT", 24, "sizeof(KBDLLHOOKSTRUCT)"),
-    ("offsetof KBDLLHOOKSTRUCT.extra_info", 16, "offsetof(KBDLLHOOKSTRUCT, dwExtraInfo)"),
+    (
+        "offsetof KBDLLHOOKSTRUCT.extra_info",
+        16,
+        "offsetof(KBDLLHOOKSTRUCT, dwExtraInfo)",
+    ),
     ("sizeof MSLLHOOKSTRUCT", 32, "sizeof(MSLLHOOKSTRUCT)"),
-    ("offsetof MSLLHOOKSTRUCT.extra_info", 24, "offsetof(MSLLHOOKSTRUCT, dwExtraInfo)"),
+    (
+        "offsetof MSLLHOOKSTRUCT.extra_info",
+        24,
+        "offsetof(MSLLHOOKSTRUCT, dwExtraInfo)",
+    ),
     ("sizeof CWPSTRUCT", 32, "sizeof(CWPSTRUCT)"),
     ("sizeof MOUSEINPUT", 32, "sizeof(MOUSEINPUT)"),
     ("sizeof KEYBDINPUT", 24, "sizeof(KEYBDINPUT)"),
@@ -146,8 +170,16 @@ const LAYOUT: &[(&str, i64, &str)] = &[
     // PAINTSTRUCT and RECT are declared in the kit's gdi32.kdecl; the calls
     // here take them, so their layout is this file's business too.
     ("sizeof PAINTSTRUCT", 72, "sizeof(PAINTSTRUCT)"),
-    ("offsetof PAINTSTRUCT.paint", 12, "offsetof(PAINTSTRUCT, rcPaint)"),
-    ("offsetof PAINTSTRUCT.reserved", 36, "offsetof(PAINTSTRUCT, rgbReserved)"),
+    (
+        "offsetof PAINTSTRUCT.paint",
+        12,
+        "offsetof(PAINTSTRUCT, rcPaint)",
+    ),
+    (
+        "offsetof PAINTSTRUCT.reserved",
+        36,
+        "offsetof(PAINTSTRUCT, rgbReserved)",
+    ),
     ("sizeof RECT", 16, "sizeof(RECT)"),
 ];
 
@@ -250,7 +282,15 @@ fn sdk_agrees_with_the_table() {
     std::fs::write(&path, c).expect("write the C check");
 
     let out = Command::new("x86_64-w64-mingw32-gcc")
-        .args(["-fsyntax-only", "-Wall", "-Wextra", "-I", "abi", "-I", "runtime"])
+        .args([
+            "-fsyntax-only",
+            "-Wall",
+            "-Wextra",
+            "-I",
+            "abi",
+            "-I",
+            "runtime",
+        ])
         .arg(&path)
         .current_dir(repo())
         .output()
@@ -275,7 +315,13 @@ fn the_records_have_the_layout_windows_has() {
     let Some(lines) = wine_lines(&bin, &dir) else {
         return;
     };
-    assert_eq!(lines.len(), LAYOUT.len(), "printed {} lines, want {}", lines.len(), LAYOUT.len());
+    assert_eq!(
+        lines.len(),
+        LAYOUT.len(),
+        "printed {} lines, want {}",
+        lines.len(),
+        LAYOUT.len()
+    );
     for (line, (label, want, _)) in lines.iter().zip(LAYOUT) {
         assert_eq!(line, &want.to_string(), "{label}");
     }
@@ -408,7 +454,13 @@ fn the_calls_that_need_no_desktop_run_under_wine() {
     let Some(lines) = wine_lines(&bin, &dir) else {
         return;
     };
-    assert_eq!(lines.len(), 25, "printed {} lines:\n{}", lines.len(), lines.join("\n"));
+    assert_eq!(
+        lines.len(),
+        25,
+        "printed {} lines:\n{}",
+        lines.len(),
+        lines.join("\n")
+    );
 
     let num = |i: usize| -> i64 {
         lines[i]
@@ -645,7 +697,8 @@ fn the_declarations_are_listed() {
         "EmptyClipboard",
     ] {
         assert!(
-            listing.contains(&format!("dll: {name}(")) || listing.contains(&format!("dll: {name}()")),
+            listing.contains(&format!("dll: {name}("))
+                || listing.contains(&format!("dll: {name}()")),
             "`{name}` is not in `kiln commands --use win`"
         );
     }
@@ -656,10 +709,22 @@ fn the_declarations_are_listed() {
         );
     }
     for name in [
-        "WM_DESTROY", "WM_PAINT", "WM_COMMAND", "WM_QUIT",
-        "WS_OVERLAPPEDWINDOW", "WS_VISIBLE", "MB_YESNO", "SW_SHOW",
-        "CW_USEDEFAULT", "WH_KEYBOARD_LL", "IDC_ARROW", "IDI_APPLICATION",
-        "COLOR_WINDOW", "SM_CXSCREEN", "VK_RETURN", "HWND_MESSAGE",
+        "WM_DESTROY",
+        "WM_PAINT",
+        "WM_COMMAND",
+        "WM_QUIT",
+        "WS_OVERLAPPEDWINDOW",
+        "WS_VISIBLE",
+        "MB_YESNO",
+        "SW_SHOW",
+        "CW_USEDEFAULT",
+        "WH_KEYBOARD_LL",
+        "IDC_ARROW",
+        "IDI_APPLICATION",
+        "COLOR_WINDOW",
+        "SM_CXSCREEN",
+        "VK_RETURN",
+        "HWND_MESSAGE",
     ] {
         assert!(
             listing.contains(&format!("const: {name} ")),

@@ -38,8 +38,8 @@ pub struct Template {
 /// resolved at all.
 pub fn load_all(repo_root: &Path) -> Result<Vec<Template>, String> {
     let root = repo_root.join("templates");
-    let entries = std::fs::read_dir(&root)
-        .map_err(|e| format!("cannot read {}: {e}", root.display()))?;
+    let entries =
+        std::fs::read_dir(&root).map_err(|e| format!("cannot read {}: {e}", root.display()))?;
 
     let mut out: Vec<Template> = Vec::new();
     for entry in entries.flatten() {
@@ -103,9 +103,10 @@ fn parse_meta(id: &str, dir: &Path, meta: &Path) -> Result<Template, String> {
             "desc" => desc = value,
             "entry" => entry = value,
             "target" => {
-                target = Some(Target::parse(&value).ok_or_else(|| {
-                    format!("{}: unknown target `{value}`", meta.display())
-                })?)
+                target = Some(
+                    Target::parse(&value)
+                        .ok_or_else(|| format!("{}: unknown target `{value}`", meta.display()))?,
+                )
             }
             _ => {}
         }
@@ -113,7 +114,11 @@ fn parse_meta(id: &str, dir: &Path, meta: &Path) -> Result<Template, String> {
 
     Ok(Template {
         id: id.to_string(),
-        name: if name.is_empty() { id.to_string() } else { name },
+        name: if name.is_empty() {
+            id.to_string()
+        } else {
+            name
+        },
         desc,
         // A template without a declared target is a template whose New Project
         // tile would lie about what it builds.

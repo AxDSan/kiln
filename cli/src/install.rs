@@ -18,7 +18,15 @@ use std::path::{Path, PathBuf};
 /// install that silently picked up `target/` or a developer's `dist/` would
 /// copy gigabytes and would differ between machines.
 const TREE: &[&str] = &[
-    "runtime", "abi", "libs", "kits", "templates", "examples", "editors", "assets", "docs",
+    "runtime",
+    "abi",
+    "libs",
+    "kits",
+    "templates",
+    "examples",
+    "editors",
+    "assets",
+    "docs",
 ];
 
 /// The binaries: the name to install as, whether the install is useless
@@ -211,7 +219,10 @@ pub fn cmd_install(root: &Path, args: &[String]) -> i32 {
         println!("nothing was written. Run it again without --dry-run.");
         return 0;
     }
-    println!("installed. `kiln version` should work once {} is on your PATH.", bindir.display());
+    println!(
+        "installed. `kiln version` should work once {} is on your PATH.",
+        bindir.display()
+    );
     if !on_path(&bindir) {
         println!();
         println!("{} is not on your PATH. Add it:", bindir.display());
@@ -229,7 +240,11 @@ pub fn cmd_install(root: &Path, args: &[String]) -> i32 {
 fn install_editors(libdir: &Path, dry: bool) -> i32 {
     let src = libdir.join("editors").join("kate").join("kiln.xml");
     // In a dry run nothing has been copied yet, so read from the source tree.
-    let src = if src.is_file() { src } else { PathBuf::from("editors/kate/kiln.xml") };
+    let src = if src.is_file() {
+        src
+    } else {
+        PathBuf::from("editors/kate/kiln.xml")
+    };
 
     let dest_dir = home()
         .join(".local")

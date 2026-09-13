@@ -40,10 +40,17 @@ fn a_dry_run_writes_nothing() {
     let dir = scratch("dry");
     let prefix = dir.join("prefix");
     let out = kiln(&["install", "--dry-run", "--prefix", prefix.to_str().unwrap()]);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("dry run"), "{text}");
-    assert!(text.contains("runtime/"), "it did not say what it would copy:\n{text}");
+    assert!(
+        text.contains("runtime/"),
+        "it did not say what it would copy:\n{text}"
+    );
     assert!(
         !prefix.exists(),
         "a dry run created {} — it must write nothing",
@@ -57,7 +64,11 @@ fn an_installed_tree_builds_and_runs_a_program() {
     let dir = scratch("real");
     let prefix = dir.join("prefix");
     let out = kiln(&["install", "--prefix", prefix.to_str().unwrap()]);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let bin = prefix.join("bin").join("kiln");
     assert!(bin.exists(), "no kiln in {}", prefix.join("bin").display());
@@ -65,7 +76,11 @@ fn an_installed_tree_builds_and_runs_a_program() {
     // The name on PATH is a symlink into lib/, not a second copy.
     let meta = std::fs::symlink_metadata(&bin).expect("stat the installed kiln");
     #[cfg(unix)]
-    assert!(meta.file_type().is_symlink(), "{} is not a symlink", bin.display());
+    assert!(
+        meta.file_type().is_symlink(),
+        "{} is not a symlink",
+        bin.display()
+    );
     #[cfg(not(unix))]
     let _ = meta;
 
@@ -101,12 +116,20 @@ fn an_installed_tree_builds_and_runs_a_program() {
 fn replacing_an_install_needs_force() {
     let dir = scratch("force");
     let prefix = dir.join("prefix");
-    assert!(kiln(&["install", "--prefix", prefix.to_str().unwrap()]).status.success());
+    assert!(kiln(&["install", "--prefix", prefix.to_str().unwrap()])
+        .status
+        .success());
 
     let again = kiln(&["install", "--prefix", prefix.to_str().unwrap()]);
-    assert!(!again.status.success(), "a second install should have refused");
+    assert!(
+        !again.status.success(),
+        "a second install should have refused"
+    );
     let err = String::from_utf8_lossy(&again.stderr);
-    assert!(err.contains("--force"), "the refusal did not name the way out:\n{err}");
+    assert!(
+        err.contains("--force"),
+        "the refusal did not name the way out:\n{err}"
+    );
 
     let forced = kiln(&["install", "--force", "--prefix", prefix.to_str().unwrap()]);
     assert!(

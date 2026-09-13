@@ -80,7 +80,10 @@ fn lines_of(out: std::process::Output, what: &str) -> Vec<String> {
 }
 
 fn linux_lines(image: &Path, cwd: &Path) -> Vec<String> {
-    let out = Command::new(image).current_dir(cwd).output().expect("run the Linux build");
+    let out = Command::new(image)
+        .current_dir(cwd)
+        .output()
+        .expect("run the Linux build");
     lines_of(out, "the Linux program")
 }
 
@@ -110,7 +113,11 @@ fn same_on_both(tag: &str, source: &Path, must_say: &[&str]) {
     build(source, &dir.join("linux_build"), None);
     build(source, &dir.join("win_build"), Some("windows"));
     let image = dir.join("win_build.exe");
-    assert!(image.is_file(), "expected {} to be written", image.display());
+    assert!(
+        image.is_file(),
+        "expected {} to be written",
+        image.display()
+    );
 
     let linux = linux_lines(&dir.join("linux_build"), &dir);
     for line in must_say {
@@ -181,6 +188,10 @@ end
     same_on_both(
         "before1970",
         &source,
-        &["1906-01-01T00:00:00Z", "1969-07-20T20:17:40Z", "1969-12-31T23:59:59Z"],
+        &[
+            "1906-01-01T00:00:00Z",
+            "1969-07-20T20:17:40Z",
+            "1969-12-31T23:59:59Z",
+        ],
     );
 }

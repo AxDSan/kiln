@@ -36,7 +36,9 @@ fn on_path(tool: &str) -> bool {
 /// three, or the test says which is missing and stops.
 fn windows_ui_present() -> bool {
     if !on_path("x86_64-w64-mingw32-gcc") {
-        eprintln!("x86_64-w64-mingw32-gcc is not installed; skipping the Windows GUI cross-build test");
+        eprintln!(
+            "x86_64-w64-mingw32-gcc is not installed; skipping the Windows GUI cross-build test"
+        );
         return false;
     }
     let rmlui = repo().join("vendor/RmlUi/build-windows/librmlui.a");
@@ -75,7 +77,11 @@ fn build_windows(source: &Path, out: &Path, extra: &[&str]) {
         .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
         .expect("run kiln");
-    assert!(status.success(), "kiln build --os windows failed for {}", source.display());
+    assert!(
+        status.success(),
+        "kiln build --os windows failed for {}",
+        source.display()
+    );
 }
 
 /// The image's own headers: PE32+ for x86-64, and the optional header's
@@ -87,7 +93,10 @@ fn pe_subsystem(image: &Path) -> u16 {
     assert!(bytes.len() > 0x40, "image is too short to be a PE file");
     assert_eq!(&bytes[0..2], b"MZ", "no DOS stub signature");
     let pe = u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize;
-    assert!(pe + 24 + 70 <= bytes.len(), "e_lfanew points outside the file");
+    assert!(
+        pe + 24 + 70 <= bytes.len(),
+        "e_lfanew points outside the file"
+    );
     assert_eq!(&bytes[pe..pe + 4], b"PE\0\0", "no PE signature at e_lfanew");
     let machine = u16::from_le_bytes([bytes[pe + 4], bytes[pe + 5]]);
     assert_eq!(machine, 0x8664, "machine is not x86-64");
@@ -169,7 +178,11 @@ fn form_cross_builds_to_a_gui_subsystem_pe_with_its_dlls_beside_it() {
     let image = dir.join("form.exe");
     build_windows(&repo().join("examples/form.kiln"), &image, &[]);
 
-    assert_eq!(pe_subsystem(&image), 2, "a form must link for the GUI subsystem");
+    assert_eq!(
+        pe_subsystem(&image),
+        2,
+        "a form must link for the GUI subsystem"
+    );
 
     // The three the ui library links directly. Their own dependencies are
     // copied too, and the run below is what proves that list complete: a
@@ -177,11 +190,17 @@ fn form_cross_builds_to_a_gui_subsystem_pe_with_its_dlls_beside_it() {
     // program before `main`.
     let dlls = dlls_beside(&image);
     for want in ["SDL2.dll", "SDL2_image.dll", "libfreetype-6.dll"] {
-        assert!(dlls.contains(&want.to_string()), "{want} is not beside the program; found {dlls:?}");
+        assert!(
+            dlls.contains(&want.to_string()),
+            "{want} is not beside the program; found {dlls:?}"
+        );
     }
     // sdl2-compat's SDL2.dll loads SDL3.dll by hand, not through its import
     // table; the manifest names it so it ships too.
-    assert!(dlls.contains(&"SDL3.dll".to_string()), "SDL3.dll is not beside the program; found {dlls:?}");
+    assert!(
+        dlls.contains(&"SDL3.dll".to_string()),
+        "SDL3.dll is not beside the program; found {dlls:?}"
+    );
 
     let dump = dir.join("w.ppm");
     let Some(out) = wine(
@@ -246,13 +265,19 @@ fn console_program_that_uses_ui_runs_under_wine_with_the_dlls_beside_it() {
     build_windows(&source, &image, &[]);
 
     // A console program keeps its console even when it links the UI stack.
-    assert_eq!(pe_subsystem(&image), 3, "a console program must stay in the console subsystem");
+    assert_eq!(
+        pe_subsystem(&image),
+        3,
+        "a console program must stay in the console subsystem"
+    );
     assert!(dlls_beside(&image).contains(&"SDL2.dll".to_string()));
 
     // No window is asked for, so this runs to completion with no display
     // at all — and the DLL chain is proven complete by the loader, which
     // resolves every import before `main`.
-    let Some(out) = wine(&image, &dir, &[]) else { return };
+    let Some(out) = wine(&image, &dir, &[]) else {
+        return;
+    };
     assert!(
         out.status.success(),
         "the program exited {:?} under wine:\n{}",
@@ -275,7 +300,11 @@ fn console_cross_build_ships_no_dlls() {
     let dir = scratch("console");
     let image = dir.join("hello.exe");
     build_windows(&repo().join("examples/hello.kiln"), &image, &[]);
-    assert_eq!(pe_subsystem(&image), 3, "a console program must link for the console subsystem");
+    assert_eq!(
+        pe_subsystem(&image),
+        3,
+        "a console program must link for the console subsystem"
+    );
     assert!(
         dlls_beside(&image).is_empty(),
         "a console program imports nothing from the mingw sysroot, yet DLLs were copied: {:?}",

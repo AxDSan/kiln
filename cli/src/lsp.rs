@@ -39,20 +39,20 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
-use lsp_types::request::{
-    Completion, DocumentSymbolRequest, GotoDefinition, HoverRequest, References,
-    Request as _, SignatureHelpRequest,
-};
 use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
     Notification as _, PublishDiagnostics,
 };
+use lsp_types::request::{
+    Completion, DocumentSymbolRequest, Formatting, GotoDefinition, HoverRequest, References,
+    Request as _, SignatureHelpRequest,
+};
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, Diagnostic,
-    DiagnosticSeverity, DocumentSymbolParams, Hover, HoverContents, HoverProviderCapability,
-    InitializeParams, Location, MarkupContent, MarkupKind, OneOf, Position,
-    ParameterInformation, ParameterLabel, PublishDiagnosticsParams, Range, ReferenceParams,
-    ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureInformation,
+    DiagnosticSeverity, DocumentFormattingParams, DocumentSymbolParams, Hover, HoverContents,
+    HoverProviderCapability, InitializeParams, Location, MarkupContent, MarkupKind, OneOf,
+    ParameterInformation, ParameterLabel, Position, PublishDiagnosticsParams, Range,
+    ReferenceParams, ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureInformation,
     SymbolInformation, SymbolKind, TextDocumentPositionParams, TextDocumentSyncCapability,
     TextDocumentSyncKind, TextEdit, Uri,
 };
@@ -108,6 +108,7 @@ fn serve() -> Result<(), Box<dyn Error + Sync + Send>> {
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
+        document_formatting_provider: Some(OneOf::Left(true)),
         ..Default::default()
     })?;
 
@@ -211,6 +212,7 @@ impl Server {
             GotoDefinition::METHOD => self.on_definition(req.params),
             References::METHOD => self.on_references(req.params),
             DocumentSymbolRequest::METHOD => self.on_document_symbol(req.params),
+            Formatting::METHOD => self.on_formatting(req.params),
             _ => {
                 let resp = Response::new_err(
                     id,
@@ -307,7 +309,11 @@ impl Server {
                         .map(|(n, _)| n)
                         .collect();
                     for name in &subs {
-                        items.push(item(name, CompletionItemKind::FUNCTION, "subroutine".into()));
+                        items.push(item(
+                            name,
+                            CompletionItemKind::FUNCTION,
+                            "subroutine".into(),
+                        ));
                     }
                     // The one that does not exist: named after the component
                     // and the event, declared with what the event hands over,
@@ -337,11 +343,7 @@ impl Server {
                         ));
                     }
                     for ev in &desc.events {
-                        items.push(item(
-                            ev,
-                            CompletionItemKind::EVENT,
-                            format!("{ty} event"),
-                        ));
+                        items.push(item(ev, CompletionItemKind::EVENT, format!("{ty} event")));
                     }
                 }
             }
@@ -420,7 +422,13 @@ impl Server {
                 (b.id.clone(), b.type_name.clone())
             };
             let desc = reg.component(&ty)?;
-            member_hover(reg, desc, &id, occ, &nth_line(&src, occ.line).unwrap_or_default())
+            member_hover(
+                reg,
+                desc,
+                &id,
+                occ,
+                &nth_line(&src, occ.line).unwrap_or_default(),
+            )
         });
 
         let text = if let Some(text) = member {
@@ -565,9 +573,23 @@ impl Server {
     }
 
     /// Powers the editor's outline / breadcrumb view.
+    /// Whole-document formatting, for K2 files. A 1.x file has no canonical
+    /// printer, so nothing is offered for one.
+    fn on_formatting(&mut self, params: serde_json::Value) -> Option<serde_json::Value> {
+        let p: DocumentFormattingParams = serde_json::from_value(params).ok()?;
+        let src = self.docs.get(&p.text_document.uri)?.clone();
+        if !crate::lsp_k2::is_k2(&src) {
+            return None;
+        }
+        serde_json::to_value(crate::lsp_k2::formatting(&src)?).ok()
+    }
+
     fn on_document_symbol(&mut self, params: serde_json::Value) -> Option<serde_json::Value> {
         let p: DocumentSymbolParams = serde_json::from_value(params).ok()?;
         let src = self.docs.get(&p.text_document.uri)?.clone();
+        if crate::lsp_k2::is_k2(&src) {
+            return serde_json::to_value(crate::lsp_k2::symbols(&src)).ok();
+        }
         let ix = Index::build(&src);
         let syms: Vec<SymbolInformation> = ix
             .occurrences
@@ -663,6 +685,11 @@ impl Server {
     /// validator's line numbers are the unit's, and they would land on the
     /// wrong text. Those are counted, and the count points at the unit.
     fn diagnose(&mut self, src: &str, dir: Option<&Path>) -> Vec<Diagnostic> {
+        // A Kiln 2 file is checked by the K2 front end — the same parse and
+        // lowering a build runs, so the editor cannot disagree with it.
+        if crate::lsp_k2::is_k2(src) {
+            return crate::lsp_k2::diagnostics(src);
+        }
         let parsed = match parse(src) {
             Ok(m) => m,
             // A parse error stops everything downstream — while you are typing,
@@ -683,11 +710,21 @@ impl Server {
             Err(msg) => {
                 // Degraded: we parsed, but can't type-check. Say so once, at the
                 // top of the file, instead of pretending the file is clean.
-                return vec![diag(src, Span::line(1), format!("Kiln runtime unavailable: {msg}"))];
+                return vec![diag(
+                    src,
+                    Span::line(1),
+                    format!("Kiln runtime unavailable: {msg}"),
+                )];
             }
         };
 
-        let check = |m, r, h: &Hints| if is_unit { validate_unit(m, r, h) } else { validate_with(m, r, h) };
+        let check = |m, r, h: &Hints| {
+            if is_unit {
+                validate_unit(m, r, h)
+            } else {
+                validate_with(m, r, h)
+            }
+        };
         let mut errs = match check(&module, &registry, &Hints::default()) {
             Ok(()) => return Vec::new(),
             Err(errs) => errs,
@@ -719,7 +756,10 @@ impl Server {
             }
         }
         for (file, n) in elsewhere {
-            let name = file.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = file
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_default();
             here.push(diag(
                 src,
                 Span::line(1),
@@ -735,12 +775,17 @@ impl Server {
     fn elsewhere(&mut self) -> &HashMap<String, String> {
         if self.elsewhere.is_none() {
             let mut map = HashMap::new();
-            let kits = self.repo_root.clone().map(|r| kit::resolve_all(&r)).unwrap_or_default();
+            let kits = self
+                .repo_root
+                .clone()
+                .map(|r| kit::resolve_all(&r))
+                .unwrap_or_default();
             for k in kits {
                 let uses = vec![k.name.clone()];
                 if let Ok(reg) = self.registry_for(&uses) {
                     for (name, _) in reg.iter() {
-                        map.entry(name.to_string()).or_insert_with(|| k.name.clone());
+                        map.entry(name.to_string())
+                            .or_insert_with(|| k.name.clone());
                     }
                 }
             }
@@ -852,52 +897,107 @@ fn find_repo_root_from(start: &Path) -> Option<PathBuf> {
 /// rather than deriving it from the lexer means completion can't accidentally
 /// offer internal tokens like `Eof`.
 const KEYWORDS: &[&str] = &[
-    "module", "sub", "end", "let", "var", "call", "return", "if", "else", "while", "and", "or",
+    "module",
+    "sub",
+    "end",
+    "let",
+    "var",
+    "call",
+    "return",
+    "if",
+    "else",
+    "while",
+    "and",
+    "or",
     "not",
-    "true", "false", "use", "form", "on", "int", "int64", "double", "bool", "text", "bytes", "ptr",
+    "true",
+    "false",
+    "use",
+    "form",
+    "on",
+    "int",
+    "int64",
+    "double",
+    "bool",
+    "text",
+    "bytes",
+    "ptr",
     // Loops. `for`, `break` and `continue` are reserved; `to` and `step` are
     // soft keywords, offered here but usable as names elsewhere.
-    "for", "break", "continue", "to", "step",
+    "for",
+    "break",
+    "continue",
+    "to",
+    "step",
     // Build targets. `target` is a soft keyword, so it is offered
     // here but not reserved by the lexer.
-    "target", "console", "gui", "sharedlib", "staticlib",
+    "target",
+    "console",
+    "gui",
+    "sharedlib",
+    "staticlib",
     // `through` makes a `call` an indirect one. It is a soft keyword — it means
     // that only straight after `call` — so it is offered and reserves nothing.
     "through",
     // Bitwise operators. The infix ones are soft keywords — they mean the
     // operator only in operator position — so they are offered but reserve
     // nothing; `bnot` is reserved by the lexer, like `not`.
-    "band", "bor", "bxor", "bnot", "shl", "shr", "ushr",
+    "band",
+    "bor",
+    "bxor",
+    "bnot",
+    "shl",
+    "shr",
+    "ushr",
     // The 0.8.0 shorthands. All are soft keywords the parser recognises by
     // position — none is reserved by the lexer, so a variable may still be
     // named for any of them. `increment`/`decrement` lead a statement; `in`
     // does double duty (a membership test `e in xs`, and a range/`for each`
     // bound); `each` and `at` belong to `for each x at i in xs`.
-    "increment", "decrement", "in", "each", "at",
+    "increment",
+    "decrement",
+    "in",
+    "each",
+    "at",
     // The 0.9.0 expression sugar, soft keywords every one. `then` joins an `if`
     // used as a *value* to its first arm; `otherwise` supplies the value a
     // failed call did not; `check` leads a statement or a `let` initializer and
     // returns early when the call it guards failed.
-    "then", "otherwise", "check",
+    "then",
+    "otherwise",
+    "check",
     // The 0.9.0 control-flow and declaration sugar, soft keywords every one.
     // `match`/`when` is the if-chain that tests one value; `repeat N times` is
     // the counting loop with its counter hidden; `assert` is the check a
     // release build compiles out; `enum` names a run of ints from 1.
-    "match", "when", "repeat", "times", "assert", "enum",
+    "match",
+    "when",
+    "repeat",
+    "times",
+    "assert",
+    "enum",
     // The 0.9.0 hard tier. `some` and `as` open an optional (`if some v as
     // value`) and are soft keywords claimed only there; `where` filters a list
     // built by a loop (`[e for each x in xs where c]`); `defer` runs a statement
     // when its block ends. `none` is the one *literal* among them — a bare
     // `none` is the empty optional wherever it is written, so it is not usable
     // as a name.
-    "some", "as", "where", "defer", "none",
+    "some",
+    "as",
+    "where",
+    "defer",
+    "none",
 ];
 
 fn item(label: &str, kind: CompletionItemKind, detail: String) -> CompletionItem {
     CompletionItem {
         label: label.to_string(),
         kind: Some(kind),
-        detail: if detail.is_empty() { None } else { Some(detail) },
+        detail: if detail.is_empty() {
+            None
+        } else {
+            Some(detail)
+        },
         ..Default::default()
     }
 }
@@ -976,11 +1076,17 @@ fn new_handler_item(src: &str, name: &str, params: &str) -> CompletionItem {
     // Appended after the last line, on a line of its own even when the file
     // does not end with a newline yet.
     let last_line = src.lines().count() as u32;
-    let lead = if src.is_empty() || src.ends_with('\n') { "\n" } else { "\n\n" };
+    let lead = if src.is_empty() || src.ends_with('\n') {
+        "\n"
+    } else {
+        "\n\n"
+    };
     CompletionItem {
         label: name.to_string(),
         kind: Some(CompletionItemKind::FUNCTION),
-        detail: Some(format!("new subroutine — writes `{header}` at the end of the file")),
+        detail: Some(format!(
+            "new subroutine — writes `{header}` at the end of the file"
+        )),
         insert_text: Some(name.to_string()),
         // First in the list: it is the thing an `on` line is usually for.
         sort_text: Some("0".into()),
@@ -1100,7 +1206,9 @@ fn parameter_labels(label: &str) -> Vec<String> {
 }
 
 fn nth_line(src: &str, line_1based: usize) -> Option<String> {
-    src.lines().nth(line_1based.checked_sub(1)?).map(str::to_string)
+    src.lines()
+        .nth(line_1based.checked_sub(1)?)
+        .map(str::to_string)
 }
 
 /// Convert an LSP character offset (UTF-16 code units, 0-based) to our 1-based
@@ -1234,8 +1342,14 @@ mod tests {
     fn on_line_reads_the_event_and_then_the_handler() {
         assert_eq!(on_line("  on "), Some(("".into(), None)));
         assert_eq!(on_line("  on cl"), Some(("cl".into(), None)));
-        assert_eq!(on_line("  on click: "), Some(("click".into(), Some("".into()))));
-        assert_eq!(on_line("  on click:ok_"), Some(("click".into(), Some("ok_".into()))));
+        assert_eq!(
+            on_line("  on click: "),
+            Some(("click".into(), Some("".into())))
+        );
+        assert_eq!(
+            on_line("  on click:ok_"),
+            Some(("click".into(), Some("ok_".into())))
+        );
         // Not an `on` line: a variable that happens to start with the word,
         // or a statement.
         assert_eq!(on_line("  online = 1"), None);
@@ -1248,10 +1362,7 @@ mod tests {
             parameter_labels("concat(text, text) -> text"),
             vec!["text", "text"]
         );
-        assert_eq!(
-            parameter_labels("twice(n: int): int"),
-            vec!["n: int"]
-        );
+        assert_eq!(parameter_labels("twice(n: int): int"), vec!["n: int"]);
         assert!(parameter_labels("quit()").is_empty());
     }
 }

@@ -21,7 +21,10 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf()
 }
 
 fn on_path(tool: &str) -> bool {
@@ -41,8 +44,11 @@ fn isolated_project(tag: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     let kit = dir.join("kits").join("win");
     std::fs::create_dir_all(&kit).expect("create kit dir");
-    std::fs::copy(repo().join("kits/win/advapi32.kdecl"), kit.join("advapi32.kdecl"))
-        .expect("copy advapi32.kdecl into the isolated kit");
+    std::fs::copy(
+        repo().join("kits/win/advapi32.kdecl"),
+        kit.join("advapi32.kdecl"),
+    )
+    .expect("copy advapi32.kdecl into the isolated kit");
     std::fs::write(
         kit.join("lib.json"),
         "{ \"display\": \"Windows API\", \"section\": \"System\", \"version\": \"0.1.0\", \"platforms\": [\"windows\"] }\n",
@@ -93,37 +99,95 @@ fn commands_lists_the_advapi32_surface() {
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
         .expect("run kiln commands");
-    assert!(out.status.success(), "commands --use win failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "commands --use win failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let text = String::from_utf8_lossy(&out.stdout);
     let has = |needle: &str| text.lines().any(|l| l.contains(needle));
 
     // A registry call, a handle-in / status-out shape.
-    assert!(has("dll: RegOpenKeyExA(ptr, text, int, int, ptr) -> int"), "RegOpenKeyExA missing:\n{text}");
-    assert!(has("dll: RegCloseKey(ptr) -> int"), "RegCloseKey missing:\n{text}");
-    assert!(has("dll: RegSetValueExA("), "RegSetValueExA missing:\n{text}");
-    assert!(has("dll: RegQueryValueExA("), "RegQueryValueExA missing:\n{text}");
+    assert!(
+        has("dll: RegOpenKeyExA(ptr, text, int, int, ptr) -> int"),
+        "RegOpenKeyExA missing:\n{text}"
+    );
+    assert!(
+        has("dll: RegCloseKey(ptr) -> int"),
+        "RegCloseKey missing:\n{text}"
+    );
+    assert!(
+        has("dll: RegSetValueExA("),
+        "RegSetValueExA missing:\n{text}"
+    );
+    assert!(
+        has("dll: RegQueryValueExA("),
+        "RegQueryValueExA missing:\n{text}"
+    );
     // A privilege call taking a LUID c-record by pointer.
-    assert!(has("dll: LookupPrivilegeValueA(ptr, text, LUID) -> bool"), "LookupPrivilegeValueA missing:\n{text}");
-    assert!(has("dll: AdjustTokenPrivileges(ptr, bool, TOKEN_PRIVILEGES, int, ptr, ptr) -> bool"), "AdjustTokenPrivileges missing:\n{text}");
-    assert!(has("dll: OpenProcessToken(ptr, int, ptr) -> bool"), "OpenProcessToken missing:\n{text}");
-    assert!(has("dll: GetTokenInformation("), "GetTokenInformation missing:\n{text}");
+    assert!(
+        has("dll: LookupPrivilegeValueA(ptr, text, LUID) -> bool"),
+        "LookupPrivilegeValueA missing:\n{text}"
+    );
+    assert!(
+        has("dll: AdjustTokenPrivileges(ptr, bool, TOKEN_PRIVILEGES, int, ptr, ptr) -> bool"),
+        "AdjustTokenPrivileges missing:\n{text}"
+    );
+    assert!(
+        has("dll: OpenProcessToken(ptr, int, ptr) -> bool"),
+        "OpenProcessToken missing:\n{text}"
+    );
+    assert!(
+        has("dll: GetTokenInformation("),
+        "GetTokenInformation missing:\n{text}"
+    );
 
     // The three structs, including the nested array of nested records.
-    assert!(has("crecord: LUID low_part: int, high_part: int"), "LUID missing:\n{text}");
-    assert!(has("crecord: LUID_AND_ATTRIBUTES luid: LUID, attributes: int"), "LUID_AND_ATTRIBUTES missing:\n{text}");
-    assert!(has("crecord: TOKEN_PRIVILEGES privilege_count: int, privileges: LUID_AND_ATTRIBUTES[1]"), "TOKEN_PRIVILEGES missing:\n{text}");
+    assert!(
+        has("crecord: LUID low_part: int, high_part: int"),
+        "LUID missing:\n{text}"
+    );
+    assert!(
+        has("crecord: LUID_AND_ATTRIBUTES luid: LUID, attributes: int"),
+        "LUID_AND_ATTRIBUTES missing:\n{text}"
+    );
+    assert!(
+        has("crecord: TOKEN_PRIVILEGES privilege_count: int, privileges: LUID_AND_ATTRIBUTES[1]"),
+        "TOKEN_PRIVILEGES missing:\n{text}"
+    );
 
     // The constant families. An HKEY root is past a signed int, so it types int64.
-    assert!(has("const: HKEY_CURRENT_USER int64"), "HKEY_CURRENT_USER missing/typed wrong:\n{text}");
-    assert!(has("const: HKEY_LOCAL_MACHINE int64"), "HKEY_LOCAL_MACHINE missing:\n{text}");
+    assert!(
+        has("const: HKEY_CURRENT_USER int64"),
+        "HKEY_CURRENT_USER missing/typed wrong:\n{text}"
+    );
+    assert!(
+        has("const: HKEY_LOCAL_MACHINE int64"),
+        "HKEY_LOCAL_MACHINE missing:\n{text}"
+    );
     assert!(has("const: KEY_READ int"), "KEY_READ missing:\n{text}");
-    assert!(has("const: KEY_ALL_ACCESS int"), "KEY_ALL_ACCESS missing:\n{text}");
+    assert!(
+        has("const: KEY_ALL_ACCESS int"),
+        "KEY_ALL_ACCESS missing:\n{text}"
+    );
     assert!(has("const: REG_SZ int"), "REG_SZ missing:\n{text}");
     assert!(has("const: REG_DWORD int"), "REG_DWORD missing:\n{text}");
-    assert!(has("const: ERROR_SUCCESS int"), "ERROR_SUCCESS missing:\n{text}");
-    assert!(has("const: TOKEN_ADJUST_PRIVILEGES int"), "TOKEN_ADJUST_PRIVILEGES missing:\n{text}");
-    assert!(has("const: SE_PRIVILEGE_ENABLED int"), "SE_PRIVILEGE_ENABLED missing:\n{text}");
-    assert!(has("const: SE_DEBUG_NAME text"), "SE_DEBUG_NAME text const missing:\n{text}");
+    assert!(
+        has("const: ERROR_SUCCESS int"),
+        "ERROR_SUCCESS missing:\n{text}"
+    );
+    assert!(
+        has("const: TOKEN_ADJUST_PRIVILEGES int"),
+        "TOKEN_ADJUST_PRIVILEGES missing:\n{text}"
+    );
+    assert!(
+        has("const: SE_PRIVILEGE_ENABLED int"),
+        "SE_PRIVILEGE_ENABLED missing:\n{text}"
+    );
+    assert!(
+        has("const: SE_DEBUG_NAME text"),
+        "SE_DEBUG_NAME text const missing:\n{text}"
+    );
 }
 
 /// A windows-only kit is refused for another OS with a message naming the kit
@@ -138,14 +202,27 @@ fn advapi32_is_refused_on_linux() {
     )
     .unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", dir.join("app.kiln").to_str().unwrap(), "--os", "linux", "-o", dir.join("app").to_str().unwrap()])
+        .args([
+            "build",
+            dir.join("app.kiln").to_str().unwrap(),
+            "--os",
+            "linux",
+            "-o",
+            dir.join("app").to_str().unwrap(),
+        ])
         .current_dir(&dir)
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
         .expect("run kiln build");
-    assert!(!out.status.success(), "a windows-only kit must not build for linux");
+    assert!(
+        !out.status.success(),
+        "a windows-only kit must not build for linux"
+    );
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("win") && err.contains("linux"), "the error must name the kit and the OS, got:\n{err}");
+    assert!(
+        err.contains("win") && err.contains("linux"),
+        "the error must name the kit and the OS, got:\n{err}"
+    );
 }
 
 /// The heart of the stage: the program cross-builds for Windows, and — under
@@ -155,7 +232,9 @@ fn advapi32_is_refused_on_linux() {
 #[test]
 fn advapi32_builds_and_runs_on_windows() {
     if !on_path("x86_64-w64-mingw32-gcc") {
-        eprintln!("x86_64-w64-mingw32-gcc is not installed; skipping the advapi32 Windows cross-build");
+        eprintln!(
+            "x86_64-w64-mingw32-gcc is not installed; skipping the advapi32 Windows cross-build"
+        );
         return;
     }
     let dir = isolated_project("run");
@@ -163,7 +242,14 @@ fn advapi32_builds_and_runs_on_windows() {
     std::fs::write(&src, PROGRAM).expect("write program source");
     let exe = dir.join("prog.exe");
     let build = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", src.to_str().unwrap(), "--os", "windows", "-o", exe.to_str().unwrap()])
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--os",
+            "windows",
+            "-o",
+            exe.to_str().unwrap(),
+        ])
         .current_dir(&dir)
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()

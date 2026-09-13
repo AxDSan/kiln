@@ -63,7 +63,10 @@ pub fn locate(p: &Path) -> Result<PathBuf, String> {
     } else if p.is_file() {
         Ok(p.to_path_buf())
     } else {
-        Err(format!("cannot read {}: no such file or directory", p.display()))
+        Err(format!(
+            "cannot read {}: no such file or directory",
+            p.display()
+        ))
     }
 }
 
@@ -90,14 +93,12 @@ pub fn load(path: &Path) -> Result<Project, String> {
         match key.trim() {
             "name" => name = value.to_string(),
             "main" => main = value.to_string(),
-            "target" => {
-                target = Some(Target::parse(value).ok_or_else(|| {
-                    format!(
-                        "{}: unknown target `{value}` — expected console, gui, sharedlib or staticlib",
-                        file.display()
-                    )
-                })?)
-            }
+            "target" => target = Some(Target::parse(value).ok_or_else(|| {
+                format!(
+                    "{}: unknown target `{value}` — expected console, gui, sharedlib or staticlib",
+                    file.display()
+                )
+            })?),
             // Either shape reads the same, so a file written by hand with
             // commas is not wrong.
             "kits" => kits.extend(
@@ -164,7 +165,10 @@ pub fn apply_edits(text: &str, edits: &[(String, String)]) -> String {
         } else {
             line.split_once(':').map(|(k, _)| k.trim().to_string())
         };
-        match key.as_deref().and_then(|k| edits.iter().find(|(ek, _)| ek == k)) {
+        match key
+            .as_deref()
+            .and_then(|k| edits.iter().find(|(ek, _)| ek == k))
+        {
             Some((k, v)) => {
                 // The key itself, not its entry in SETTABLE: a key that is
                 // not on that list would record "" and then be appended a
@@ -320,7 +324,13 @@ mod tests {
         let dir = std::env::temp_dir().join("kiln_project_unit");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let text = render("demo", "src/main.kiln", Target::Gui, &["ui".into(), "file".into()], "0.1.0");
+        let text = render(
+            "demo",
+            "src/main.kiln",
+            Target::Gui,
+            &["ui".into(), "file".into()],
+            "0.1.0",
+        );
         std::fs::write(dir.join(FILE_NAME), text).unwrap();
 
         let p = load(&dir).unwrap();
@@ -337,7 +347,10 @@ mod tests {
         let text = "# my project\nname: demo\nmain: src/main.kiln\ntarget: console\nkits: ui\nversion: 0.1.0\nauthor: someone\n";
         let out = apply_edits(
             text,
-            &[("target".into(), "gui".into()), ("version".into(), "0.2.0".into())],
+            &[
+                ("target".into(), "gui".into()),
+                ("version".into(), "0.2.0".into()),
+            ],
         );
         assert!(out.contains("target: gui"), "{out}");
         assert!(out.contains("version: 0.2.0"), "{out}");

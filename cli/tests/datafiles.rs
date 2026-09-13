@@ -62,7 +62,8 @@ fn item_table(dir: &PathBuf) -> PathBuf {
     let mut bytes: Vec<u8> = Vec::new();
     bytes.extend_from_slice(b"<?xml version=\"1.0\" encoding=\"GB2312\"?>\r\n");
     // 武器 and 盔甲, GBK, inside a comment: the parser must not care.
-    bytes.extend_from_slice(b"<!--\"weapon\",\xce\xe4\xc6\xf7\r\n\"armor\",\xbf\xf8\xbc\xd7-->\r\n");
+    bytes
+        .extend_from_slice(b"<!--\"weapon\",\xce\xe4\xc6\xf7\r\n\"armor\",\xbf\xf8\xbc\xd7-->\r\n");
     bytes.extend_from_slice(b"<ItemBaseAttribute>\r\n  <Weapons>\r\n    <Swords>\r\n");
     bytes.extend_from_slice(
         b"      <ShortSword ID=\"1000\" Attack=\"15,23,39,68,118\" Icon=\"36,144\" \
@@ -70,7 +71,9 @@ fn item_table(dir: &PathBuf) -> PathBuf {
     );
     bytes.extend_from_slice(b"      <Scimitar ID=\"1001\" Attack=\"65,78,102,141,208\"/>\r\n");
     bytes.extend_from_slice(b"    </Swords>\r\n  </Weapons>\r\n");
-    bytes.extend_from_slice(b"  <Armors>\r\n    <Plate ID=\"2100\" Attack=\"9\"/>\r\n  </Armors>\r\n");
+    bytes.extend_from_slice(
+        b"  <Armors>\r\n    <Plate ID=\"2100\" Attack=\"9\"/>\r\n  </Armors>\r\n",
+    );
     bytes.extend_from_slice(b"</ItemBaseAttribute>\r\n");
 
     let path = dir.join("ItemBaseAttribute.xml");
@@ -154,8 +157,16 @@ fn a_malformed_document_is_refused_with_its_line() {
     let dir = scratch("bad");
 
     let cases: [(&str, &str, &str); 3] = [
-        ("unclosed", "<a>\n  <b>\n", "the element <b> is never closed"),
-        ("mismatch", "<a>\n  <b></c>\n</a>\n", "expected </b>, found </c>"),
+        (
+            "unclosed",
+            "<a>\n  <b>\n",
+            "the element <b> is never closed",
+        ),
+        (
+            "mismatch",
+            "<a>\n  <b></c>\n</a>\n",
+            "expected </b>, found </c>",
+        ),
         ("stray", "<a/>\ntext\n", "text outside the root element"),
     ];
 

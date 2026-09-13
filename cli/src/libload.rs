@@ -17,9 +17,9 @@
 //! instead (Phase 4).
 
 use std::collections::HashMap;
-use std::ffi::{c_char, c_int, CStr, CString};
 #[cfg(unix)]
 use std::ffi::c_void;
+use std::ffi::{c_char, c_int, CStr, CString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -181,11 +181,7 @@ pub fn load(repo_root: &Path, uses: &[String]) -> Result<LibPlan, String> {
 /// And the link itself: a library whose `lib.json` carries `windows_*` keys
 /// has a Windows build of its dependencies, and those keys replace the Linux
 /// ones (`Manifest::take_windows`).
-pub fn load_cross(
-    repo_root: &Path,
-    uses: &[String],
-    arch: crate::Arch,
-) -> Result<LibPlan, String> {
+pub fn load_cross(repo_root: &Path, uses: &[String], arch: crate::Arch) -> Result<LibPlan, String> {
     load_with(repo_root, uses, true, true, arch)
 }
 
@@ -377,7 +373,11 @@ fn load_with(
 /// program writes `int` or `int64` as it always did, and `intptr` in a program
 /// is the unknown type it looks like.
 fn expand_pointer_types(body: &str, arch: crate::Arch) -> String {
-    let ptr_ty = if arch == crate::Arch::X86 { "int" } else { "int64" };
+    let ptr_ty = if arch == crate::Arch::X86 {
+        "int"
+    } else {
+        "int64"
+    };
     let bytes = body.as_bytes();
     let mut out = String::with_capacity(body.len());
     let mut i = 0;
@@ -431,8 +431,8 @@ pub fn read_decls(dir: &Path, name: &str, arch: crate::Arch) -> Result<Option<Mo
     let mut declared: HashMap<String, String> = HashMap::new();
 
     for path in &files {
-        let body = std::fs::read_to_string(path)
-            .map_err(|e| format!("read {}: {e}", path.display()))?;
+        let body =
+            std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
         // `intptr` is the one spelling a bundle has for the pointer-sized
         // integer typedefs Win32 is built from (`WPARAM`, `SIZE_T`,
         // `ULONG_PTR`). It is expanded to the target's real integer type here,
@@ -1073,7 +1073,10 @@ fn mingw_pkgconfig_dirs(arch: crate::Arch) -> Vec<PathBuf> {
             dirs.push(PathBuf::from(&root).join("lib/pkgconfig"));
         }
     }
-    dirs.push(PathBuf::from(format!("{}/sys-root/mingw/lib/pkgconfig", tc.sysroot)));
+    dirs.push(PathBuf::from(format!(
+        "{}/sys-root/mingw/lib/pkgconfig",
+        tc.sysroot
+    )));
     dirs.push(PathBuf::from(format!("{}/lib/pkgconfig", tc.sysroot)));
     dirs.retain(|d| d.is_dir());
     dirs

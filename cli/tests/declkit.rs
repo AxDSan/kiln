@@ -59,7 +59,12 @@ fn build_program(dir: &Path, src_text: &str, out: &str, extra: &[&str]) -> Resul
     std::fs::write(&srcpath, src_text).expect("write program source");
     let outpath = dir.join(out);
     let output = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", srcpath.to_str().unwrap(), "-o", outpath.to_str().unwrap()])
+        .args([
+            "build",
+            srcpath.to_str().unwrap(),
+            "-o",
+            outpath.to_str().unwrap(),
+        ])
         .args(extra)
         .current_dir(repo())
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
@@ -95,13 +100,13 @@ end
 ";
 
 const EXPECTED: &[&str] = &[
-    "52",                   // demoffi_add(DEMO_ANSWER=42, DEMO_SCALE=10) — dll + two consts
-    "demoffi says hello",   // demoffi_greeting() — a C string copied out
-    "13",                   // p.x = 3 + DEMO_SCALE   — c-record mutated through the dll pointer
-    "24",                   // p.y = 4 + 20
-    "8",                    // size of DemoPoint      — the kit's c-record layout
-    "const compare works",  // DEMO_ANSWER in a comparison
-    "demoffi",              // DEMO_TAG, a text constant
+    "52",                  // demoffi_add(DEMO_ANSWER=42, DEMO_SCALE=10) — dll + two consts
+    "demoffi says hello",  // demoffi_greeting() — a C string copied out
+    "13",                  // p.x = 3 + DEMO_SCALE   — c-record mutated through the dll pointer
+    "24",                  // p.y = 4 + 20
+    "8",                   // size of DemoPoint      — the kit's c-record layout
+    "const compare works", // DEMO_ANSWER in a comparison
+    "demoffi",             // DEMO_TAG, a text constant
 ];
 
 /// The whole point of the stage: `use demoffi` supplies the dll, the c-record
@@ -126,7 +131,10 @@ fn use_demoffi_supplies_dll_record_and_const() {
         .lines()
         .map(str::to_string)
         .collect();
-    assert_eq!(lines, EXPECTED, "unexpected output from the demoffi program");
+    assert_eq!(
+        lines, EXPECTED,
+        "unexpected output from the demoffi program"
+    );
 }
 
 /// `kiln commands --use demoffi` lists the kit's dlls, its c-record and its
@@ -139,15 +147,37 @@ fn commands_lists_the_bundle() {
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
         .expect("run kiln commands");
-    assert!(out.status.success(), "commands --use demoffi failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "commands --use demoffi failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let text = String::from_utf8_lossy(&out.stdout);
     let has = |needle: &str| text.lines().any(|l| l.contains(needle));
-    assert!(has("dll: demoffi_add(int, int) -> int"), "dll listing missing:\n{text}");
-    assert!(has("dll: demoffi_greeting() -> text"), "dll listing missing:\n{text}");
-    assert!(has("dll: demoffi_move(DemoPoint, int, int)"), "dll with a c-record param missing:\n{text}");
-    assert!(has("crecord: DemoPoint"), "c-record listing missing:\n{text}");
-    assert!(has("const: DEMO_ANSWER int"), "const listing missing:\n{text}");
-    assert!(has("const: DEMO_TAG text"), "text const listing missing:\n{text}");
+    assert!(
+        has("dll: demoffi_add(int, int) -> int"),
+        "dll listing missing:\n{text}"
+    );
+    assert!(
+        has("dll: demoffi_greeting() -> text"),
+        "dll listing missing:\n{text}"
+    );
+    assert!(
+        has("dll: demoffi_move(DemoPoint, int, int)"),
+        "dll with a c-record param missing:\n{text}"
+    );
+    assert!(
+        has("crecord: DemoPoint"),
+        "c-record listing missing:\n{text}"
+    );
+    assert!(
+        has("const: DEMO_ANSWER int"),
+        "const listing missing:\n{text}"
+    );
+    assert!(
+        has("const: DEMO_TAG text"),
+        "text const listing missing:\n{text}"
+    );
 }
 
 /// A windows-only declaration kit used with `--os linux` is a clear compile
@@ -169,15 +199,29 @@ fn a_windows_only_kit_is_refused_on_linux() {
     )
     .unwrap();
     let src = dir.join("app.kiln");
-    std::fs::write(&src, "module app\nuse winonly\nsub main\n  call print_int(MB_OK)\nend\n").unwrap();
+    std::fs::write(
+        &src,
+        "module app\nuse winonly\nsub main\n  call print_int(MB_OK)\nend\n",
+    )
+    .unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", src.to_str().unwrap(), "--os", "linux", "-o", dir.join("app").to_str().unwrap()])
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--os",
+            "linux",
+            "-o",
+            dir.join("app").to_str().unwrap(),
+        ])
         .current_dir(&dir) // so kits/winonly resolves as the project kit
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
         .expect("run kiln build");
-    assert!(!output.status.success(), "a windows-only kit must not build for linux");
+    assert!(
+        !output.status.success(),
+        "a windows-only kit must not build for linux"
+    );
     let err = String::from_utf8_lossy(&output.stderr);
     assert!(
         err.contains("winonly") && err.contains("windows"),
@@ -192,7 +236,10 @@ fn a_windows_only_kit_is_refused_on_linux() {
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
         .expect("run kiln commands");
-    assert!(listed.status.success(), "listing a windows-only kit on linux must work");
+    assert!(
+        listed.status.success(),
+        "listing a windows-only kit on linux must work"
+    );
     assert!(
         String::from_utf8_lossy(&listed.stdout).contains("MessageBeep"),
         "the windows-only kit's dll should still be listed on linux"
@@ -221,7 +268,12 @@ impl Lsp {
             .expect("spawn kiln lsp");
         let stdin = child.stdin.take().unwrap();
         let stdout = BufReader::new(child.stdout.take().unwrap());
-        let mut c = Lsp { child, stdin, stdout, id: 1 };
+        let mut c = Lsp {
+            child,
+            stdin,
+            stdout,
+            id: 1,
+        };
         let root = format!("file://{}", repo().display());
         c.send(serde_json::json!({
             "jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -307,9 +359,18 @@ fn lsp_completes_a_kit_declaration() {
     // Caret on the blank line inside `main`.
     c.open(uri, "module m\nuse demoffi\nsub main\n  \nend\n");
     let labels = c.completion_labels(uri, 3, 2);
-    assert!(labels.contains(&"demoffi_add".to_string()), "kit dll should complete: {labels:?}");
-    assert!(labels.contains(&"DemoPoint".to_string()), "kit record should complete: {labels:?}");
-    assert!(labels.contains(&"DEMO_ANSWER".to_string()), "kit const should complete: {labels:?}");
+    assert!(
+        labels.contains(&"demoffi_add".to_string()),
+        "kit dll should complete: {labels:?}"
+    );
+    assert!(
+        labels.contains(&"DemoPoint".to_string()),
+        "kit record should complete: {labels:?}"
+    );
+    assert!(
+        labels.contains(&"DEMO_ANSWER".to_string()),
+        "kit const should complete: {labels:?}"
+    );
     c.shutdown();
 }
 
@@ -342,5 +403,8 @@ fn demoffi_cross_builds_and_runs_on_windows() {
         .expect("run under wine");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let lines: Vec<&str> = stdout.lines().map(|l| l.trim_end_matches('\r')).collect();
-    assert_eq!(lines, EXPECTED, "wine output differs from the Linux build:\n{stdout}");
+    assert_eq!(
+        lines, EXPECTED,
+        "wine output differs from the Linux build:\n{stdout}"
+    );
 }

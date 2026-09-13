@@ -133,16 +133,16 @@ fn every_hole_type_prints_exactly() {
     assert_eq!(
         lines,
         vec![
-            "Row 3 of 7",           // int holes -> int_to_text
-            "total = 21",           // an expression hole, int arithmetic
-            "big = 1000000",        // int64 hole -> int64_to_text
-            "ratio 0.5",            // double hole -> double_to_text
-            "ok true no false",     // bool holes -> the words true / false
-            "hi Ada, hi",           // a text var (as is) and a call hole
-            "Bea is 41",            // a field hole, text then int
+            "Row 3 of 7",               // int holes -> int_to_text
+            "total = 21",               // an expression hole, int arithmetic
+            "big = 1000000",            // int64 hole -> int64_to_text
+            "ratio 0.5",                // double hole -> double_to_text
+            "ok true no false",         // bool holes -> the words true / false
+            "hi Ada, hi",               // a text var (as is) and a call hole
+            "Bea is 41",                // a field hole, text then int
             "a literal brace: { and }", // {{ and }} unescape to single braces
-            "no holes here",        // no holes: the literal is untouched
-            "3",                    // a lone hole: the conversion, no concat
+            "no holes here",            // no holes: the literal is untouched
+            "3",                        // a lone hole: the conversion, no concat
         ],
         "the interpolated output did not match"
     );
@@ -322,7 +322,11 @@ end
         .expect("run kiln build --os windows");
     assert!(status.success(), "kiln build --os windows failed");
     let image = dir.join("prog.exe");
-    assert!(image.is_file(), "expected {} to be written", image.display());
+    assert!(
+        image.is_file(),
+        "expected {} to be written",
+        image.display()
+    );
 
     if let Some(lines) = wine_lines(&image, &dir) {
         assert_eq!(lines, vec!["Row 3 of 7, ok=true", "brace {x}"]);

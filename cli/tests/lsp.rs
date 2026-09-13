@@ -150,10 +150,7 @@ impl Client {
 fn clean_file_publishes_empty_diagnostics() {
     let mut c = Client::start();
     let uri = "file:///tmp/kiln_lsp_clean.kiln";
-    c.open(
-        uri,
-        "module m\nsub main\n  call print_text(\"hi\")\nend\n",
-    );
+    c.open(uri, "module m\nsub main\n  call print_text(\"hi\")\nend\n");
     let d = c.diagnostics(uri);
     assert!(d.is_empty(), "expected no diagnostics, got {d:?}");
     c.shutdown();
@@ -241,7 +238,10 @@ fn unsupported_requests_get_an_error_not_silence() {
     }));
     let reply = c.recv();
     assert_eq!(reply["id"], 7);
-    assert!(reply["error"].is_object(), "expected an error reply: {reply}");
+    assert!(
+        reply["error"].is_object(),
+        "expected an error reply: {reply}"
+    );
     c.shutdown();
 }
 
@@ -280,9 +280,13 @@ fn advertises_its_capabilities() {
     Client::start().shutdown();
 
     let mut c = Client::start();
-    let r = c.request(50, "textDocument/documentSymbol", serde_json::json!({
-        "textDocument": { "uri": "file:///tmp/kiln_lsp_nodoc.kiln" }
-    }));
+    let r = c.request(
+        50,
+        "textDocument/documentSymbol",
+        serde_json::json!({
+            "textDocument": { "uri": "file:///tmp/kiln_lsp_nodoc.kiln" }
+        }),
+    );
     // Unknown document: a null result, not an error and not a hang.
     assert!(r.is_null(), "unknown document should answer null: {r}");
     c.shutdown();
@@ -303,17 +307,24 @@ fn completion_after_dot_offers_component_properties() {
     let _ = c.diagnostics(uri);
 
     // `  ok.te|xt` on line 8 (0-based 7): mid-word, the way an editor asks.
-    let r = c.request(60, "textDocument/completion", serde_json::json!({
-        "textDocument": { "uri": uri },
-        "position": { "line": 7, "character": 7 }
-    }));
+    let r = c.request(
+        60,
+        "textDocument/completion",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 7, "character": 7 }
+        }),
+    );
     let labels: Vec<String> = r
         .as_array()
         .expect("completion list")
         .iter()
         .map(|i| i["label"].as_str().unwrap().to_string())
         .collect();
-    assert!(labels.contains(&"text".to_string()), "expected `text`: {labels:?}");
+    assert!(
+        labels.contains(&"text".to_string()),
+        "expected `text`: {labels:?}"
+    );
     assert!(
         !labels.contains(&"module".to_string()),
         "keywords must not appear after `.`: {labels:?}"
@@ -329,10 +340,14 @@ fn completion_offers_commands_and_locals() {
     c.open(uri, "module m\nsub main\n  let total: int = 1\n  \nend\n");
     let _ = c.diagnostics(uri);
 
-    let r = c.request(61, "textDocument/completion", serde_json::json!({
-        "textDocument": { "uri": uri },
-        "position": { "line": 3, "character": 2 }
-    }));
+    let r = c.request(
+        61,
+        "textDocument/completion",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 3, "character": 2 }
+        }),
+    );
     let items = r.as_array().expect("completion list");
     let labels: Vec<&str> = items.iter().map(|i| i["label"].as_str().unwrap()).collect();
     assert!(labels.contains(&"print_text"), "commands: {labels:?}");
@@ -358,12 +373,18 @@ fn completion_offers_the_indirect_call_and_bitwise_words() {
     c.open(uri, "module m\nsub main\n  let total: int = 1\n  \nend\n");
     let _ = c.diagnostics(uri);
 
-    let r = c.request(62, "textDocument/completion", serde_json::json!({
-        "textDocument": { "uri": uri },
-        "position": { "line": 3, "character": 2 }
-    }));
+    let r = c.request(
+        62,
+        "textDocument/completion",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 3, "character": 2 }
+        }),
+    );
     let labels = labels(&r);
-    for word in ["through", "band", "bor", "bxor", "bnot", "shl", "shr", "ushr"] {
+    for word in [
+        "through", "band", "bor", "bxor", "bnot", "shl", "shr", "ushr",
+    ] {
         assert!(
             labels.contains(&word.to_string()),
             "completion should offer `{word}`: {labels:?}"
@@ -387,14 +408,30 @@ fn completion_offers_the_shorthand_words() {
     c.open(uri, "module m\nsub main\n  let total: int = 1\n  \nend\n");
     let _ = c.diagnostics(uri);
 
-    let r = c.request(63, "textDocument/completion", serde_json::json!({
-        "textDocument": { "uri": uri },
-        "position": { "line": 3, "character": 2 }
-    }));
+    let r = c.request(
+        63,
+        "textDocument/completion",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 3, "character": 2 }
+        }),
+    );
     let labels = labels(&r);
     for word in [
-        "then", "otherwise", "check", "match", "when", "repeat", "times",
-        "assert", "enum", "some", "none", "as", "where", "defer",
+        "then",
+        "otherwise",
+        "check",
+        "match",
+        "when",
+        "repeat",
+        "times",
+        "assert",
+        "enum",
+        "some",
+        "none",
+        "as",
+        "where",
+        "defer",
     ] {
         assert!(
             labels.contains(&word.to_string()),
@@ -501,7 +538,10 @@ fn an_enum_is_a_type_name_not_a_component() {
         serde_json::json!({ "textDocument": { "uri": uri } }),
     );
     let names = syms.to_string();
-    assert!(names.contains("after"), "the sub after the enum is missing: {syms}");
+    assert!(
+        names.contains("after"),
+        "the sub after the enum is missing: {syms}"
+    );
     c.shutdown();
 }
 
@@ -510,7 +550,10 @@ fn goto_definition_finds_the_declaration() {
     let mut c = Client::start();
     let uri = "file:///tmp/kiln_lsp_def.kiln";
     //          1        2               3         4       5
-    c.open(uri, "module m\nvar count: int = 0\nsub main\n  count = 1\nend\n");
+    c.open(
+        uri,
+        "module m\nvar count: int = 0\nsub main\n  count = 1\nend\n",
+    );
     let _ = c.diagnostics(uri);
 
     // cursor on `count` in the assignment (line 4 -> 0-based 3)
@@ -526,16 +569,21 @@ fn references_respect_local_shadowing() {
     let mut c = Client::start();
     let uri = "file:///tmp/kiln_lsp_refs.kiln";
     //          1        2               3      4                5         6    7      8         9
-    let src = "module m\nvar x: int = 1\nsub a\n  let x: int = 9\n  x = 3\nend\nsub b\n  x = 4\nend\n";
+    let src =
+        "module m\nvar x: int = 1\nsub a\n  let x: int = 9\n  x = 3\nend\nsub b\n  x = 4\nend\n";
     c.open(uri, src);
     let _ = c.diagnostics(uri);
 
     // The `x` on line 5 is a's local: it must not include line 2 or line 8.
-    let r = c.request(90, "textDocument/references", serde_json::json!({
-        "textDocument": { "uri": uri },
-        "position": { "line": 4, "character": 2 },
-        "context": { "includeDeclaration": true }
-    }));
+    let r = c.request(
+        90,
+        "textDocument/references",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 4, "character": 2 },
+            "context": { "includeDeclaration": true }
+        }),
+    );
     let lines: Vec<i64> = r
         .as_array()
         .expect("locations")
@@ -544,7 +592,10 @@ fn references_respect_local_shadowing() {
         .collect();
     assert!(lines.contains(&3), "the local's declaration: {lines:?}");
     assert!(lines.contains(&4), "its use: {lines:?}");
-    assert!(!lines.contains(&1), "must NOT include the global: {lines:?}");
+    assert!(
+        !lines.contains(&1),
+        "must NOT include the global: {lines:?}"
+    );
     assert!(!lines.contains(&7), "must NOT include sub b: {lines:?}");
     c.shutdown();
 }
@@ -579,9 +630,13 @@ fn document_symbols_list_module_level_names() {
     c.open(uri, FORM_SRC);
     let _ = c.diagnostics(uri);
 
-    let r = c.request(110, "textDocument/documentSymbol", serde_json::json!({
-        "textDocument": { "uri": uri }
-    }));
+    let r = c.request(
+        110,
+        "textDocument/documentSymbol",
+        serde_json::json!({
+            "textDocument": { "uri": uri }
+        }),
+    );
     let names: Vec<&str> = r
         .as_array()
         .expect("symbols")
@@ -691,8 +746,14 @@ fn use_line_completion_offers_resolvable_kits() {
         .iter()
         .map(|i| i["label"].as_str().unwrap().to_string())
         .collect();
-    assert!(labels.contains(&"widget".to_string()), "project kit: {labels:?}");
-    assert!(labels.contains(&"file".to_string()), "bundled library: {labels:?}");
+    assert!(
+        labels.contains(&"widget".to_string()),
+        "project kit: {labels:?}"
+    );
+    assert!(
+        labels.contains(&"file".to_string()),
+        "bundled library: {labels:?}"
+    );
     assert!(
         !labels.contains(&"module".to_string()),
         "a keyword is not a library name: {labels:?}"
@@ -706,7 +767,8 @@ fn use_line_completion_offers_resolvable_kits() {
 fn signature_help_tracks_the_argument_being_typed() {
     let mut c = Client::start();
     let uri = "file:///tmp/kiln_lsp_sig.kiln";
-    let src = "module m\nsub join_two(left: text, right: text): text\n  return concat(left, right)\n\
+    let src =
+        "module m\nsub join_two(left: text, right: text): text\n  return concat(left, right)\n\
                end\nsub main\n  call print_text(join_two(\"a\", \"b\"))\nend\n";
     c.open(uri, src);
     let _ = c.diagnostics(uri);
@@ -723,16 +785,25 @@ fn signature_help_tracks_the_argument_being_typed() {
     // Inside `join_two("a", |"b")` on line 6 — a subroutine, with its own
     // parameter names.
     let r = c.request(83, "textDocument/signatureHelp", Client::at(uri, 5, 33));
-    let label = r["signatures"][0]["label"].as_str().unwrap_or("").to_string();
+    let label = r["signatures"][0]["label"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
     assert!(label.contains("left: text"), "parameter names: {label}");
     assert_eq!(r["activeParameter"], 1, "second argument: {r}");
 
     // A string containing a comma must not move the highlight.
     let uri2 = "file:///tmp/kiln_lsp_sig2.kiln";
-    c.open(uri2, "module m\nsub main\n  call print_text(concat(\"a, b\", \"c\"))\nend\n");
+    c.open(
+        uri2,
+        "module m\nsub main\n  call print_text(concat(\"a, b\", \"c\"))\nend\n",
+    );
     let _ = c.diagnostics(uri2);
     let r = c.request(84, "textDocument/signatureHelp", Client::at(uri2, 2, 34));
-    assert_eq!(r["activeParameter"], 1, "the comma inside the literal counted: {r}");
+    assert_eq!(
+        r["activeParameter"], 1,
+        "the comma inside the literal counted: {r}"
+    );
     c.shutdown();
 }
 
@@ -769,15 +840,29 @@ fn records_and_dictionaries_reach_the_editor() {
         "module m\nrecord person\n  name: text\nend\nsub main\n  var d: int{} = {}\n  \nend\n",
     );
     let diags = c.diagnostics(uri);
-    assert!(diags.is_empty(), "a record and a dictionary must be clean: {diags:?}");
+    assert!(
+        diags.is_empty(),
+        "a record and a dictionary must be clean: {diags:?}"
+    );
 
-    let r = c.request(90, "textDocument/completion", serde_json::json!({
-        "textDocument": { "uri": uri },
-        "position": { "line": 6, "character": 2 }
-    }));
+    let r = c.request(
+        90,
+        "textDocument/completion",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 6, "character": 2 }
+        }),
+    );
     let items = r.as_array().expect("completion list");
     let labels: Vec<&str> = items.iter().map(|i| i["label"].as_str().unwrap()).collect();
-    for cmd in ["dict_get", "dict_set", "dict_has", "dict_keys", "dict_count", "dict_remove"] {
+    for cmd in [
+        "dict_get",
+        "dict_set",
+        "dict_has",
+        "dict_keys",
+        "dict_count",
+        "dict_remove",
+    ] {
         assert!(labels.contains(&cmd), "`{cmd}` should complete: {labels:?}");
     }
     assert!(labels.contains(&"person"), "the record type: {labels:?}");
@@ -822,7 +907,10 @@ fn diagnostic_columns_are_utf16() {
     let mut c = Client::start();
     let uri = "file:///tmp/kiln_lsp_cols_utf16.kiln";
     // "héllo" is 5 UTF-16 units, 6 bytes. `nope` starts at unit 27.
-    c.open(uri, "module m\nsub main\n  call print_text(\"héllo\" + nope())\nend\n");
+    c.open(
+        uri,
+        "module m\nsub main\n  call print_text(\"héllo\" + nope())\nend\n",
+    );
     let d = c.diagnostics(uri);
     assert_eq!(d.len(), 1, "{d:?}");
     assert_eq!(d[0]["range"]["start"]["character"], 28, "{:?}", d[0]);
@@ -837,7 +925,10 @@ fn diagnostic_columns_are_utf16() {
 fn a_command_from_an_unused_library_names_the_use_line() {
     let mut c = Client::start();
     let uri = "file:///tmp/kiln_lsp_elsewhere.kiln";
-    c.open(uri, "module m\nsub main\n  let t: text = file_read_text(\"a\")\nend\n");
+    c.open(
+        uri,
+        "module m\nsub main\n  let t: text = file_read_text(\"a\")\nend\n",
+    );
     let d = c.diagnostics(uri);
     assert_eq!(d.len(), 1, "{d:?}");
     assert_eq!(
@@ -879,7 +970,10 @@ fn completion_after_on_offers_the_components_events() {
     let mut c = Client::start();
     let uri = "file:///tmp/kiln_lsp_on.kiln";
     //          1        2        3                 4      5    6        7
-    c.open(uri, "module m\ntimer t\n  interval = 500\n  on \nend\nsub main\nend\n");
+    c.open(
+        uri,
+        "module m\ntimer t\n  interval = 500\n  on \nend\nsub main\nend\n",
+    );
     let _ = c.diagnostics(uri);
 
     let r = c.request(120, "textDocument/completion", Client::at(uri, 3, 5));
@@ -903,7 +997,10 @@ fn handler_completion_writes_the_subroutine_with_the_events_parameters() {
 
     let r = c.request(121, "textDocument/completion", Client::at(uri, 2, 11));
     let names = labels(&r);
-    assert!(names.contains(&"main".to_string()), "existing subroutines: {names:?}");
+    assert!(
+        names.contains(&"main".to_string()),
+        "existing subroutines: {names:?}"
+    );
     let new = r
         .as_array()
         .unwrap()
@@ -916,11 +1013,17 @@ fn handler_completion_writes_the_subroutine_with_the_events_parameters() {
         edit["newText"], "\nsub t_tick(n: int)\n  \nend\n",
         "the event hands an int, so the handler takes one: {new}"
     );
-    assert_eq!(edit["range"]["start"]["line"], 6, "after the last line: {new}");
+    assert_eq!(
+        edit["range"]["start"]["line"], 6,
+        "after the last line: {new}"
+    );
 
     // Once the subroutine exists it is offered as itself, not created twice.
     let uri2 = "file:///tmp/kiln_lsp_handler2.kiln";
-    c.open(uri2, "module m\ntimer t\n  on tick: \nend\nsub main\nend\nsub t_tick(n: int)\nend\n");
+    c.open(
+        uri2,
+        "module m\ntimer t\n  on tick: \nend\nsub main\nend\nsub t_tick(n: int)\nend\n",
+    );
     let _ = c.diagnostics(uri2);
     let r = c.request(122, "textDocument/completion", Client::at(uri2, 2, 11));
     let ticks: Vec<&serde_json::Value> = r
@@ -944,7 +1047,10 @@ fn completion_after_on_inside_a_forms_button_offers_its_events() {
     let mut c = Client::start();
     let uri = "file:///tmp/kiln_lsp_form_on.kiln";
     //          1        2      3          4           5      6    7    8      9
-    c.open(uri, "module m\nuse ui\nform Main\n  button ok\n    on \n  end\nend\nsub go\nend\n");
+    c.open(
+        uri,
+        "module m\nuse ui\nform Main\n  button ok\n    on \n  end\nend\nsub go\nend\n",
+    );
     let _ = c.diagnostics(uri);
 
     let r = c.request(140, "textDocument/completion", Client::at(uri, 4, 7));
@@ -961,12 +1067,18 @@ fn handler_completion_inside_a_forms_button_writes_the_subroutine() {
     let mut c = Client::start();
     let uri = "file:///tmp/kiln_lsp_form_handler.kiln";
     //          1        2      3          4           5             6    7    8      9
-    c.open(uri, "module m\nuse ui\nform Main\n  button ok\n    on click: \n  end\nend\nsub go\nend\n");
+    c.open(
+        uri,
+        "module m\nuse ui\nform Main\n  button ok\n    on click: \n  end\nend\nsub go\nend\n",
+    );
     let _ = c.diagnostics(uri);
 
     let r = c.request(141, "textDocument/completion", Client::at(uri, 4, 14));
     let names = labels(&r);
-    assert!(names.contains(&"go".to_string()), "existing subroutines: {names:?}");
+    assert!(
+        names.contains(&"go".to_string()),
+        "existing subroutines: {names:?}"
+    );
     let new = r
         .as_array()
         .unwrap()
@@ -976,7 +1088,10 @@ fn handler_completion_inside_a_forms_button_writes_the_subroutine() {
     assert_eq!(new["insertText"], "ok_click");
     let edit = &new["additionalTextEdits"][0];
     assert_eq!(edit["newText"], "\nsub ok_click\n  \nend\n", "{new}");
-    assert_eq!(edit["range"]["start"]["line"], 9, "after the last line: {new}");
+    assert_eq!(
+        edit["range"]["start"]["line"], 9,
+        "after the last line: {new}"
+    );
     c.shutdown();
 }
 
@@ -987,7 +1102,10 @@ fn completion_after_on_inside_the_form_offers_the_forms_events() {
     let mut c = Client::start();
     let uri = "file:///tmp/kiln_lsp_form_own_on.kiln";
     //          1        2      3          4           5      6      7    8      9
-    c.open(uri, "module m\nuse ui\nform Main\n  button ok\n  end\n  on \nend\nsub go\nend\n");
+    c.open(
+        uri,
+        "module m\nuse ui\nform Main\n  button ok\n  end\n  on \nend\nsub go\nend\n",
+    );
     let _ = c.diagnostics(uri);
 
     let r = c.request(142, "textDocument/completion", Client::at(uri, 5, 5));
@@ -996,7 +1114,10 @@ fn completion_after_on_inside_the_form_offers_the_forms_events() {
 
     // And the handler it creates is named after the form.
     let uri2 = "file:///tmp/kiln_lsp_form_own_handler.kiln";
-    c.open(uri2, "module m\nuse ui\nform Main\n  on load: \nend\nsub go\nend\n");
+    c.open(
+        uri2,
+        "module m\nuse ui\nform Main\n  on load: \nend\nsub go\nend\n",
+    );
     let _ = c.diagnostics(uri2);
     let r = c.request(143, "textDocument/completion", Client::at(uri2, 3, 11));
     let new = r
@@ -1006,8 +1127,7 @@ fn completion_after_on_inside_the_form_offers_the_forms_events() {
         .find(|i| i["label"] == "Main_load")
         .unwrap_or_else(|| panic!("the new handler: {:?}", labels(&r)));
     assert_eq!(
-        new["additionalTextEdits"][0]["newText"],
-        "\nsub Main_load\n  \nend\n",
+        new["additionalTextEdits"][0]["newText"], "\nsub Main_load\n  \nend\n",
         "{new}"
     );
     c.shutdown();
@@ -1026,12 +1146,18 @@ fn hover_on_a_property_shows_its_type_and_editor() {
 
     let h = c.request(130, "textDocument/hover", Client::at(uri, 4, 8));
     let text = h["contents"]["value"].as_str().unwrap_or("").to_string();
-    assert!(text.contains("button.background_color: text"), "hover: {text}");
+    assert!(
+        text.contains("button.background_color: text"),
+        "hover: {text}"
+    );
     assert!(text.contains("editor: color"), "the editor hint: {text}");
 
     let h = c.request(131, "textDocument/hover", Client::at(uri, 8, 6));
     let text = h["contents"]["value"].as_str().unwrap_or("").to_string();
-    assert!(text.contains("button.text: text"), "hover on `ok.text`: {text}");
+    assert!(
+        text.contains("button.text: text"),
+        "hover on `ok.text`: {text}"
+    );
     assert!(text.contains("property of `ok`"), "{text}");
     c.shutdown();
 }

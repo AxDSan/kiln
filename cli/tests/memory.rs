@@ -30,12 +30,7 @@ fn build_and_run(tag: &str, src: &str) -> String {
     std::fs::write(&file, src).expect("write source");
 
     let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args([
-            "build",
-            file.to_str().unwrap(),
-            "-o",
-            bin.to_str().unwrap(),
-        ])
+        .args(["build", file.to_str().unwrap(), "-o", bin.to_str().unwrap()])
         .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .output()
         .expect("run kiln");
@@ -75,7 +70,11 @@ fn a_loop_that_discards_what_it_builds_does_not_grow() {
          end\n",
     );
     let mut lines = out.lines();
-    assert_eq!(lines.next().unwrap().trim(), "54888896", "wrong answer: {out}");
+    assert_eq!(
+        lines.next().unwrap().trim(),
+        "54888896",
+        "wrong answer: {out}"
+    );
     let held: i64 = lines.next().unwrap().trim().parse().expect("a number");
     assert!(
         held < 8 * 1024 * 1024,
@@ -108,8 +107,14 @@ fn a_value_held_only_by_a_module_variable_survives() {
         \x20 call print_text(\"{list[1]},{list[2]},{list[3]}\")\n\
          end\n",
     );
-    assert!(out.contains("built at run time"), "the global was lost: {out}");
-    assert!(out.contains("one,two,three"), "the global list was lost: {out}");
+    assert!(
+        out.contains("built at run time"),
+        "the global was lost: {out}"
+    );
+    assert!(
+        out.contains("one,two,three"),
+        "the global list was lost: {out}"
+    );
 }
 
 /// Two names for one array are two names for the same array — the promise that
@@ -195,10 +200,17 @@ fn the_collector_can_be_turned_off() {
         .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .output()
         .expect("run kiln");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let on = Command::new(&bin).output().expect("run");
-    let off = Command::new(&bin).env("KILN_GC", "0").output().expect("run");
+    let off = Command::new(&bin)
+        .env("KILN_GC", "0")
+        .output()
+        .expect("run");
     assert_eq!(
         String::from_utf8_lossy(&on.stdout),
         String::from_utf8_lossy(&off.stdout),

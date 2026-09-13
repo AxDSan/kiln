@@ -31,7 +31,12 @@ fn build(src_path: &Path, tag: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).expect("scratch dir");
     let bin = dir.join("prog");
     let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", src_path.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .args([
+            "build",
+            src_path.to_str().unwrap(),
+            "-o",
+            bin.to_str().unwrap(),
+        ])
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
         .expect("run kiln");
@@ -149,9 +154,18 @@ fn the_echo_example_echoes_lines_and_counts_clients_from_one() {
 
     let (stdout, _) = finish(child, "tcpecho");
     assert!(stdout.contains("connect 1\n"), "no `connect 1`:\n{stdout}");
-    assert!(stdout.contains("  from 127.0.0.1:"), "no client address:\n{stdout}");
-    assert!(stdout.contains("disconnect 1\n"), "no `disconnect 1`:\n{stdout}");
-    assert!(stdout.contains("connect 2\n"), "the second client must be 2:\n{stdout}");
+    assert!(
+        stdout.contains("  from 127.0.0.1:"),
+        "no client address:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("disconnect 1\n"),
+        "no `disconnect 1`:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("connect 2\n"),
+        "the second client must be 2:\n{stdout}"
+    );
 }
 
 /// (b) A server and a client in ONE program, talking over loopback: two pumps
@@ -305,9 +319,18 @@ end
         stdout.contains(&format!("error: connect 127.0.0.1:{port}: ")),
         "the message must name the failure and the address:\n{stdout}\n{stderr}"
     );
-    assert!(stdout.contains("code set\n"), "last_error_code() was 0:\n{stdout}");
-    assert!(stdout.contains("inactive\n"), "active should have dropped:\n{stdout}");
-    assert!(!stdout.contains("connected?!"), "it connected to nothing:\n{stdout}");
+    assert!(
+        stdout.contains("code set\n"),
+        "last_error_code() was 0:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("inactive\n"),
+        "active should have dropped:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("connected?!"),
+        "it connected to nothing:\n{stdout}"
+    );
 }
 
 /// (d) An empty delimiter delivers what arrived, as it arrived.
@@ -470,7 +493,10 @@ fn the_listing_shows_the_components_and_their_commands() {
         "event: tcpclient receive",
         "event: tcpclient error",
     ] {
-        assert!(text.lines().any(|l| l == line), "missing `{line}` in:\n{text}");
+        assert!(
+            text.lines().any(|l| l == line),
+            "missing `{line}` in:\n{text}"
+        );
     }
 }
 

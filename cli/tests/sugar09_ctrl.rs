@@ -272,10 +272,22 @@ end
     let run = Command::new(&bin).output().expect("run built binary");
     let stdout = String::from_utf8_lossy(&run.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&run.stderr).into_owned();
-    assert!(stdout.contains("still here"), "the passing assert stopped the program: {stdout}");
-    assert!(!stdout.contains("unreachable"), "the failing assert did not stop it: {stdout}");
-    assert!(stderr.contains("n must be positive"), "the message is missing: {stderr}");
-    assert!(!run.status.success(), "a fired assertion must fail the program");
+    assert!(
+        stdout.contains("still here"),
+        "the passing assert stopped the program: {stdout}"
+    );
+    assert!(
+        !stdout.contains("unreachable"),
+        "the failing assert did not stop it: {stdout}"
+    );
+    assert!(
+        stderr.contains("n must be positive"),
+        "the message is missing: {stderr}"
+    );
+    assert!(
+        !run.status.success(),
+        "a fired assertion must fail the program"
+    );
 }
 
 /// With no message of its own an `assert` quotes the condition as it was
@@ -327,7 +339,10 @@ end
         !release.contains("the release build must not carry this"),
         "a release build must not carry the message either"
     );
-    assert!(release.contains("done"), "the rest of the program is untouched");
+    assert!(
+        release.contains("done"),
+        "the rest of the program is untouched"
+    );
 }
 
 /// Dropping the code is not the same as not looking at it: a release build has
@@ -354,7 +369,10 @@ end
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
         .expect("run kiln emit");
-    assert!(!out.status.success(), "a release build accepted a broken assert");
+    assert!(
+        !out.status.success(),
+        "a release build accepted a broken assert"
+    );
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("nosuchthing"),

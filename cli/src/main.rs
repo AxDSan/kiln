@@ -34,6 +34,7 @@ mod kit;
 mod libload;
 mod lsp;
 mod lsp_index;
+mod lsp_k2;
 mod project;
 mod templates;
 
@@ -426,9 +427,10 @@ fn parse_io_args(rest: &[String]) -> Result<Io, String> {
             "--arch" | "-a" => {
                 i += 1;
                 let v = rest.get(i).ok_or("`--arch` needs a name")?;
-                arch = Some(Arch::parse(v).ok_or_else(|| {
-                    format!("unknown arch `{v}` — expected x86_64 or x86")
-                })?);
+                arch = Some(
+                    Arch::parse(v)
+                        .ok_or_else(|| format!("unknown arch `{v}` — expected x86_64 or x86"))?,
+                );
             }
             s if s.starts_with('-') => return Err(format!("unknown flag `{s}`")),
             s => {
@@ -471,7 +473,11 @@ fn cmd_edit(rest: &[String]) -> i32 {
     };
     let edit = match op.split_first() {
         Some((verb, a)) if verb == "set" && a.len() == 3 => kiln_k2::Edit::SetProperty {
-            target: if a[0] == "." { String::new() } else { a[0].clone() },
+            target: if a[0] == "." {
+                String::new()
+            } else {
+                a[0].clone()
+            },
             name: a[1].clone(),
             value: a[2].clone(),
         },
@@ -479,9 +485,9 @@ fn cmd_edit(rest: &[String]) -> i32 {
             type_name: a[0].clone(),
             id: a[1].clone(),
         },
-        Some((verb, a)) if verb == "remove" && a.len() == 1 => kiln_k2::Edit::RemoveComponent {
-            id: a[0].clone(),
-        },
+        Some((verb, a)) if verb == "remove" && a.len() == 1 => {
+            kiln_k2::Edit::RemoveComponent { id: a[0].clone() }
+        }
         Some((verb, a)) if verb == "rename" && a.len() == 2 => kiln_k2::Edit::RenameComponent {
             from: a[0].clone(),
             to: a[1].clone(),
@@ -872,7 +878,9 @@ fn cmd_commands(repo_root: &Path, args: &[String]) -> i32 {
     let mut names: Vec<&str> = plan.registry.names().collect();
     names.sort_unstable();
     for name in names {
-        let Some(cmd) = plan.registry.get(name) else { continue };
+        let Some(cmd) = plan.registry.get(name) else {
+            continue;
+        };
         let params = cmd
             .sig
             .params
@@ -902,7 +910,9 @@ fn cmd_commands(repo_root: &Path, args: &[String]) -> i32 {
     let mut components: Vec<&str> = plan.registry.component_names().collect();
     components.sort_unstable();
     for type_name in components {
-        let Some(desc) = plan.registry.component(type_name) else { continue };
+        let Some(desc) = plan.registry.component(type_name) else {
+            continue;
+        };
         println!("component: {type_name}");
         // `kind:` and `editor:` are ADDED lines, never a change to the shape of
         // the existing ones: the designer's catalog, gen-docs.sh and
@@ -936,7 +946,9 @@ fn cmd_commands(repo_root: &Path, args: &[String]) -> i32 {
     let mut dlls: Vec<&str> = plan.registry.dll_names().collect();
     dlls.sort_unstable();
     for name in dlls {
-        let Some(d) = plan.registry.dll(name) else { continue };
+        let Some(d) = plan.registry.dll(name) else {
+            continue;
+        };
         let params = d
             .sig
             .params
@@ -953,7 +965,9 @@ fn cmd_commands(repo_root: &Path, args: &[String]) -> i32 {
     let mut crecords: Vec<&str> = plan.registry.record_names().collect();
     crecords.sort_unstable();
     for name in crecords {
-        let Some(rec) = plan.registry.record(name) else { continue };
+        let Some(rec) = plan.registry.record(name) else {
+            continue;
+        };
         // Only a c-record has a byte layout a kit ships for interop; a plain
         // heap record is a program's own business and is not listed here.
         if !rec.is_c {
@@ -976,7 +990,9 @@ fn cmd_commands(repo_root: &Path, args: &[String]) -> i32 {
     let mut consts: Vec<&str> = plan.registry.const_names().collect();
     consts.sort_unstable();
     for name in consts {
-        let Some(c) = plan.registry.const_(name) else { continue };
+        let Some(c) = plan.registry.const_(name) else {
+            continue;
+        };
         println!("const: {name} {}", c.ty.as_str());
     }
     0
@@ -1200,13 +1216,14 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
         );
         return 2;
     }
-    let (mut ll, mut plan, target, module) = match compile(&input, io.target, io.os, io.arch, io.release) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("kiln: {e}");
-            return 1;
-        }
-    };
+    let (mut ll, mut plan, target, module) =
+        match compile(&input, io.target, io.os, io.arch, io.release) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("kiln: {e}");
+                return 1;
+            }
+        };
 
     // A shared library that declares `dll_attach`/`dll_detach` gets a platform
     // loader entry — `DllMain` on Windows, an ELF constructor on Linux. The
@@ -1317,11 +1334,7 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
 /// through here, so `build`, `run`, `emit` and the language server agree on
 /// what a program *is*. A unit's own error is reported with the unit's file
 /// and line, since the program's line numbers would point at the wrong text.
-fn parse_program(
-    src: &str,
-    input: &Path,
-    opts: ParseOptions,
-) -> Result<kiln_ir::Resolved, String> {
+fn parse_program(src: &str, input: &Path, opts: ParseOptions) -> Result<kiln_ir::Resolved, String> {
     let module = parse_with(src, opts).map_err(|e| e.to_string())?;
     if module.is_unit {
         return Err(format!(
@@ -1437,7 +1450,10 @@ fn compile_with(
                 "kit `{kit}` supports {} — it cannot be built for {}. Build with `--os {}`.",
                 platforms.join(", "),
                 os.as_platform(),
-                platforms.first().map(String::as_str).unwrap_or("<platform>")
+                platforms
+                    .first()
+                    .map(String::as_str)
+                    .unwrap_or("<platform>")
             ));
         }
     }
@@ -1475,11 +1491,7 @@ fn compile_with(
     // nobody remembers to make; off in release because `--release` already
     // means "strip what a user does not need", and this is the largest part
     // of it.
-    let source = if release {
-        None
-    } else {
-        input.to_str()
-    };
+    let source = if release { None } else { input.to_str() };
     let ll = lower_module_for(
         &module,
         &plan.registry,
@@ -1526,10 +1538,13 @@ fn elsewhere(repo_root: &Path) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for k in kit::resolve_all(repo_root) {
         let uses = vec![k.name.clone()];
-        let Ok(root) = kit::overlay_root(repo_root, &uses) else { continue };
+        let Ok(root) = kit::overlay_root(repo_root, &uses) else {
+            continue;
+        };
         if let Ok(plan) = libload::load_metadata(&root, &uses, Arch::host()) {
             for (name, _) in plan.registry.iter() {
-                map.entry(name.to_string()).or_insert_with(|| k.name.clone());
+                map.entry(name.to_string())
+                    .or_insert_with(|| k.name.clone());
             }
         }
     }
@@ -1665,11 +1680,18 @@ fn default_output(input: &Path, project_output: Option<&Path>, target: Target, o
     let (dir, stem) = match project_output {
         Some(p) => (
             p.parent().unwrap_or(Path::new(".")).to_path_buf(),
-            p.file_name().and_then(|s| s.to_str()).unwrap_or("a").to_string(),
+            p.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("a")
+                .to_string(),
         ),
         None => (
             PathBuf::new(),
-            input.file_stem().and_then(|s| s.to_str()).unwrap_or("a").to_string(),
+            input
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("a")
+                .to_string(),
         ),
     };
     // Libraries follow the platform convention, so a host's linker finds them
@@ -1853,11 +1875,11 @@ fn clang_link(
         }
     }
     libs.push("-lm".into()); // libm for the floating-point commands
-    // libdl for the foreign-function loader (runtime/kn_dll.c's dlopen/dlsym).
-    // Only on Linux, and only for a native build: glibc >= 2.34 folds these
-    // into libc so the flag is a harmless no-op there, but an older host still
-    // needs it — and macOS has no `libdl` to name (the calls live in libSystem)
-    // while the Windows loader is kernel32, linked by the mingw path instead.
+                             // libdl for the foreign-function loader (runtime/kn_dll.c's dlopen/dlsym).
+                             // Only on Linux, and only for a native build: glibc >= 2.34 folds these
+                             // into libc so the flag is a harmless no-op there, but an older host still
+                             // needs it — and macOS has no `libdl` to name (the calls live in libSystem)
+                             // while the Windows loader is kernel32, linked by the mingw path instead.
     if cfg!(target_os = "linux") {
         libs.push("-ldl".into());
     }
@@ -2090,17 +2112,26 @@ fn mingw_link(
             );
             return Err(1);
         }
-        return build_archive(driver, &driver_args, tc.ar, &clang_common, &c_inputs, out_bin);
+        return build_archive(
+            driver,
+            &driver_args,
+            tc.ar,
+            &clang_common,
+            &c_inputs,
+            out_bin,
+        );
     }
 
     let dir = std::env::temp_dir().join(format!("kiln_mingw_{}", std::process::id()));
     let c_dir = dir.join("c");
     let cxx_dir = dir.join("cxx");
-    if let Err(e) = std::fs::create_dir_all(&c_dir).and_then(|_| std::fs::create_dir_all(&cxx_dir)) {
+    if let Err(e) = std::fs::create_dir_all(&c_dir).and_then(|_| std::fs::create_dir_all(&cxx_dir))
+    {
         eprintln!("kiln: cannot create {}: {e}", dir.display());
         return Err(1);
     }
-    let mut objects = match compile_objects(driver, &driver_args, &clang_common, &c_inputs, &c_dir) {
+    let mut objects = match compile_objects(driver, &driver_args, &clang_common, &c_inputs, &c_dir)
+    {
         Ok(o) => o,
         Err(code) => {
             let _ = std::fs::remove_dir_all(&dir);
@@ -2118,7 +2149,11 @@ fn mingw_link(
     }
 
     // The link driver follows the sources: g++ knows where libstdc++ is.
-    let linker = if cxx_inputs.is_empty() { tc.gcc } else { tc.gxx };
+    let linker = if cxx_inputs.is_empty() {
+        tc.gcc
+    } else {
+        tc.gxx
+    };
     let mut cmd = Command::new(linker);
     cmd.args(&objects);
     cmd.args(&cfg.link_args);
@@ -2161,7 +2196,10 @@ fn mingw_link(
         // so the import library comes out beside it under the name a
         // `#pragma comment(lib, "greet.lib")` expects. ld writes it as part
         // of the same link, from the same export table.
-        cmd.arg(format!("-Wl,--out-implib,{}", implib_path(out_bin).display()));
+        cmd.arg(format!(
+            "-Wl,--out-implib,{}",
+            implib_path(out_bin).display()
+        ));
     } else {
         cmd.arg("-Wl,--gc-sections");
     }
@@ -2261,7 +2299,9 @@ fn copy_windows_dlls(arch: Arch, image: &Path, extra: &[String]) -> Result<Vec<S
             for e in rd.flatten() {
                 let name = e.file_name().to_string_lossy().to_string();
                 if name.to_ascii_lowercase().ends_with(".dll") {
-                    available.entry(name.to_ascii_lowercase()).or_insert(e.path());
+                    available
+                        .entry(name.to_ascii_lowercase())
+                        .or_insert(e.path());
                 }
             }
         }
@@ -2277,7 +2317,9 @@ fn copy_windows_dlls(arch: Arch, image: &Path, extra: &[String]) -> Result<Vec<S
             if copied.iter().any(|c| c.to_ascii_lowercase() == key) {
                 continue;
             }
-            let Some(src) = available.get(&key) else { continue };
+            let Some(src) = available.get(&key) else {
+                continue;
+            };
             let real = src
                 .file_name()
                 .map(|f| f.to_string_lossy().to_string())
@@ -2309,7 +2351,9 @@ fn mingw_release_cflags(driver_args: &[String]) -> Vec<String> {
         req(&[&["-fstack-protector-strong"]]),
     ];
     let dir = mingw_probe_dir();
-    let Some(src) = mingw_probe_src(&dir) else { return Vec::new() };
+    let Some(src) = mingw_probe_src(&dir) else {
+        return Vec::new();
+    };
     let obj = dir.join("probe.o");
     let taken = probe_each("clang", &want, |taken, alt| {
         Command::new("clang")
@@ -2348,7 +2392,9 @@ fn mingw_release_ldflags(arch: Arch, driver_args: &[String], cflags: &[String]) 
         req(&[&["-Wl,-s"]]),
     ];
     let dir = mingw_probe_dir();
-    let Some(src) = mingw_probe_src(&dir) else { return Vec::new() };
+    let Some(src) = mingw_probe_src(&dir) else {
+        return Vec::new();
+    };
     let obj = dir.join("probe.o");
     let compiled = Command::new("clang")
         .args(driver_args)

@@ -56,46 +56,46 @@ fn build_structs_lib(dir: &Path, cc: &str, soname: &str, shared_flags: &[&str]) 
 /// `sizeof` computed by the C compiler that built `structs.c`; the `*-ok` lines
 /// are Kiln's own field offsets held to clang's `offsetof`.
 const EXPECT: &[&str] = &[
-    "11",             // m.pt.x — a nested field round-trips
-    "22",             // m.pt.y
-    "48",             // size of Msg
-    "48",             // clang's sizeof(SMsg): the same number
-    "8",              // size of Point
-    "8",              // clang's sizeof(SPoint)
-    "300",            // C filled the nested POINT through the struct pointer
+    "11",  // m.pt.x — a nested field round-trips
+    "22",  // m.pt.y
+    "48",  // size of Msg
+    "48",  // clang's sizeof(SMsg): the same number
+    "8",   // size of Point
+    "8",   // clang's sizeof(SPoint)
+    "300", // C filled the nested POINT through the struct pointer
     "400",
-    "15",             // ...and the scalar fields around it
+    "15", // ...and the scalar fields around it
     "1000000000000",
-    "pt-offset-ok",   // `address of m.pt` sits at clang's offsetof(SMsg, pt)
-    "777",            // a write through that pointer lands in m.pt.x
-    "780",            // a `dll` taking the nested record moves the POINT inside
-    "404",            // ...the MSG, so C got the nested struct's own address
-    "65535",          // a `int16` field reads back unsigned
-    "258",            // a `word` field, the same width by its other name
-    "16",             // size of WC
-    "16",             // clang's sizeof(SWndClass)
-    "65535",          // C wrote both WORDs as uint16_t
+    "pt-offset-ok", // `address of m.pt` sits at clang's offsetof(SMsg, pt)
+    "777",          // a write through that pointer lands in m.pt.x
+    "780",          // a `dll` taking the nested record moves the POINT inside
+    "404",          // ...the MSG, so C got the nested struct's own address
+    "65535",        // a `int16` field reads back unsigned
+    "258",          // a `word` field, the same width by its other name
+    "16",           // size of WC
+    "16",           // clang's sizeof(SWndClass)
+    "65535",        // C wrote both WORDs as uint16_t
     "258",
-    "window",         // the text field after them is where it should be
+    "window", // the text field after them is where it should be
     "wc-name-offset-ok",
-    "3",              // bytes[1] — positions count from 1
-    "48",             // bytes[16]
-    "3",              // C reads the same byte at index 0
-    "48",             // ...and at index 15
-    "20",             // size of Blob: 4 + 16, padded to 4
-    "20",             // clang's sizeof(SBlob)
+    "3",               // bytes[1] — positions count from 1
+    "48",              // bytes[16]
+    "3",               // C reads the same byte at index 0
+    "48",              // ...and at index 15
+    "20",              // size of Blob: 4 + 16, padded to 4
+    "20",              // clang's sizeof(SBlob)
     "bytes-offset-ok", // `address of b.bytes` is the first element
-    "77",             // C memset the array member alone
+    "77",              // C memset the array member alone
     "77",
-    "9",              // ...and left `n` untouched
-    "200",            // a computed index reaches the same element
-    "55",             // ...and a `const` index folds like a literal one
-    "1.5",            // a float field round-trips (exact in binary)
-    "4",              // size of FloatBox
-    "4",              // clang's sizeof(SFloatBox)
-    "2.25",           // C stored 2.25 as a float; Kiln reads it as a double
-    "float-agrees",   // and C reads back exactly what Kiln wrote
-    "5",              // a module variable seeded from a `const`
+    "9",            // ...and left `n` untouched
+    "200",          // a computed index reaches the same element
+    "55",           // ...and a `const` index folds like a literal one
+    "1.5",          // a float field round-trips (exact in binary)
+    "4",            // size of FloatBox
+    "4",            // clang's sizeof(SFloatBox)
+    "2.25",         // C stored 2.25 as a float; Kiln reads it as a double
+    "float-agrees", // and C reads back exactly what Kiln wrote
+    "5",            // a module variable seeded from a `const`
 ];
 
 fn run_and_check(bin: &Path, dir: &Path, how: &str) {
@@ -272,9 +272,9 @@ fn kiln_kits_lists_a_split_kits_whole_bundle() {
         .expect("run kiln kits");
     let text = String::from_utf8_lossy(&out.stdout);
     for line in [
-        "dll: split_demo split_add demoffi",     // calls.kdecl
-        "crecord: split_demo SplitPoint",        // shapes.kdecl
-        "const: split_demo SPLIT_ANSWER int",    // shapes.kdecl
+        "dll: split_demo split_add demoffi",  // calls.kdecl
+        "crecord: split_demo SplitPoint",     // shapes.kdecl
+        "const: split_demo SPLIT_ANSWER int", // shapes.kdecl
     ] {
         assert!(text.contains(line), "expected `{line}` in:\n{text}");
     }

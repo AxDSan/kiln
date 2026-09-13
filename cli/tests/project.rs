@@ -91,7 +91,11 @@ fn project_prints_resolved_fields_for_file_and_directory() {
         &["project", dir.join("project.kproj").to_str().unwrap()],
     );
     assert!(by_dir.status.success(), "{}", stderr(&by_dir));
-    assert_eq!(stdout(&by_dir), stdout(&by_file), "file and directory disagree");
+    assert_eq!(
+        stdout(&by_dir),
+        stdout(&by_file),
+        "file and directory disagree"
+    );
     let text = stdout(&by_dir);
     assert!(has_line(&text, "name: kiln_proj_print"), "{text}");
     assert!(
@@ -104,7 +108,10 @@ fn project_prints_resolved_fields_for_file_and_directory() {
     for l in text.lines() {
         let kind = l.split(": ").next().unwrap_or("");
         assert!(
-            matches!(kind, "project" | "name" | "main" | "target" | "kit" | "version"),
+            matches!(
+                kind,
+                "project" | "name" | "main" | "target" | "kit" | "version"
+            ),
             "unlabelled line {l:?} in:\n{text}"
         );
     }
@@ -118,8 +125,14 @@ fn build_and_run_take_the_project_from_elsewhere() {
     // project file, and the output lands in the project, not here.
     let built = kiln(&repo(), &["build", dir.to_str().unwrap()]);
     assert!(built.status.success(), "{}", stderr(&built));
-    assert!(dir.join("kiln_proj_build").is_file(), "output not in the project");
-    assert!(!repo().join("kiln_proj_build").exists(), "output leaked into cwd");
+    assert!(
+        dir.join("kiln_proj_build").is_file(),
+        "output not in the project"
+    );
+    assert!(
+        !repo().join("kiln_proj_build").exists(),
+        "output leaked into cwd"
+    );
 
     let ran = kiln(
         &repo(),
@@ -137,7 +150,11 @@ fn inspect_describes_the_projects_entry() {
     let dir = fresh("inspect");
     let out = kiln(&repo(), &["inspect", dir.to_str().unwrap()]);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(has_line(&stdout(&out), "module: kiln_proj_inspect"), "{}", stdout(&out));
+    assert!(
+        has_line(&stdout(&out), "module: kiln_proj_inspect"),
+        "{}",
+        stdout(&out)
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -154,11 +171,20 @@ fn the_projects_target_yields_to_the_flag() {
 
     let built = kiln(&repo(), &["build", dir.to_str().unwrap()]);
     assert!(built.status.success(), "{}", stderr(&built));
-    assert!(dir.join("libkiln_proj_target.so").is_file(), "project target ignored");
+    assert!(
+        dir.join("libkiln_proj_target.so").is_file(),
+        "project target ignored"
+    );
 
-    let built = kiln(&repo(), &["build", dir.to_str().unwrap(), "--target", "console"]);
+    let built = kiln(
+        &repo(),
+        &["build", dir.to_str().unwrap(), "--target", "console"],
+    );
     assert!(built.status.success(), "{}", stderr(&built));
-    assert!(dir.join("kiln_proj_target").is_file(), "--target did not win");
+    assert!(
+        dir.join("kiln_proj_target").is_file(),
+        "--target did not win"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -223,13 +249,29 @@ fn a_gui_project_is_untitled_until_titled() {
     let _ = std::fs::remove_dir_all(&dir);
     let out = kiln(&repo, &["new", "gui-app", dir.to_str().unwrap()]);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(has_line(&stdout(&out), "title: Untitled App"), "{}", stdout(&out));
+    assert!(
+        has_line(&stdout(&out), "title: Untitled App"),
+        "{}",
+        stdout(&out)
+    );
     let src = std::fs::read_to_string(dir.join("main.kiln")).unwrap();
     assert!(src.contains("title = \"Untitled App\""), "{src}");
-    assert!(src.contains("module kiln_proj_untitled"), "the module still follows the folder:\n{src}");
+    assert!(
+        src.contains("module kiln_proj_untitled"),
+        "the module still follows the folder:\n{src}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 
-    let out = kiln(&repo, &["new", "gui-app", dir.to_str().unwrap(), "--title", "Inventory"]);
+    let out = kiln(
+        &repo,
+        &[
+            "new",
+            "gui-app",
+            dir.to_str().unwrap(),
+            "--title",
+            "Inventory",
+        ],
+    );
     assert!(out.status.success(), "{}", stderr(&out));
     let src = std::fs::read_to_string(dir.join("main.kiln")).unwrap();
     assert!(src.contains("title = \"Inventory\""), "{src}");

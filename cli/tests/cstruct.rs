@@ -146,10 +146,7 @@ fn c_record_rejections_are_build_errors() {
             .env("KILN_RUNTIME_DIR", repo().join("runtime"))
             .output()
             .expect("run kiln");
-        assert!(
-            !out.status.success(),
-            "case {i} should not build:\n{src}"
-        );
+        assert!(!out.status.success(), "case {i} should not build:\n{src}");
         let msg = String::from_utf8_lossy(&out.stderr);
         assert!(
             msg.contains(needle),

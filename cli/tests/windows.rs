@@ -55,7 +55,11 @@ fn build_windows(source: &Path, out: &Path, extra: &[&str]) {
         .env("KILN_RUNTIME_DIR", repo.join("runtime"))
         .status()
         .expect("run kiln");
-    assert!(status.success(), "kiln build --os windows failed for {}", source.display());
+    assert!(
+        status.success(),
+        "kiln build --os windows failed for {}",
+        source.display()
+    );
 }
 
 /// Read the image's own headers, not `file`'s opinion of them: `MZ`, the
@@ -112,7 +116,11 @@ fn hello_cross_builds_to_pe32_plus_and_runs_under_wine() {
     // a file Windows will not run, so the build adds one.
     build_windows(&repo().join("examples/hello.kiln"), &dir.join("hello"), &[]);
     let image = dir.join("hello.exe");
-    assert!(image.is_file(), "expected {} to be written", image.display());
+    assert!(
+        image.is_file(),
+        "expected {} to be written",
+        image.display()
+    );
     assert_pe32_plus(&image);
 
     if let Some(lines) = wine_lines(&image, &dir) {
@@ -233,7 +241,11 @@ fn library_cross_builds_to_dll_and_archive() {
     let pe = u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize;
     // Characteristics: bit 0x2000 is IMAGE_FILE_DLL.
     let characteristics = u16::from_le_bytes([bytes[pe + 22], bytes[pe + 23]]);
-    assert_ne!(characteristics & 0x2000, 0, "the .dll is not marked as a DLL");
+    assert_ne!(
+        characteristics & 0x2000,
+        0,
+        "the .dll is not marked as a DLL"
+    );
     // The export directory is the first data directory, 112 bytes into the
     // PE32+ optional header; a size of zero means nothing is exported.
     let opt = pe + 24;
@@ -248,7 +260,10 @@ fn library_cross_builds_to_dll_and_archive() {
     let archive = dir.join("libhellolib.a");
     build_windows(&source, &archive, &["--target", "staticlib"]);
     let bytes = std::fs::read(&archive).unwrap();
-    assert!(bytes.starts_with(b"!<arch>\n"), "the static library is not an ar archive");
+    assert!(
+        bytes.starts_with(b"!<arch>\n"),
+        "the static library is not an ar archive"
+    );
 }
 
 /// The `ptr` type and the raw-memory commands must marshal identically on
@@ -264,15 +279,29 @@ fn ptr_cross_builds_and_runs_under_wine() {
     let dir = scratch("ptr");
     build_windows(&repo().join("examples/ptr.kiln"), &dir.join("ptr.exe"), &[]);
     let image = dir.join("ptr.exe");
-    assert!(image.is_file(), "expected {} to be written", image.display());
+    assert!(
+        image.is_file(),
+        "expected {} to be written",
+        image.display()
+    );
     assert_pe32_plus(&image);
 
     if let Some(lines) = wine_lines(&image, &dir) {
         assert_eq!(
             lines,
             vec![
-                "42", "9000000000", "255", "3.5", "hello, C", "", "7", "7",
-                "same", "null-ok", "123", "Kiln",
+                "42",
+                "9000000000",
+                "255",
+                "3.5",
+                "hello, C",
+                "",
+                "7",
+                "7",
+                "same",
+                "null-ok",
+                "123",
+                "Kiln",
             ],
             "unexpected ptr output under wine"
         );

@@ -92,17 +92,36 @@ fn run_lines(bin: &Path, cwd: &Path) -> Vec<String> {
 fn dll_attach_installs_a_hook_the_host_sees() {
     let dir = scratch("hook");
     let ex = repo().join("examples/hook");
-    cc("clang", &ex.join("hookrt.c"), &dir.join("libhookrt.so"), &["-shared", "-fPIC"]);
-    build_native(&ex.join("hook.kiln"), &dir.join("libhook.so"), &["--target", "sharedlib"]);
+    cc(
+        "clang",
+        &ex.join("hookrt.c"),
+        &dir.join("libhookrt.so"),
+        &["-shared", "-fPIC"],
+    );
+    build_native(
+        &ex.join("hook.kiln"),
+        &dir.join("libhook.so"),
+        &["--target", "sharedlib"],
+    );
     cc(
         "clang",
         &ex.join("host.c"),
         &dir.join("host"),
-        &["-L", dir.to_str().unwrap(), "-lhookrt", &format!("-Wl,-rpath,{}", dir.display()), "-ldl"],
+        &[
+            "-L",
+            dir.to_str().unwrap(),
+            "-lhookrt",
+            &format!("-Wl,-rpath,{}", dir.display()),
+            "-ldl",
+        ],
     );
 
     let lines = run_lines(&dir.join("host"), &dir);
-    assert_eq!(lines, vec!["before 20", "after 21"], "the hook did not take effect");
+    assert_eq!(
+        lines,
+        vec!["before 20", "after 21"],
+        "the hook did not take effect"
+    );
 }
 
 /// The ordering the shim promises: `<module>_init` runs before `dll_attach`.
@@ -144,15 +163,32 @@ fn an_exported_flag_shows_init_then_attach_ran() {
     )
     .expect("write loader.c");
 
-    build_native(&dir.join("flag.kiln"), &dir.join("libflag.so"), &["--target", "sharedlib"]);
-    build_native(&dir.join("plain.kiln"), &dir.join("libplain.so"), &["--target", "sharedlib"]);
-    cc("clang", &dir.join("loader.c"), &dir.join("loader"), &["-ldl"]);
+    build_native(
+        &dir.join("flag.kiln"),
+        &dir.join("libflag.so"),
+        &["--target", "sharedlib"],
+    );
+    build_native(
+        &dir.join("plain.kiln"),
+        &dir.join("libplain.so"),
+        &["--target", "sharedlib"],
+    );
+    cc(
+        "clang",
+        &dir.join("loader.c"),
+        &dir.join("loader"),
+        &["-ldl"],
+    );
 
     let hooked = Command::new(dir.join("loader"))
         .arg(dir.join("libflag.so"))
         .output()
         .expect("run loader on libflag");
-    assert!(hooked.status.success(), "loader failed:\n{}", String::from_utf8_lossy(&hooked.stderr));
+    assert!(
+        hooked.status.success(),
+        "loader failed:\n{}",
+        String::from_utf8_lossy(&hooked.stderr)
+    );
     assert_eq!(
         String::from_utf8_lossy(&hooked.stdout).trim(),
         "8",
@@ -163,7 +199,11 @@ fn an_exported_flag_shows_init_then_attach_ran() {
         .arg(dir.join("libplain.so"))
         .output()
         .expect("run loader on libplain");
-    assert!(plain.status.success(), "loader failed:\n{}", String::from_utf8_lossy(&plain.stderr));
+    assert!(
+        plain.status.success(),
+        "loader failed:\n{}",
+        String::from_utf8_lossy(&plain.stderr)
+    );
     assert_eq!(
         String::from_utf8_lossy(&plain.stdout).trim(),
         "0",
@@ -188,12 +228,20 @@ fn a_loader_hook_with_a_signature_is_rejected() {
         )
         .expect("write bad.kiln");
         let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
-            .args(["build", src.to_str().unwrap(), "-o", dir.join("libbad.so").to_str().unwrap()])
+            .args([
+                "build",
+                src.to_str().unwrap(),
+                "-o",
+                dir.join("libbad.so").to_str().unwrap(),
+            ])
             .args(["--target", "sharedlib"])
             .env("KILN_RUNTIME_DIR", repo().join("runtime"))
             .output()
             .expect("run kiln");
-        assert!(!out.status.success(), "a hook with a signature must not build");
+        assert!(
+            !out.status.success(),
+            "a hook with a signature must not build"
+        );
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
             stderr.contains("loader hook"),
@@ -231,14 +279,22 @@ fn both_hooks_fire_at_load_and_unload() {
          \x20 return 0;\n}\n",
     )
     .expect("write ld.c");
-    build_native(&dir.join("dt.kiln"), &dir.join("libdt.so"), &["--target", "sharedlib"]);
+    build_native(
+        &dir.join("dt.kiln"),
+        &dir.join("libdt.so"),
+        &["--target", "sharedlib"],
+    );
     cc("clang", &dir.join("ld.c"), &dir.join("ld"), &["-ldl"]);
 
     let out = Command::new(dir.join("ld"))
         .arg(dir.join("libdt.so"))
         .output()
         .expect("run loader");
-    assert!(out.status.success(), "loader failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "loader failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let lines: Vec<String> = String::from_utf8_lossy(&out.stdout)
         .lines()
         .map(str::to_string)
@@ -278,9 +334,16 @@ fn dll_attach_is_a_real_dllmain_under_wine() {
         MINGW_GCC,
         &ex.join("hookrt.c"),
         &dir.join("hookrt.dll"),
-        &["-shared", &format!("-Wl,--out-implib,{}", dir.join("libhookrt.dll.a").display())],
+        &[
+            "-shared",
+            &format!("-Wl,--out-implib,{}", dir.join("libhookrt.dll.a").display()),
+        ],
     );
-    build_native(&ex.join("hook.kiln"), &dir.join("hook.dll"), &["--os", "windows", "--target", "sharedlib"]);
+    build_native(
+        &ex.join("hook.kiln"),
+        &dir.join("hook.dll"),
+        &["--os", "windows", "--target", "sharedlib"],
+    );
     cc(
         MINGW_GCC,
         &ex.join("host.c"),
@@ -307,5 +370,9 @@ fn dll_attach_is_a_real_dllmain_under_wine() {
         .lines()
         .map(str::to_string)
         .collect();
-    assert_eq!(lines, vec!["before 20", "after 21"], "the DllMain hook did not take effect");
+    assert_eq!(
+        lines,
+        vec!["before 20", "after 21"],
+        "the DllMain hook did not take effect"
+    );
 }

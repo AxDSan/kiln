@@ -44,7 +44,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 fn repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf()
 }
 
 fn on_path(tool: &str) -> bool {
@@ -93,7 +96,14 @@ fn build_example(dir: &Path, name: &str) -> PathBuf {
     assert!(src.is_file(), "missing example {}", src.display());
     let out = dir.join(name);
     let done = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", src.to_str().unwrap(), "--os", "windows", "-o", out.to_str().unwrap()])
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--os",
+            "windows",
+            "-o",
+            out.to_str().unwrap(),
+        ])
         .current_dir(repo())
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
@@ -104,7 +114,11 @@ fn build_example(dir: &Path, name: &str) -> PathBuf {
         String::from_utf8_lossy(&done.stderr)
     );
     let image = dir.join(format!("{name}.exe"));
-    assert!(image.is_file(), "expected {} to be written", image.display());
+    assert!(
+        image.is_file(),
+        "expected {} to be written",
+        image.display()
+    );
     image
 }
 
@@ -113,14 +127,33 @@ fn build_example(dir: &Path, name: &str) -> PathBuf {
 /// magic — `0x20B` is what "PE32+" means.
 fn assert_pe32_plus(path: &Path) {
     let bytes = std::fs::read(path).expect("read the built image");
-    assert!(bytes.len() > 0x100, "{} is too small to be a PE", path.display());
-    assert_eq!(&bytes[0..2], b"MZ", "{}: no DOS stub signature", path.display());
+    assert!(
+        bytes.len() > 0x100,
+        "{} is too small to be a PE",
+        path.display()
+    );
+    assert_eq!(
+        &bytes[0..2],
+        b"MZ",
+        "{}: no DOS stub signature",
+        path.display()
+    );
     let pe = u32::from_le_bytes(bytes[0x3c..0x40].try_into().unwrap()) as usize;
-    assert_eq!(&bytes[pe..pe + 4], b"PE\0\0", "{}: no PE signature", path.display());
+    assert_eq!(
+        &bytes[pe..pe + 4],
+        b"PE\0\0",
+        "{}: no PE signature",
+        path.display()
+    );
     let machine = u16::from_le_bytes(bytes[pe + 4..pe + 6].try_into().unwrap());
     assert_eq!(machine, 0x8664, "{}: machine is not x86-64", path.display());
     let magic = u16::from_le_bytes(bytes[pe + 24..pe + 26].try_into().unwrap());
-    assert_eq!(magic, 0x20B, "{}: optional header is not PE32+", path.display());
+    assert_eq!(
+        magic,
+        0x20B,
+        "{}: optional header is not PE32+",
+        path.display()
+    );
 }
 
 /// Run a built `.exe` under wine and answer its stdout, with the carriage
@@ -155,7 +188,10 @@ fn run_under_wine(dir: &Path, image: &Path, seconds: &str) -> Vec<String> {
         out.status.code(),
         String::from_utf8_lossy(&out.stderr)
     );
-    stdout.lines().map(|l| l.trim_end_matches('\r').to_string()).collect()
+    stdout
+        .lines()
+        .map(|l| l.trim_end_matches('\r').to_string())
+        .collect()
 }
 
 /// The self-checking examples print `<label> ok` or `<label> FAILED`. Nothing
@@ -163,8 +199,17 @@ fn run_under_wine(dir: &Path, image: &Path, seconds: &str) -> Vec<String> {
 /// reports no failure at all.
 fn assert_no_failures(name: &str, lines: &[String]) {
     let failed: Vec<&String> = lines.iter().filter(|l| l.contains("FAILED")).collect();
-    assert!(failed.is_empty(), "{name} reported failures:\n{failed:?}\nfull output:\n{}", lines.join("\n"));
-    assert_eq!(lines.last().map(String::as_str), Some("done"), "{name} did not run to the end:\n{}", lines.join("\n"));
+    assert!(
+        failed.is_empty(),
+        "{name} reported failures:\n{failed:?}\nfull output:\n{}",
+        lines.join("\n")
+    );
+    assert_eq!(
+        lines.last().map(String::as_str),
+        Some("done"),
+        "{name} did not run to the end:\n{}",
+        lines.join("\n")
+    );
 }
 
 /// The five examples all cross-build for Windows against the merged kit, and
@@ -217,14 +262,24 @@ fn a_raw_win32_program_is_a_console_subsystem_image() {
     assert_eq!(subsystem, 3, "expected a console-subsystem image");
 
     let refused = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", repo().join("examples/win/window.kiln").to_str().unwrap(),
-               "--os", "windows", "--target", "gui",
-               "-o", dir.join("gui").to_str().unwrap()])
+        .args([
+            "build",
+            repo().join("examples/win/window.kiln").to_str().unwrap(),
+            "--os",
+            "windows",
+            "--target",
+            "gui",
+            "-o",
+            dir.join("gui").to_str().unwrap(),
+        ])
         .current_dir(repo())
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
         .expect("run kiln build");
-    assert!(!refused.status.success(), "`--target gui` unexpectedly built a formless module");
+    assert!(
+        !refused.status.success(),
+        "`--target gui` unexpectedly built a formless module"
+    );
     assert!(
         String::from_utf8_lossy(&refused.stderr).contains("declares no form"),
         "the refusal should say why, got:\n{}",
@@ -280,13 +335,35 @@ fn window_pumps_messages_under_wine() {
     let lines = run_under_wine(&dir, &image, "180");
     let has = |needle: &str| lines.iter().any(|l| l == needle);
 
-    assert!(has("registered"), "RegisterClassExA failed:\n{}", lines.join("\n"));
-    assert!(has("created"), "CreateWindowExA failed:\n{}", lines.join("\n"));
-    assert!(has("paint"), "the WNDPROC never saw WM_PAINT:\n{}", lines.join("\n"));
-    assert!(has("destroy"), "the WNDPROC never saw WM_DESTROY:\n{}", lines.join("\n"));
-    assert!(has("destroys 1"), "WM_DESTROY should arrive exactly once:\n{}", lines.join("\n"));
     assert!(
-        lines.iter().any(|l| l.starts_with("paints ") && l != "paints 0"),
+        has("registered"),
+        "RegisterClassExA failed:\n{}",
+        lines.join("\n")
+    );
+    assert!(
+        has("created"),
+        "CreateWindowExA failed:\n{}",
+        lines.join("\n")
+    );
+    assert!(
+        has("paint"),
+        "the WNDPROC never saw WM_PAINT:\n{}",
+        lines.join("\n")
+    );
+    assert!(
+        has("destroy"),
+        "the WNDPROC never saw WM_DESTROY:\n{}",
+        lines.join("\n")
+    );
+    assert!(
+        has("destroys 1"),
+        "WM_DESTROY should arrive exactly once:\n{}",
+        lines.join("\n")
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("paints ") && l != "paints 0"),
         "WM_PAINT should have been handled at least once:\n{}",
         lines.join("\n")
     );
@@ -298,7 +375,10 @@ fn window_pumps_messages_under_wine() {
         .find_map(|l| l.strip_prefix("frames "))
         .and_then(|n| n.parse().ok())
         .unwrap_or_else(|| panic!("no frame count printed:\n{}", lines.join("\n")));
-    assert!(frames < 400, "the pump ran out its budget instead of seeing WM_QUIT: {frames}");
+    assert!(
+        frames < 400,
+        "the pump ran out its budget instead of seeing WM_QUIT: {frames}"
+    );
 }
 
 /// The registry proof: a key created, a DWORD and a string written into it,
@@ -358,15 +438,18 @@ fn commands_lists_the_merged_bundle() {
 
     // One entry point from each subsystem file.
     for needle in [
-        "dll: MessageBoxA",        // user32
-        "dll: CreateWindowExA",    // user32
-        "dll: TextOutA",           // gdi32
-        "dll: CreateProcessA",     // kernel32_proc
-        "dll: ReadProcessMemory",  // kernel32_mem
-        "dll: VirtualAlloc",       // kernel32_mem
-        "dll: RegOpenKeyExA",      // advapi32
+        "dll: MessageBoxA",       // user32
+        "dll: CreateWindowExA",   // user32
+        "dll: TextOutA",          // gdi32
+        "dll: CreateProcessA",    // kernel32_proc
+        "dll: ReadProcessMemory", // kernel32_mem
+        "dll: VirtualAlloc",      // kernel32_mem
+        "dll: RegOpenKeyExA",     // advapi32
     ] {
-        assert!(has(needle), "`{needle}` is missing from the merged bundle:\n{text}");
+        assert!(
+            has(needle),
+            "`{needle}` is missing from the merged bundle:\n{text}"
+        );
     }
 
     // The structs and numbers a program writes beside them.
@@ -380,13 +463,19 @@ fn commands_lists_the_merged_bundle() {
         "const: HKEY_CURRENT_USER",
         "const: PAGE_READWRITE",
     ] {
-        assert!(has(needle), "`{needle}` is missing from the merged bundle:\n{text}");
+        assert!(
+            has(needle),
+            "`{needle}` is missing from the merged bundle:\n{text}"
+        );
     }
 
     // A bundle this size is the point of a kit; a listing that collapsed to a
     // handful would mean one file stopped merging without anything erroring.
     let dlls = text.lines().filter(|l| l.starts_with("dll: ")).count();
-    assert!(dlls > 300, "only {dlls} dll declarations merged — a file is missing:\n{text}");
+    assert!(
+        dlls > 300,
+        "only {dlls} dll declarations merged — a file is missing:\n{text}"
+    );
 }
 
 /// `use win` on a build that is not for Windows is one sentence naming the
@@ -397,12 +486,22 @@ fn the_win_kit_is_refused_for_linux() {
     let dir = scratch("gate");
     let src = repo().join("examples/win/meminfo.kiln");
     let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", src.to_str().unwrap(), "--os", "linux", "-o", dir.join("meminfo").to_str().unwrap()])
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--os",
+            "linux",
+            "-o",
+            dir.join("meminfo").to_str().unwrap(),
+        ])
         .current_dir(repo())
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .output()
         .expect("run kiln build");
-    assert!(!out.status.success(), "a windows-only kit must not build for linux");
+    assert!(
+        !out.status.success(),
+        "a windows-only kit must not build for linux"
+    );
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("kit `win` supports windows"),

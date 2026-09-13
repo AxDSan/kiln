@@ -143,7 +143,12 @@ fn an_unknown_convention_is_a_build_error() {
         let path = dir.join(format!("{name}.kiln"));
         std::fs::write(&path, src).expect("write reject source");
         let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
-            .args(["build", path.to_str().unwrap(), "-o", dir.join("x").to_str().unwrap()])
+            .args([
+                "build",
+                path.to_str().unwrap(),
+                "-o",
+                dir.join("x").to_str().unwrap(),
+            ])
             .env("KILN_RUNTIME_DIR", repo().join("runtime"))
             .output()
             .expect("run kiln");

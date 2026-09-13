@@ -161,26 +161,26 @@ end
     assert_eq!(
         lines,
         vec![
-            "2",        // 10 +=5 -=3 *=2 /=4 mod=4  -> 2
-            "abc",      // "a" &= "b" &= "c"
-            "1",        // increment, increment, decrement
-            "foobar",   // text +
-            "ababab",   // text * 3
-            "t1",       // 1 <= 5 <= 12 is true
-            "f1",       // 1 <= 20 <= 12 is false (20 <= 12 fails)
-            "mid-in",   // 1 <= bump() <= 10 is true
-            "1",        // bump() ran exactly once: the middle is evaluated once
-            "has20",    // 20 in [10,20,30]
-            "no99",     // 99 not in [10,20,30]
-            "hasA",     // "a" in the dictionary
-            "noZ",      // "z" not in the dictionary
-            "substr",   // "ell" in "hello"
-            "nosub",    // "xyz" not in "hello"
-            "fires",    // one-line if that fires
-            "4",        // `increment y if y = 3` ran; the skipped one did not
-            "1000000",  // 1_000_000
-            "3",        // count of [1, 2, 3,] with a trailing comma, called with one too
-            "9",        // {"k": 9,} with a trailing comma
+            "2",       // 10 +=5 -=3 *=2 /=4 mod=4  -> 2
+            "abc",     // "a" &= "b" &= "c"
+            "1",       // increment, increment, decrement
+            "foobar",  // text +
+            "ababab",  // text * 3
+            "t1",      // 1 <= 5 <= 12 is true
+            "f1",      // 1 <= 20 <= 12 is false (20 <= 12 fails)
+            "mid-in",  // 1 <= bump() <= 10 is true
+            "1",       // bump() ran exactly once: the middle is evaluated once
+            "has20",   // 20 in [10,20,30]
+            "no99",    // 99 not in [10,20,30]
+            "hasA",    // "a" in the dictionary
+            "noZ",     // "z" not in the dictionary
+            "substr",  // "ell" in "hello"
+            "nosub",   // "xyz" not in "hello"
+            "fires",   // one-line if that fires
+            "4",       // `increment y if y = 3` ran; the skipped one did not
+            "1000000", // 1_000_000
+            "3",       // count of [1, 2, 3,] with a trailing comma, called with one too
+            "9",       // {"k": 9,} with a trailing comma
         ]
     );
 }

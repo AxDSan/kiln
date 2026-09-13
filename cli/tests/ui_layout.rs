@@ -31,7 +31,10 @@ fn ui_available() -> bool {
 /// run in parallel, and two writing one output path race each other.
 fn build_as(name: &str, tag: &str) -> PathBuf {
     let example = repo().join("examples").join(format!("{name}.kiln"));
-    build_file(&example, &std::env::temp_dir().join(format!("kiln_{name}_{tag}_layout")))
+    build_file(
+        &example,
+        &std::env::temp_dir().join(format!("kiln_{name}_{tag}_layout")),
+    )
 }
 
 /// Build inline source, for the cases small enough not to deserve an example.
@@ -45,7 +48,12 @@ fn build_src(src: &str, tag: &str) -> PathBuf {
 
 fn build_file(source: &Path, out_bin: &Path) -> PathBuf {
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", source.to_str().unwrap(), "-o", out_bin.to_str().unwrap()])
+        .args([
+            "build",
+            source.to_str().unwrap(),
+            "-o",
+            out_bin.to_str().unwrap(),
+        ])
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
         .expect("run kiln");
@@ -141,12 +149,20 @@ end
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines.first().copied(), Some("10005"), "bad anchors set no error:\n{stdout}");
+    assert_eq!(
+        lines.first().copied(),
+        Some("10005"),
+        "bad anchors set no error:\n{stdout}"
+    );
     assert!(
         lines.get(1).map_or(false, |l| l.starts_with("anchors:")),
         "error text does not name the property:\n{stdout}"
     );
-    assert_eq!(lines.get(2).copied(), Some("right"), "bad anchors replaced good ones:\n{stdout}");
+    assert_eq!(
+        lines.get(2).copied(),
+        Some("right"),
+        "bad anchors replaced good ones:\n{stdout}"
+    );
     assert!(
         has_line(&stderr, "ui: anchored 2 -> 500,230 120x36"),
         "the run-time left/anchors were not the base of the resize:\n{stderr}"
@@ -272,11 +288,20 @@ end
     );
     // `main` builds the form, so load can only come after it — and exactly once,
     // however many frames the loop turns.
-    let order: Vec<&str> = stdout.lines().filter(|l| *l == "main" || *l == "loaded").collect();
-    assert_eq!(order, vec!["main", "loaded"], "load fired at the wrong time:\n{stdout}");
+    let order: Vec<&str> = stdout
+        .lines()
+        .filter(|l| *l == "main" || *l == "loaded")
+        .collect();
+    assert_eq!(
+        order,
+        vec!["main", "loaded"],
+        "load fired at the wrong time:\n{stdout}"
+    );
     // What the handler wrote is what the first frame shows.
     assert!(
-        String::from_utf8_lossy(&out.stderr).lines().all(|l| !l.contains("Syntax error")),
+        String::from_utf8_lossy(&out.stderr)
+            .lines()
+            .all(|l| !l.contains("Syntax error")),
         "the handler's property write was refused:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );

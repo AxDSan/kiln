@@ -47,7 +47,12 @@ impl Frame {
             self.height
         );
         let i = (y * self.width + x) * 3;
-        format!("#{:02x}{:02x}{:02x}", self.px[i], self.px[i + 1], self.px[i + 2])
+        format!(
+            "#{:02x}{:02x}{:02x}",
+            self.px[i],
+            self.px[i + 1],
+            self.px[i + 2]
+        )
     }
 
     /// One pixel against the token the specification pins for that surface.
@@ -93,7 +98,12 @@ fn render(src: &str, tag: &str) -> (Frame, String) {
     std::fs::write(&source, src).expect("write source");
     let bin = dir.join("prog");
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
-        .args(["build", source.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .args([
+            "build",
+            source.to_str().unwrap(),
+            "-o",
+            bin.to_str().unwrap(),
+        ])
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
         .status()
         .expect("run kiln");
@@ -106,7 +116,10 @@ fn render(src: &str, tag: &str) -> (Frame, String) {
         .output()
         .expect("run built binary");
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-    assert!(out.status.success(), "binary exited non-zero\nstderr:\n{stderr}");
+    assert!(
+        out.status.success(),
+        "binary exited non-zero\nstderr:\n{stderr}"
+    );
     (read_ppm(&dump), stderr)
 }
 
@@ -172,7 +185,11 @@ fn controls_wear_the_specified_rest_colours() {
         return;
     }
     let (f, _) = render(FORM, "rest");
-    assert_eq!((f.width, f.height), (400, 300), "the dump is not the form's size");
+    assert_eq!(
+        (f.width, f.height),
+        (400, 300),
+        "the dump is not the form's size"
+    );
 
     // The window's own ground: surface.canvas, not the old #f0f0f0.
     f.expect(2, 2, "#f3f3f3", "the form's ground");
