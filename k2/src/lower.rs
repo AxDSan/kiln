@@ -20,6 +20,17 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
 
     // Pass 1: reserve a RecordId + interned type for every declared type.
     let mut type_ids: HashMap<String, RecordId> = HashMap::new();
+    let mut type_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for item in &p.items {
+        match item {
+            ast::Item::Type(td) => {
+                type_names.insert(td.name.clone());
+            }
+            ast::Item::Enum(ed) => {
+                type_names.insert(ed.name.clone());
+            }
+        }
+    }
     for item in &p.items {
         if let ast::Item::Type(td) = item {
             if td.kind != ast::TypeKind::StaticClass {
@@ -64,6 +75,7 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
         enums,
         consts: HashMap::new(),
         methods: HashMap::new(),
+        type_names,
         generics: HashMap::new(),
         mono: HashMap::new(),
         tvars: HashMap::new(),
@@ -171,8 +183,6 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
             }
         }
     }
-    cx.drain_pending()?;
-
     // Top-level statements become Main.
     if !p.top_level.is_empty() {
         let main = cx.b.declare_func("kmain", vec![], TyTable::VOID);
@@ -185,15 +195,15 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
         cx.b.set_entry(main);
     } else if let Some(sig) = cx.methods.get("Main").cloned() {
         cx.b.set_entry(sig.fid);
-    } else if let Some(sig) = cx.methods.values().find(|s| false_ref(s)).cloned() {
-        let _ = sig;
     }
 
-    Ok(cx.b.build())
-}
+    // Every generic instance and lifted lambda queued by *any* of the above —
+    // method bodies and top-level code alike — gets its body here. This must
+    // run after the last direct lowering, or an instance would be declared and
+    // left empty.
+    cx.drain_pending()?;
 
-fn false_ref(_: &Sig) -> bool {
-    false
+    Ok(cx.b.build())
 }
 
 #[derive(Clone)]
@@ -225,6 +235,9 @@ struct Pending {
 struct Cx {
     b: ModuleBuilder,
     type_ids: HashMap<String, RecordId>,
+    /// Every declared type name — records, classes, static classes and enums —
+    /// so `Type.Member` can be told from `value.Member`.
+    type_names: std::collections::HashSet<String>,
     enums: HashMap<String, HashMap<String, i128>>,
     consts: HashMap<String, (TyId, ast::Expr)>,
     methods: HashMap<String, Sig>,
@@ -905,10 +918,12 @@ impl<'a> FnLower<'a> {
             ast::ExprKind::Ident(name) => (name.clone(), None),
             ast::ExprKind::Member(recv, name) => {
                 if let ast::ExprKind::Ident(obj) = &recv.kind {
-                    if self.cx.methods.contains_key(&format!("{obj}.{name}"))
+                    let qualified = format!("{obj}.{name}");
+                    if (self.cx.methods.contains_key(&qualified)
+                        || self.cx.generics.contains_key(&qualified))
                         && self.is_type_name(obj)
                     {
-                        (format!("{obj}.{name}"), None)
+                        (qualified, None)
                     } else {
                         // instance call
                         let (recv_v, _) = self.expr(recv, None)?;
@@ -1132,7 +1147,8 @@ impl<'a> FnLower<'a> {
     }
 
     fn is_type_name(&self, name: &str) -> bool {
-        self.cx.type_ids.contains_key(name)
+        self.cx.type_names.contains(name)
+            || self.cx.type_ids.contains_key(name)
             || matches!(
                 name,
                 "Console" | "Math" | "int" | "long" | "string" | "double"

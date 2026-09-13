@@ -224,3 +224,20 @@ public static class P
     let err = kiln_k2::compile_to_llvm(src).unwrap_err();
     assert!(err.contains("captures `k`"), "unexpected error: {err}");
 }
+
+#[test]
+fn generics_and_lambdas_work_in_top_level_code() {
+    // Regression: instance bodies are queued during lowering and drained at the
+    // end — top-level code must be drained too, or the instance is emitted empty.
+    let src = r#"
+namespace T;
+public static class P
+{
+    public static T Pick<T>(T a, T b) => a;
+}
+Func<int, int> triple = x => x * 3;
+Console.WriteLine($"{triple(14)}");
+Console.WriteLine($"{P.Pick(5, 9)}");
+"#;
+    assert_eq!(run_k2(src), "42\n5\n");
+}
