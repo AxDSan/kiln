@@ -105,6 +105,12 @@ clang and checks stdout):
   `record R(...) : I`. An interface value carries the object and the
   implementation's methods, so two unrelated types work through one interface
   and a `List<IShape>` holds both; a missing implementation is a compile error
+- **The standard library**: `using Kiln.File;` loads that library and
+  `File.ReadText(p)` resolves to its `file_read_text` command — the spec's
+  naming rule read backwards at the call site, with the bare name tried too for
+  libraries that do not prefix (`Text.Uppercase` → `uppercase`). Arguments and
+  the result cross the slot ABI with the signature's own tags, so the whole
+  command set is reachable rather than a hand-written handful
 - **The Kiln runtime, opt-in**: `kiln k2 --runtime` links the runtime and
   support libraries exactly as a 1.x build does; `Console.WriteLine` becomes
   the `print_text` command over the slot ABI, and **every allocation comes from

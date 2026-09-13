@@ -43,10 +43,19 @@ pub use lower::Runtime;
 
 /// Parse and lower K2 source to a KIR module, choosing what it links against.
 pub fn compile_with(src: &str, runtime: Runtime) -> Result<kiln_kir::Module, String> {
+    compile_full(src, runtime, None)
+}
+
+/// Parse and lower, with the standard library's commands available.
+pub fn compile_full(
+    src: &str,
+    runtime: Runtime,
+    registry: Option<&kiln_ir::Registry>,
+) -> Result<kiln_kir::Module, String> {
     let toks = lexer::lex(src).map_err(|e| format!("{}:{}: {}", e.line, e.col, e.msg))?;
     let program =
         parser::parse(toks).map_err(|e| format!("{}:{}: {}", e.span.line, e.span.col, e.msg))?;
-    lower::lower_with(&program, runtime)
+    lower::lower_full(&program, runtime, registry)
 }
 
 /// Parse and lower to textual LLVM IR for a chosen runtime.

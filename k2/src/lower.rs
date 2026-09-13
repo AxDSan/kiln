@@ -43,6 +43,17 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
 }
 
 pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> {
+    lower_full(p, runtime, None)
+}
+
+/// Lower, with the command registry the standard library is described by. With
+/// one, `File.ReadText(p)` resolves to the `file_read_text` command; without
+/// one, only the built-in surface is available.
+pub fn lower_full(
+    p: &ast::Program,
+    runtime: Runtime,
+    registry: Option<&kiln_ir::Registry>,
+) -> Result<Module, String> {
     let mut b = ModuleBuilder::new(
         p.namespace.as_deref().unwrap_or("program"),
         ModuleKind::Console,
@@ -116,6 +127,7 @@ pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> 
     // `Bytes` is addressed as a buffer of u8; intern that once up front.
     let _ = b.m.types.intern(TyKind::Array(TyTable::U8));
     let mut cx = Cx {
+        registry: registry.cloned(),
         runtime,
         b,
         type_ids,
@@ -576,6 +588,8 @@ struct Cell {
 }
 
 struct Cx {
+    /// The standard library's commands, when the caller supplied them.
+    registry: Option<kiln_ir::Registry>,
     runtime: Runtime,
     b: ModuleBuilder,
     type_ids: HashMap<String, RecordId>,
@@ -2758,6 +2772,42 @@ impl<'a> FnLower<'a> {
             }
         }
         // Resolve a method: `Type.Method(..)` (static) or `recv.Method(..)`.
+        // `Owner.Member(...)` may name a standard-library command: the spec's
+        // rule is that `file_read_text` is written `File.ReadText`, so the
+        // name is reversed and looked up.
+        if let ast::ExprKind::Member(recv, member) = &callee.kind {
+            if let ast::ExprKind::Ident(owner) = &recv.kind {
+                if !self.is_type_name(owner) || owner == "Console" {
+                    if let Some((sym, params, ret, tags)) = self.lookup_command(owner, member) {
+                        if args.len() != params.len() {
+                            return Err(format!(
+                                "`{owner}.{member}` expects {} argument(s), got {}",
+                                params.len(),
+                                args.len()
+                            ));
+                        }
+                        let mut kargs = Vec::new();
+                        for (a, pty) in args.iter().zip(params.iter()) {
+                            kargs.push(self.expr(a, Some(*pty))?.0);
+                        }
+                        let slots = params
+                            .iter()
+                            .zip(tags.iter())
+                            .map(|(ty, tag)| SlotTy { tag: *tag, ty: *ty })
+                            .collect();
+                        return Ok((
+                            Expr::Call(Box::new(Call::Command {
+                                symbol: sym,
+                                args: kargs,
+                                arg_slots: slots,
+                                ret,
+                            })),
+                            ret,
+                        ));
+                    }
+                }
+            }
+        }
         let (key, this_arg): (String, Option<Expr>) = match &callee.kind {
             ast::ExprKind::Ident(name) => (name.clone(), None),
             ast::ExprKind::Member(recv, name) => {
@@ -3911,6 +3961,31 @@ impl<'a> FnLower<'a> {
         Ok(sig)
     }
 
+    /// Resolve `Owner.Member` to a standard-library command: its symbol, its
+    /// parameter types, its return type, and each parameter's slot tag.
+    fn lookup_command(
+        &mut self,
+        owner: &str,
+        member: &str,
+    ) -> Option<(String, Vec<TyId>, TyId, Vec<i32>)> {
+        // The spec's rule is that `file_read_text` is written `File.ReadText`.
+        // Some libraries do not prefix their commands (`uppercase`, not
+        // `text_uppercase`), so the bare member name is tried as well.
+        let qualified = format!("{}_{}", snake_case(owner), snake_case(member));
+        let bare = snake_case(member);
+        let reg = self.cx.registry.as_ref()?;
+        let cmd = reg.get(&qualified).or_else(|| reg.get(&bare))?;
+        let sig = cmd.sig.clone();
+        let symbol = cmd.symbol.clone();
+        let params: Vec<TyId> = sig.params.iter().map(|t| ir_ty(*t, &mut self.cx)).collect();
+        let tags: Vec<i32> = sig.params.iter().map(|t| t.sdt_tag()).collect();
+        let ret = match sig.ret {
+            Some(t) => ir_ty(t, &mut self.cx),
+            None => TyTable::VOID,
+        };
+        Some((symbol, params, ret, tags))
+    }
+
     fn is_type_name(&self, name: &str) -> bool {
         self.cx.type_names.contains(name)
             || self.cx.type_ids.contains_key(name)
@@ -4581,6 +4656,29 @@ fn literal_text(e: &ast::Expr) -> Result<String, String> {
         ast::ExprKind::Float(v, _) => v.to_string(),
         _ => return Err("a designer property must be a literal".into()),
     })
+}
+
+/// A 1.x command signature's type, as a KIR type.
+fn ir_ty(t: kiln_ir::Ty, cx: &mut Cx) -> TyId {
+    use kiln_ir::Ty as T;
+    match t {
+        T::Int => TyTable::I32,
+        T::Int64 => TyTable::I64,
+        T::Double => TyTable::F64,
+        T::Text => TyTable::STR,
+        T::Bool => TyTable::BOOL,
+        T::Bytes => TyTable::BYTES,
+        T::Ptr => TyTable::PTR,
+        T::Byte => TyTable::U8,
+        T::Int16 => TyTable::I16,
+        T::Float => TyTable::F32,
+        T::Array(e) | T::Dict(e) | T::Optional(e) => {
+            let inner = ir_ty(e.ty(), cx);
+            cx.b.m.types.intern(TyKind::Array(inner))
+        }
+        // Signature-only and interop shapes cross as a pointer.
+        _ => TyTable::PTR,
+    }
 }
 
 /// `CharacterId` → `character_id`. The default column name for a field.

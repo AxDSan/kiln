@@ -108,3 +108,30 @@ public static class P
         "after collecting, {small} bytes are still held:\n{out}"
     );
 }
+
+#[test]
+fn the_standard_library_is_reachable() {
+    // `using Kiln.File;` loads the file library, and `File.ReadText(p)` resolves
+    // to its `file_read_text` command — the spec's naming rule, reversed at the
+    // call site. A library whose commands are unprefixed (`uppercase`) is found
+    // by the bare name.
+    let path = tmp("stdlib-demo.txt");
+    let p = path.to_str().unwrap();
+    let src = format!(
+        "namespace StdLib;\n\
+         using Kiln.File;\n\
+         using Kiln.Text;\n\
+         public static class P\n\
+         {{\n\
+         \x20   public static void Main()\n\
+         \x20   {{\n\
+         \x20       File.WriteText(\"{p}\", \"written by Kiln 2\");\n\
+         \x20       Console.WriteLine(File.ReadText(\"{p}\"));\n\
+         \x20       Console.WriteLine($\"exists: {{File.Exists(\"{p}\")}}\");\n\
+         \x20       Console.WriteLine(Text.Uppercase(\"kiln two\"));\n\
+         \x20   }}\n\
+         }}\n"
+    );
+    let out = build_and_run("stdlib", &src);
+    assert_eq!(out, "written by Kiln 2\nexists: 1\nKILN TWO\n", "{out}");
+}

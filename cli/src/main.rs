@@ -456,6 +456,25 @@ fn parse_io_args(rest: &[String]) -> Result<Io, String> {
     })
 }
 
+/// The support libraries a K2 program asks for, from its `using Kiln.X;` lines.
+fn k2_uses(src: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in src.lines() {
+        let t = line.trim();
+        let Some(rest) = t.strip_prefix("using ") else {
+            continue;
+        };
+        let path = rest.trim_end_matches(';').trim();
+        if let Some(lib) = path.strip_prefix("Kiln.") {
+            let lib = lib.split('.').next().unwrap_or(lib).to_lowercase();
+            if !lib.is_empty() && !out.contains(&lib) {
+                out.push(lib);
+            }
+        }
+    }
+    out
+}
+
 /// Change a form's designer block through the tree.
 ///
 /// Studio calls this rather than editing text: everything the change did not
@@ -686,7 +705,15 @@ fn cmd_k2(rest: &[String]) -> i32 {
     } else {
         kiln_k2::Runtime::Libc
     };
-    let module = match kiln_k2::compile_with(&src, runtime) {
+    // `using Kiln.File;` asks for the `file` library. The registry it builds is
+    // what makes `File.ReadText(p)` resolve to the `file_read_text` command.
+    let uses = k2_uses(&src);
+    let registry = find_repo_root().and_then(|root| {
+        libload::load_metadata(&root, &uses, Arch::host())
+            .ok()
+            .map(|p| p.registry)
+    });
+    let module = match kiln_k2::compile_full(&src, runtime, registry.as_ref()) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("kiln k2: {input}:{e}");
@@ -719,11 +746,10 @@ fn cmd_k2(rest: &[String]) -> i32 {
             eprintln!("kiln k2: --runtime needs the Kiln runtime sources");
             return 1;
         };
-        let uses: Vec<String> = if is_gui {
-            vec!["ui".to_string()]
-        } else {
-            Vec::new()
-        };
+        let mut uses = k2_uses(&src);
+        if is_gui && !uses.iter().any(|u| u == "ui") {
+            uses.push("ui".to_string());
+        }
         let plan = match libload::load(&root, &uses) {
             Ok(p) => p,
             Err(e) => {
