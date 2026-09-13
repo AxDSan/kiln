@@ -187,6 +187,7 @@ pub fn lower(p: &ast::Program) -> Result<Module, String> {
     if !p.top_level.is_empty() {
         let main = cx.b.declare_func("kmain", vec![], TyTable::VOID);
         let mut fl = FnLower::new(&mut cx, main, TyTable::VOID);
+        fl.captured = captured_names(&p.top_level, None);
         for s in &p.top_level {
             fl.stmt(s)?;
         }
@@ -230,6 +231,29 @@ struct Pending {
     method: ast::Method,
     tvars: HashMap<String, TyId>,
     this: bool,
+    /// For a lifted lambda: the environment record reached through parameter 0,
+    /// and the captured variables it holds, in field order.
+    env: Option<EnvPlan>,
+}
+
+/// How a lifted lambda reaches the variables it captured.
+#[derive(Clone)]
+struct EnvPlan {
+    /// Record of `Ptr` fields, one per captured variable.
+    rec: RecordId,
+    /// `(name, cell record, value type)` per field, in order.
+    captures: Vec<(String, RecordId, TyId)>,
+}
+
+/// A captured variable: its value lives in a one-field heap record (a "cell"),
+/// so the declaring function and every closure over it read and write the same
+/// memory — capture by reference, as the spec requires.
+#[derive(Clone)]
+struct Cell {
+    /// An expression yielding the cell pointer in the current function.
+    ptr: Expr,
+    rec: RecordId,
+    ty: TyId,
 }
 
 struct Cx {
@@ -362,16 +386,24 @@ impl Cx {
         sig: &Sig,
     ) -> Result<(), String> {
         let _ = td;
-        self.lower_into(sig.fid, m, sig.this)
+        self.lower_into(sig.fid, m, sig.this, None)
     }
 
     /// Lower a method body into an already-declared function. Parameter types
     /// come from the declared function, so this serves plain methods and
     /// monomorphic instances alike.
-    fn lower_into(&mut self, fid: FuncId, m: &ast::Method, this: bool) -> Result<(), String> {
+    fn lower_into(
+        &mut self,
+        fid: FuncId,
+        m: &ast::Method,
+        this: bool,
+        env: Option<EnvPlan>,
+    ) -> Result<(), String> {
         let ret = self.b.m.func(fid).ret;
         let ptys: Vec<TyId> = self.b.m.func(fid).params.iter().map(|p| p.ty).collect();
         let mut fl = FnLower::new(self, fid, ret);
+        // Names this body's lambdas close over; such locals live in cells.
+        fl.captured = captured_names(&m.body, m.expr_body.as_ref());
         if this {
             fl.scope.insert("this".into(), (LocalId(0), ptys[0]));
         }
@@ -379,6 +411,43 @@ impl Cx {
         for (i, p) in m.params.iter().enumerate() {
             fl.scope
                 .insert(p.name.clone(), (LocalId((base + i) as u32), ptys[base + i]));
+        }
+        // A lifted lambda reaches its captures through the environment record
+        // in parameter 0: `env.field[i]` is the cell pointer for capture `i`.
+        if let Some(plan) = env {
+            let env_ty = fl.cx.b.m.types.intern(TyKind::Record(plan.rec));
+            let env_val = Expr::Cast {
+                value: Box::new(Expr::Local(LocalId(0))),
+                to: env_ty,
+            };
+            for (i, (name, cell_rec, vty)) in plan.captures.iter().enumerate() {
+                let cell_ty = fl.cx.b.m.types.intern(TyKind::Record(*cell_rec));
+                let ptr = Expr::Cast {
+                    value: Box::new(Expr::Field(Box::new(env_val.clone()), i)),
+                    to: cell_ty,
+                };
+                fl.cells.insert(
+                    name.clone(),
+                    Cell {
+                        ptr,
+                        rec: *cell_rec,
+                        ty: *vty,
+                    },
+                );
+            }
+        }
+        // A parameter a lambda closes over has to move into a cell, so the
+        // closure and the body share one location rather than two copies.
+        let captured_params: Vec<(String, LocalId, TyId)> = m
+            .params
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| fl.captured.contains(&p.name))
+            .map(|(i, p)| (p.name.clone(), LocalId((base + i) as u32), ptys[base + i]))
+            .collect();
+        for (name, lid, ty) in captured_params {
+            fl.scope.remove(&name);
+            fl.make_cell(&name, ty, Expr::Local(lid))?;
         }
         if let Some(e) = &m.expr_body {
             let (val, _) = fl.expr(e, Some(ret))?;
@@ -398,7 +467,7 @@ impl Cx {
     fn drain_pending(&mut self) -> Result<(), String> {
         while let Some(p) = self.pending.pop() {
             let saved = std::mem::replace(&mut self.tvars, p.tvars);
-            let r = self.lower_into(p.fid, &p.method, p.this);
+            let r = self.lower_into(p.fid, &p.method, p.this, p.env);
             self.tvars = saved;
             r?;
         }
@@ -429,6 +498,12 @@ struct FnLower<'a> {
     fid: FuncId,
     ret: TyId,
     scope: HashMap<String, (LocalId, TyId)>,
+    /// Captured variables, by name: their value lives in a heap cell.
+    cells: HashMap<String, Cell>,
+    /// Names the lambdas in this body close over (an over-approximation: a
+    /// local with one of these names is celled whether or not it is really
+    /// captured, which is safe and costs one indirection).
+    captured: std::collections::HashSet<String>,
     blocks: Vec<Vec<Stmt>>,
 }
 
@@ -439,6 +514,8 @@ impl<'a> FnLower<'a> {
             fid,
             ret,
             scope: HashMap::new(),
+            cells: HashMap::new(),
+            captured: std::collections::HashSet::new(),
             blocks: vec![Vec::new()],
         }
     }
@@ -449,6 +526,49 @@ impl<'a> FnLower<'a> {
 
     fn finish(mut self) -> Vec<Stmt> {
         self.blocks.pop().unwrap()
+    }
+
+    /// Move a value into a fresh heap cell and register `name` as captured.
+    /// The cell is a one-field record, so the declaring function and every
+    /// closure over it read and write the same memory.
+    fn make_cell(&mut self, name: &str, ty: TyId, init: Expr) -> Result<(), String> {
+        let n = self.cx.b.m.records.len();
+        let rec = self
+            .cx
+            .b
+            .c_record(&format!("$cell{n}"), vec![("v", ty)], Equality::ByRef);
+        let cell_ty = self.cx.b.m.types.intern(TyKind::Record(rec));
+        let lid = self
+            .cx
+            .b
+            .add_local(self.fid, &format!("${name}$cell"), cell_ty);
+        self.push(Stmt::Let {
+            local: lid,
+            value: Expr::MakeRecord(rec, vec![init]),
+        });
+        self.cells.insert(
+            name.to_string(),
+            Cell {
+                ptr: Expr::Local(lid),
+                rec,
+                ty,
+            },
+        );
+        Ok(())
+    }
+
+    /// Declare a variable, in a cell when a lambda closes over its name.
+    fn declare_var(&mut self, name: &str, ty: TyId, init: Expr) -> Result<(), String> {
+        if self.captured.contains(name) {
+            return self.make_cell(name, ty, init);
+        }
+        let lid = self.new_local(name, ty);
+        self.scope.insert(name.to_string(), (lid, ty));
+        self.push(Stmt::Let {
+            local: lid,
+            value: init,
+        });
+        Ok(())
     }
 
     fn new_local(&mut self, name: &str, ty: TyId) -> LocalId {
@@ -481,12 +601,7 @@ impl<'a> FnLower<'a> {
                 };
                 let (val, vty) = self.expr(value, hint)?;
                 let lty = hint.unwrap_or(vty);
-                let lid = self.new_local(name, lty);
-                self.scope.insert(name.clone(), (lid, lty));
-                self.push(Stmt::Let {
-                    local: lid,
-                    value: val,
-                });
+                self.declare_var(name, lty, val)?;
             }
             ast::StmtKind::Assign { target, op, value } => {
                 let place = self.place(target)?;
@@ -842,6 +957,9 @@ impl<'a> FnLower<'a> {
     }
 
     fn ident(&mut self, name: &str, _span: LSpan) -> Result<(Expr, TyId), String> {
+        if let Some(c) = self.cells.get(name).cloned() {
+            return Ok((Expr::Field(Box::new(c.ptr), 0), c.ty));
+        }
         if let Some((lid, ty)) = self.scope.get(name).copied() {
             return Ok((Expr::Local(lid), ty));
         }
@@ -1002,18 +1120,25 @@ impl<'a> FnLower<'a> {
                 want_params.len()
             ));
         }
-        // Reject captures with a clear message rather than a confusing
-        // "unknown name" from the lifted body.
+        // Which enclosing variables does this lambda close over? Captured
+        // locals already live in cells; a plain local here means a form of
+        // capture the cell pass does not cover (a loop variable).
         let mut free = Vec::new();
         collect_idents_lambda(l, &mut free);
         let bound: Vec<&str> = l.params.iter().map(|(n, _)| n.as_str()).collect();
+        let mut captures: Vec<(String, RecordId, TyId)> = Vec::new();
+        let mut seen: Vec<String> = Vec::new();
         for name in &free {
-            if bound.contains(&name.as_str()) {
+            if bound.contains(&name.as_str()) || seen.contains(name) {
                 continue;
             }
-            if self.scope.contains_key(name) {
+            if let Some(c) = self.cells.get(name).cloned() {
+                seen.push(name.clone());
+                captures.push((name.clone(), c.rec, c.ty));
+            } else if self.scope.contains_key(name) {
                 return Err(format!(
-                    "this lambda captures `{name}`; capturing lambdas are not supported yet"
+                    "this lambda captures `{name}`, which is a loop or pattern variable; \
+                     capturing those is not supported yet"
                 ));
             }
         }
@@ -1054,17 +1179,47 @@ impl<'a> FnLower<'a> {
             doc: None,
             span: Default::default(),
         };
+        // The environment: a record of pointers, one per captured cell. Both
+        // sides reach the same cells, so a capture is by reference.
+        let (env_expr, env_plan) = if captures.is_empty() {
+            (Expr::Null(TyTable::PTR), None)
+        } else {
+            let rn = self.cx.b.m.records.len();
+            let fields: Vec<(&str, TyId)> =
+                captures.iter().map(|_| ("cell", TyTable::PTR)).collect();
+            let env_rec = self
+                .cx
+                .b
+                .c_record(&format!("$env{rn}"), fields, Equality::ByRef);
+            let mut vals = Vec::new();
+            for (name, _, _) in &captures {
+                let c = self.cells[name].clone();
+                vals.push(Expr::Cast {
+                    value: Box::new(c.ptr),
+                    to: TyTable::PTR,
+                });
+            }
+            (
+                Expr::MakeRecord(env_rec, vals),
+                Some(EnvPlan {
+                    rec: env_rec,
+                    captures: captures.clone(),
+                }),
+            )
+        };
+
         self.cx.pending.push(Pending {
             fid,
             method,
             tvars: self.cx.tvars.clone(),
             this: true,
+            env: env_plan,
         });
 
         Ok((
             Expr::MakeClosure {
                 func: fid,
-                env: Box::new(Expr::Null(TyTable::PTR)),
+                env: Box::new(env_expr),
             },
             want,
         ))
@@ -1142,6 +1297,7 @@ impl<'a> FnLower<'a> {
             method: t.method.clone(),
             tvars,
             this: false,
+            env: None,
         });
         Ok(sig)
     }
@@ -1297,6 +1453,9 @@ impl<'a> FnLower<'a> {
     fn place(&mut self, e: &ast::Expr) -> Result<Place, String> {
         match &e.kind {
             ast::ExprKind::Ident(name) => {
+                if let Some(c) = self.cells.get(name).cloned() {
+                    return Ok(Place::Field(Box::new(c.ptr), 0));
+                }
                 let (lid, _) = *self
                     .scope
                     .get(name)
@@ -1330,6 +1489,148 @@ impl<'a> FnLower<'a> {
 
     fn place_ty(&mut self, e: &ast::Expr) -> Result<TyId, String> {
         Ok(self.expr(e, None)?.1)
+    }
+}
+
+/// Names the lambdas inside a function body close over. An over-approximation:
+/// it is every identifier any lambda mentions, so a local sharing a name is
+/// celled needlessly — safe, and costing one indirection.
+fn captured_names(
+    body: &[ast::Stmt],
+    expr_body: Option<&ast::Expr>,
+) -> std::collections::HashSet<String> {
+    let mut lambdas = Vec::new();
+    for s in body {
+        collect_lambdas_stmt(s, &mut lambdas);
+    }
+    if let Some(e) = expr_body {
+        collect_lambdas_expr(e, &mut lambdas);
+    }
+    let mut out = std::collections::HashSet::new();
+    for l in lambdas {
+        let mut free = Vec::new();
+        collect_idents_lambda(&l, &mut free);
+        let bound: Vec<&str> = l.params.iter().map(|(n, _)| n.as_str()).collect();
+        for n in free {
+            if !bound.contains(&n.as_str()) {
+                out.insert(n);
+            }
+        }
+    }
+    out
+}
+
+fn collect_lambdas_expr(e: &ast::Expr, out: &mut Vec<ast::Lambda>) {
+    use ast::ExprKind as E;
+    match &e.kind {
+        E::Lambda(l) => {
+            out.push(l.clone());
+            // a nested lambda's captures matter to this function too
+            match &l.body {
+                ast::LambdaBody::Expr(x) => collect_lambdas_expr(x, out),
+                ast::LambdaBody::Block(b) => {
+                    for s in b {
+                        collect_lambdas_stmt(s, out);
+                    }
+                }
+            }
+        }
+        E::Member(b, _) => collect_lambdas_expr(b, out),
+        E::Call(c, args) => {
+            collect_lambdas_expr(c, out);
+            for a in args {
+                collect_lambdas_expr(a, out);
+            }
+        }
+        E::Index(a, b) | E::Binary(_, a, b) | E::NullCoalesce(a, b) | E::Range(a, b, _) => {
+            collect_lambdas_expr(a, out);
+            collect_lambdas_expr(b, out);
+        }
+        E::Unary(_, a) | E::Cast(_, a) | E::Try(a) => collect_lambdas_expr(a, out),
+        E::Ternary(a, b, c) => {
+            collect_lambdas_expr(a, out);
+            collect_lambdas_expr(b, out);
+            collect_lambdas_expr(c, out);
+        }
+        E::New(_, args, inits) => {
+            for a in args {
+                collect_lambdas_expr(a, out);
+            }
+            for (_, v) in inits {
+                collect_lambdas_expr(v, out);
+            }
+        }
+        E::Interp(segs) => {
+            for sg in segs {
+                if let ast::InterpSeg::Expr(x) = sg {
+                    collect_lambdas_expr(x, out);
+                }
+            }
+        }
+        E::Int(_)
+        | E::Float(_, _)
+        | E::Bool(_)
+        | E::Str(_)
+        | E::Char(_)
+        | E::Null
+        | E::Ident(_) => {}
+    }
+}
+
+fn collect_lambdas_stmt(s: &ast::Stmt, out: &mut Vec<ast::Lambda>) {
+    use ast::StmtKind as S;
+    match &s.kind {
+        S::Local { value, .. } => collect_lambdas_expr(value, out),
+        S::Assign { target, value, .. } => {
+            collect_lambdas_expr(target, out);
+            collect_lambdas_expr(value, out);
+        }
+        S::Expr(e) => collect_lambdas_expr(e, out),
+        S::Return(Some(e)) => collect_lambdas_expr(e, out),
+        S::Return(None) | S::Break | S::Continue => {}
+        S::If { cond, then, els } => {
+            collect_lambdas_expr(cond, out);
+            for x in then.iter().chain(els) {
+                collect_lambdas_stmt(x, out);
+            }
+        }
+        S::While { cond, body } => {
+            collect_lambdas_expr(cond, out);
+            for x in body {
+                collect_lambdas_stmt(x, out);
+            }
+        }
+        S::For {
+            init,
+            cond,
+            step,
+            body,
+        } => {
+            if let Some(i) = init.as_ref() {
+                collect_lambdas_stmt(i, out);
+            }
+            if let Some(c) = cond {
+                collect_lambdas_expr(c, out);
+            }
+            if let Some(st) = step.as_ref() {
+                collect_lambdas_stmt(st, out);
+            }
+            for x in body {
+                collect_lambdas_stmt(x, out);
+            }
+        }
+        S::ForEach { coll, body, .. } => {
+            collect_lambdas_expr(coll, out);
+            for x in body {
+                collect_lambdas_stmt(x, out);
+            }
+        }
+        S::Defer(d) => collect_lambdas_stmt(d, out),
+        S::Block(b) => {
+            for x in b {
+                collect_lambdas_stmt(x, out);
+            }
+        }
     }
 }
 

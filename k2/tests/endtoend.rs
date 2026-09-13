@@ -208,21 +208,26 @@ public static class P
 }
 
 #[test]
-fn capturing_lambda_is_reported_not_miscompiled() {
+fn capturing_a_loop_variable_is_reported_not_miscompiled() {
+    // Locals and parameters are captured by reference through cells; a foreach
+    // variable is not celled yet, so it must be reported rather than compiled
+    // to the wrong thing.
     let src = r#"
 namespace C;
 public static class P
 {
     public static void Main()
     {
-        var k = 10;
-        Func<int, int> f = x => x + k;
-        Console.WriteLine($"{f(1)}");
+        foreach (var i in 1..3)
+        {
+            Func<int, int> f = x => x + i;
+            Console.WriteLine($"{f(1)}");
+        }
     }
 }
 "#;
     let err = kiln_k2::compile_to_llvm(src).unwrap_err();
-    assert!(err.contains("captures `k`"), "unexpected error: {err}");
+    assert!(err.contains("captures `i`"), "unexpected error: {err}");
 }
 
 #[test]
@@ -240,4 +245,52 @@ Console.WriteLine($"{triple(14)}");
 Console.WriteLine($"{P.Pick(5, 9)}");
 "#;
     assert_eq!(run_k2(src), "42\n5\n");
+}
+
+#[test]
+fn capturing_lambda_sees_later_mutation() {
+    // Capture is BY REFERENCE (spec §8): the closure must observe a write made
+    // after it was created, and its own writes must be visible outside.
+    let src = r#"
+namespace Cap;
+public static class P
+{
+    public static void Main()
+    {
+        var n = 10;
+        Func<int, int> addN = x => x + n;
+        n = 32;
+        Console.WriteLine($"{addN(10)}");
+
+        var count = 0;
+        Action<int> bump = k => { count = count + k; };
+        bump(7);
+        bump(35);
+        Console.WriteLine($"{count}");
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "42\n42\n");
+}
+
+#[test]
+fn capturing_lambda_captures_a_parameter() {
+    let src = r#"
+namespace Cap2;
+public static class P
+{
+    public static int Make(int seed)
+    {
+        Func<int, int> f = x => x * seed;
+        seed = 6;
+        return f(7);
+    }
+    public static void Main()
+    {
+        Console.WriteLine($"{Make(2)}");
+    }
+}
+"#;
+    // `seed` is captured by reference, so the call sees 6, not 2.
+    assert_eq!(run_k2(src), "42\n");
 }
