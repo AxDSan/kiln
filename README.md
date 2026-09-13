@@ -319,12 +319,19 @@ on them locally:
 cargo install mdbook
 tools/gen-docs.sh          # regenerate the reference pages from the toolchain
 tools/check-docs.sh        # compile every sample in every page
+tools/check-release.sh     # no page, count or version left stale by a release
 mdbook serve docs-site     # the book, at http://localhost:3000
 
 # or assemble the whole site the way it is published
 mdbook build docs-site && mkdir -p _site && cp -r docs-site/landing/. _site/ \
   && cp -r docs-site/book _site/docs && tools/check-site.sh _site
 ```
+
+A release touches more than the compiler: the generated reference, the landing
+page's three counts, the counts and unpack lines here, the book's table of
+contents, and the port records that name a state. [`RELEASING.md`](RELEASING.md)
+is the list, in order, and `tools/check-release.sh` is the part of it a script
+can hold to account.
 
 ## Licence
 

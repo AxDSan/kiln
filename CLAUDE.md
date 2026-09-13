@@ -61,6 +61,20 @@ tools/fetch-mbedtls.sh       # optional: https in `net`
   and `<name>_cmds.c` (implementations), and `use <name>` finds it — there is no
   registration list.
 
+## Releasing
+
+A release can leave more stale than the compiler: the generated reference, the
+landing page's three counts, the README's counts and unpack lines, the book's
+`SUMMARY.md`, `limitations.md`, and the port records under `docs/` that name a
+state ("open, deliberately"). [`RELEASING.md`](../RELEASING.md) is that list in
+order, and `tools/check-release.sh` checks the four of those a script can:
+the README's counts against the toolchain, every `kiln-X.Y.Z-<platform>`
+filename against `Cargo.toml`, every guide page against `SUMMARY.md`, and the
+generated pages against a fresh `tools/gen-docs.sh`.
+
+Run it beside `tools/check-docs.sh` before any commit that changes what the
+toolchain reports, and before every release cut.
+
 ## Adding a command
 
 Declare it in the library's `_libinfo.c` table (name, symbol, return type,
