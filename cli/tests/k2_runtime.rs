@@ -407,3 +407,47 @@ public static class P
 ";
     assert_eq!(build_and_run("inject", src), "1 matched\n2 rows survive\n");
 }
+
+/// Build a K2 source that is expected NOT to compile, and return the message.
+fn build_error(name: &str, src: &str) -> String {
+    let path = tmp(&format!("{name}.kiln"));
+    std::fs::write(&path, src).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["k2", path.to_str().unwrap(), "--runtime", "-o", &tmp(name).to_string_lossy()])
+        .output()
+        .expect("kiln k2");
+    assert!(
+        !out.status.success(),
+        "this was expected not to compile, but it did"
+    );
+    String::from_utf8_lossy(&out.stderr).to_string()
+}
+
+#[test]
+fn a_wrong_argument_to_a_command_is_reported_not_crashed() {
+    // A command's parameters are ABI tags, not Kiln types, and nothing used to
+    // compare the two. A `List<T>` where an array is declared reached the
+    // library as a record pointer, was read as an array, and segfaulted inside
+    // it — with nothing in the message to say which argument was wrong.
+    let src = "\
+namespace Mism;
+using Kiln.Db;
+public static class P
+{
+    public static void Main()
+    {
+        var h = Db.Open(\"sqlite::memory:\");
+        var ps = new List<string>();
+        ps.Add(\"x\");
+        Db.Exec(h, \"insert into t values (?)\", ps);
+    }
+}
+";
+    let err = build_error("mismatch", src);
+    assert!(err.contains("Db.Exec"), "the command is not named: {err}");
+    assert!(err.contains("argument 3"), "the position is not named: {err}");
+    assert!(
+        err.contains("a list of text") && err.contains("a record"),
+        "expected and got are not both named: {err}"
+    );
+}

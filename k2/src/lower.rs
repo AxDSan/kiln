@@ -540,6 +540,29 @@ struct Sig {
     ret: TyId,
 }
 
+/// A slot tag in words, for an error a reader can act on.
+fn describe_slot(tag: i32) -> String {
+    const ARRAY: i32 = 0x100;
+    const DICT: i32 = 0x200;
+    if tag & ARRAY != 0 {
+        return format!("a list of {}", describe_slot(tag & !ARRAY));
+    }
+    if tag & DICT != 0 {
+        return format!("a dictionary of {}", describe_slot(tag & !DICT));
+    }
+    match tag {
+        3 => "a whole number".into(),
+        4 => "a 64-bit whole number".into(),
+        6 => "a decimal number".into(),
+        8 => "true or false".into(),
+        9 => "text".into(),
+        10 => "bytes".into(),
+        13 => "a record".into(),
+        14 => "a pointer".into(),
+        _ => format!("slot type {tag}"),
+    }
+}
+
 /// A record mapped to a database table by `[Table]`.
 #[derive(Clone)]
 struct TableInfo {
@@ -2941,8 +2964,9 @@ impl<'a> FnLower<'a> {
                             ));
                         }
                         let mut kargs = Vec::new();
-                        for (a, pty) in args.iter().zip(params.iter()) {
-                            kargs.push(self.expr(a, Some(*pty))?.0);
+                        let who = format!("{owner}.{member}");
+                        for (i, (a, pty)) in args.iter().zip(params.iter()).enumerate() {
+                            kargs.push(self.command_arg(&who, i + 1, a, *pty, tags[i])?);
                         }
                         let slots = params
                             .iter()
@@ -3052,8 +3076,9 @@ impl<'a> FnLower<'a> {
                 self.lookup_instance_command(recv_ty, member, args.len())
             {
                 let mut kargs = vec![this.clone()];
-                for (a, pty) in args.iter().zip(params.iter().skip(1)) {
-                    kargs.push(self.expr(a, Some(*pty))?.0);
+                for (i, (a, pty)) in args.iter().zip(params.iter().skip(1)).enumerate() {
+                    // The receiver is argument 1, so the rest start at 2.
+                    kargs.push(self.command_arg(member, i + 2, a, *pty, tags[i + 1])?);
                 }
                 let slots = params
                     .iter()
@@ -5008,6 +5033,51 @@ impl<'a> FnLower<'a> {
             ctor: None,
         });
         Ok(sig)
+    }
+
+    /// Lower one argument of a command against the slot its signature declares.
+    ///
+    /// A command's parameters are described by ABI tags, not by Kiln types, and
+    /// until now nothing compared the two. A `List<T>` passed where an array
+    /// was declared reached the runtime as a record pointer and was read as an
+    /// array — a segfault in the library, with nothing in the message to say
+    /// which argument was wrong. A mismatch is a compile error instead.
+    fn command_arg(
+        &mut self,
+        name: &str,
+        pos: usize,
+        a: &ast::Expr,
+        pty: TyId,
+        tag: i32,
+    ) -> Result<Expr, String> {
+        let (v, actual) = self.expr(a, Some(pty))?;
+        self.check_command_arg(name, pos, v, actual, pty, tag)
+    }
+
+    /// The check itself, over an argument that is already lowered.
+    fn check_command_arg(
+        &mut self,
+        name: &str,
+        pos: usize,
+        v: Expr,
+        actual: TyId,
+        pty: TyId,
+        tag: i32,
+    ) -> Result<Expr, String> {
+        if actual == pty {
+            return Ok(v);
+        }
+        let got = self.cx.b.m.types.sdt_tag(actual);
+        if got == tag {
+            // The same shape on the ABI — an int width, say. The emitter
+            // marshals it.
+            return Ok(v);
+        }
+        Err(format!(
+            "`{name}` expects {} for argument {pos}, but this is {}",
+            describe_slot(tag),
+            describe_slot(got)
+        ))
     }
 
     /// Resolve `value.Member(...)` to a command whose first parameter is the
