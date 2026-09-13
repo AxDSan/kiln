@@ -12,7 +12,7 @@ Updated 2026-09-13. Tracks what of the [spec](spec.md) is actually built, so the
 | `backend` | 1.x → LLVM, split into `lower/` modules | unchanged behaviour, 61 tests |
 | `k2::print` | the canonical printer — `kiln fmt` | fixed point, comments carried, meaning unchanged |
 | `kir::debug` | DWARF line tables | a K2 binary is steppable in gdb |
-| `cli::lsp_k2` | the language server's K2 half | diagnostics, outline, formatting |
+| `cli::lsp_k2` | the language server's K2 half | diagnostics, outline, formatting, hover, completion |
 | `k2::edit` | `kiln edit` — tree-level changes to a form | Studio's writer; everything untouched comes back unchanged |
 | `k2::migrate` | `kiln migrate` — 1.x source → K2 source | all 41 1.x examples convert to valid K2 |
 | `cli` | `kiln k2 <file> [-o] [--run] [--emit-ir] [--runtime]` | builds+runs K2; libc by default, or the real Kiln runtime with `--runtime` |
@@ -83,8 +83,12 @@ clang and checks stdout):
 - **Language server**: a `.kiln` file is recognised as K2 or 1.x by its first
   line, and a K2 file gets diagnostics from the front end itself — the same
   parse and lowering a build runs, so the editor cannot disagree with the
-  compiler — plus a document outline (types, members, a form's components) and
-  whole-document formatting
+  compiler — plus a document outline (types, members, a form's components),
+  whole-document formatting, **hover** (a declaration with its signature, or a
+  sentence for a keyword that has none) and **completion** (what the file
+  declares plus the language's words; after a dot, only that thing's members).
+  A failed parse is retried with the caret's line blanked out, since asking
+  what follows a dot means looking at a file that does not parse
 - **`kiln edit`**: `set`, `add`, `remove`, `rename`, `on` change a form's
   designer block **through the tree**, not as text — so comments, the code half
   and everything else survive. This is what Studio calls: the CLI has always
@@ -184,7 +188,7 @@ clang and checks stdout):
 4. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
 5. binding the generated SQL to `libs/db` and returning rows (the statement text is generated; execution needs the runtime)
 6. ABI v5 proper: a handler that captures a *local*; Studio itself calling `kiln edit` (the command exists; the C++ side still splices 1.x text)
-7. hover and completion still read the 1.x index (diagnostics, outline, formatting, grammars and the debugger are done)
+7. Studio's code view still uses its own C++ highlighting rather than the language server
 
 ## Milestone: the RAD half runs
 
