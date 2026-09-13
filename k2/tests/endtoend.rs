@@ -966,3 +966,50 @@ public form MainWindow
     // title, and the label by its text.
     assert!(ll.contains("Counter"), "{ll}");
 }
+
+#[test]
+fn a_partial_form_merges_its_halves() {
+    // The designer owns one block and your code the other, as the spec has it.
+    let src = r#"
+namespace C2;
+
+public partial form MainWindow
+{
+    Title = "Counter";
+    Label count { Text = "0"; }
+    Button add { Text = "Add"; Click += OnAdd; }
+}
+
+public partial form MainWindow
+{
+    int n;
+    void OnAdd()
+    {
+        n = n + 1;
+        count.Text = $"{n}";
+    }
+}
+"#;
+    let m = kiln_k2::compile(src).unwrap();
+    assert_eq!(m.kind, kiln_k2::ModuleKind::Gui);
+    let ll = kiln_kir::emit::emit(&m);
+    // Components from the first block, state and handler from the second.
+    assert!(ll.contains("@MainWindow__count"), "{ll}");
+    assert!(ll.contains("@MainWindow__add"), "{ll}");
+    assert!(ll.contains("@MainWindow__state_n"), "{ll}");
+    assert!(ll.contains("ptr @MainWindow_OnAdd"), "{ll}");
+}
+
+#[test]
+fn two_differently_named_forms_are_rejected() {
+    let src = r#"
+namespace C3;
+public form A { Title = "a"; }
+public form B { Title = "b"; }
+"#;
+    let err = match kiln_k2::compile(src) {
+        Ok(_) => panic!("two forms should be rejected"),
+        Err(e) => e,
+    };
+    assert!(err.contains("one form"), "got: {err}");
+}

@@ -397,10 +397,37 @@ pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> 
     }
     // A form: its components become globals holding runtime handles, its
     // methods are plain functions, and its build sequence is the entry point.
-    let form = p.items.iter().find_map(|i| match i {
-        ast::Item::Form(f) => Some(f.clone()),
-        _ => None,
-    });
+    // `partial form` lets the designer's half and the code half be separate
+    // blocks — in one file or several. They are merged here, in source order.
+    let form = {
+        let parts: Vec<&ast::FormDecl> = p
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                ast::Item::Form(f) => Some(f),
+                _ => None,
+            })
+            .collect();
+        match parts.split_first() {
+            None => None,
+            Some((first, rest)) => {
+                if let Some(other) = rest.iter().find(|f| f.name != first.name) {
+                    return Err(format!(
+                        "a program declares one form, but found `{}` and `{}`",
+                        first.name, other.name
+                    ));
+                }
+                let mut merged = (*first).clone();
+                for part in rest {
+                    merged.properties.extend(part.properties.clone());
+                    merged.components.extend(part.components.clone());
+                    merged.fields.extend(part.fields.clone());
+                    merged.methods.extend(part.methods.clone());
+                }
+                Some(merged)
+            }
+        }
+    };
     if let Some(f) = &form {
         cx.b.m.kind = ModuleKind::Gui;
         for c in &f.components {

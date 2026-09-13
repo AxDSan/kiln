@@ -7,7 +7,8 @@
 // file.
 namespace Counter;
 
-public form MainWindow
+// ── the designer's half ─────────────────────────────────────────────────────
+public partial form MainWindow
 {
     Title = "Counter";
     Width = 320;
@@ -50,6 +51,11 @@ public form MainWindow
         Click += OnReset;
     }
 
+}
+
+// ── your half, in the same file ─────────────────────────────────────────────
+public partial form MainWindow
+{
     int n;
 
     void OnAdd()

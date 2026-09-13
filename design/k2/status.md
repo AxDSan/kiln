@@ -56,7 +56,8 @@ clang and checks stdout):
   its components, `Click += OnAdd` wires an event, form fields hold state
   between events, and `count.Text = $"{n}"` sets a property at run time. It
   lowers to the same `kn_ui_*` interface the 1.x backend emits, so it renders
-  through the real UI runtime (`examples/k2/counter.kiln`)
+  through the real UI runtime (`examples/k2/counter.kiln`). **`partial form`**
+  splits the designer's half from yours, which is the shape Studio will edit
 - **Generic types**: `record Pair<A, B>` and `class Box<T>` instantiate per set
   of type arguments — fields substituted, methods declared and lowered per
   instance, with the template's own name meaning that instance inside it
@@ -113,7 +114,7 @@ clang and checks stdout):
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)
 5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
 6. binding the generated SQL to `libs/db` and returning rows (the statement text is generated; execution needs the runtime)
-7. ABI v5: a lambda as an event handler (a method group works today, which needs no env pointer); `partial form` so the designer's half and the code half can be separate blocks; Studio editing K2 through `kiln edit`
+7. ABI v5: a lambda as an event handler (a method group works today, which needs no env pointer); Studio editing K2 through `kiln edit`
 8. LSP, `kiln migrate`, folding K2 into `kiln build`/`run` with runtime linking
 
 ## Milestone: the RAD half runs

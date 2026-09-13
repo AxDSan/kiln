@@ -167,6 +167,7 @@ impl Parser {
         loop {
             match self.peek_at(n) {
                 Tok::Keyword(Kw::Public | Kw::Internal | Kw::Private | Kw::Static) => n += 1,
+                Tok::Ident(w) if w == "partial" => n += 1,
                 _ => break,
             }
         }
@@ -197,6 +198,11 @@ impl Parser {
                 }
                 Tok::Keyword(Kw::Static) => {
                     is_static = true;
+                    self.bump();
+                }
+                // `partial` splits a declaration across blocks; the parts are
+                // merged when lowering.
+                Tok::Ident(w) if w == "partial" => {
                     self.bump();
                 }
                 _ => break,
