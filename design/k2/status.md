@@ -26,7 +26,9 @@ clang and checks stdout):
 - arithmetic, comparisons, bitwise, shifts — **unsigned ops select udiv/ult/lshr**
 - short-circuit `&&`/`||`, ternary `?:`, unary `- ! ~`, casts `(T)e`
 - `new T(...)` / `new T { f = v }`, field access, `this.field`
-- `$"…{expr}…"` interpolation and `Console.WriteLine`/`Write` (lowered to `printf`)
+- `$"…{expr}…"` interpolation **as a value** (assignable, returnable) and
+  `string + string` concatenation, built with libc `snprintf`/`malloc`;
+  `Console.WriteLine`/`Write` lower to `printf`
 - enum members and `Type.Const` references
 - **generic methods**: `T Max<T>(T a, T b)` — type arguments inferred from the
   arguments, monomorphised per instantiation with mangled symbols, instances
@@ -73,7 +75,9 @@ clang and checks stdout):
 
 - **Records are C-layout + `malloc`**, even `class`. Managed records / GC
   integration and reference vs value equality land with the runtime work.
-- **`Console.WriteLine` is `printf`**, not the Kiln runtime. Replaced in Phase 4.
+- **`Console.WriteLine` is `printf`** and strings are built with
+  `snprintf`/`malloc`, not the Kiln text runtime or collector. A built string is
+  never freed. Replaced in Phase 4.
 - **The K2 path links libc only** via a generated `main` shim; no runtime, no
   collector roots. Folded into `kiln build` (with runtime linking) later.
 - **One `k2` crate** holds syntax + lowering; splits into `k2-syntax`/`k2-sema`/

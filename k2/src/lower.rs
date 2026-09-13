@@ -955,6 +955,138 @@ impl<'a> FnLower<'a> {
         Ok(Some(()))
     }
 
+    /// The printf/snprintf conversion for a value, with any promotion applied.
+    fn fmt_arg(&mut self, v: Expr, ty: TyId) -> (&'static str, Expr) {
+        match self.tt().kind(ty) {
+            TyKind::Str => ("%s", v),
+            TyKind::F32 => (
+                "%g",
+                Expr::Cast {
+                    value: Box::new(v),
+                    to: TyTable::F64,
+                },
+            ),
+            TyKind::F64 => ("%g", v),
+            TyKind::I64 | TyKind::U64 | TyKind::Nint | TyKind::Nuint => ("%lld", v),
+            TyKind::Bool => (
+                "%d",
+                Expr::Cast {
+                    value: Box::new(v),
+                    to: TyTable::I32,
+                },
+            ),
+            TyKind::U8 | TyKind::U16 | TyKind::U32 => ("%u", cast_to(v, ty, TyTable::U32)),
+            _ => ("%d", cast_to(v, ty, TyTable::I32)),
+        }
+    }
+
+    /// Build a `string` from literal chunks and values, with libc: `snprintf`
+    /// measures it, `malloc` allocates, `snprintf` fills. This is what makes
+    /// `$"..."` usable as a value and `string + string` work; it is replaced by
+    /// the Kiln text runtime when the standard library lands.
+    fn build_string(&mut self, parts: Vec<(String, Option<(Expr, TyId)>)>) -> (Expr, TyId) {
+        let mut fmt = String::new();
+        let mut args: Vec<Expr> = Vec::new();
+        for (lit, val) in parts {
+            for ch in lit.chars() {
+                if ch == '%' {
+                    fmt.push_str("%%");
+                } else {
+                    fmt.push(ch);
+                }
+            }
+            if let Some((v, ty)) = val {
+                let (spec, arg) = self.fmt_arg(v, ty);
+                fmt.push_str(spec);
+                args.push(arg);
+            }
+        }
+        // Values are evaluated once, into locals, then used by both snprintf calls.
+        let mut held = Vec::new();
+        for a in args {
+            let ty = self.infer_arg_ty(&a);
+            let l = self.new_local("$fmtarg", ty);
+            self.push(Stmt::Let { local: l, value: a });
+            held.push(Expr::Local(l));
+        }
+        let snprintf = |args: Vec<Expr>| {
+            Expr::Call(Box::new(Call::Dll {
+                library: "c".into(),
+                symbol: "snprintf".into(),
+                conv: CallConv::Cdecl,
+                args,
+                arg_tys: vec![TyTable::STR, TyTable::I64, TyTable::STR],
+                ret: TyTable::I32,
+                varargs: true,
+            }))
+        };
+        // n = snprintf(null, 0, fmt, ...)
+        let mut measure = vec![
+            Expr::Null(TyTable::STR),
+            Expr::Int(0, TyTable::I64),
+            Expr::Str(fmt.clone()),
+        ];
+        measure.extend(held.iter().cloned());
+        let n = self.new_local("$len", TyTable::I32);
+        self.push(Stmt::Let {
+            local: n,
+            value: snprintf(measure),
+        });
+        // buf = malloc(n + 1)
+        let size = Expr::Cast {
+            value: Box::new(Expr::Bin(
+                BinOp::Add,
+                Box::new(Expr::Local(n)),
+                Box::new(Expr::Int(1, TyTable::I32)),
+                TyTable::I32,
+            )),
+            to: TyTable::I64,
+        };
+        let buf = self.new_local("$buf", TyTable::STR);
+        self.push(Stmt::Let {
+            local: buf,
+            value: Expr::Call(Box::new(Call::Dll {
+                library: "c".into(),
+                symbol: "malloc".into(),
+                conv: CallConv::Cdecl,
+                args: vec![size],
+                arg_tys: vec![TyTable::I64],
+                ret: TyTable::STR,
+                varargs: false,
+            })),
+        });
+        // snprintf(buf, n + 1, fmt, ...)
+        let mut fill = vec![
+            Expr::Local(buf),
+            Expr::Cast {
+                value: Box::new(Expr::Bin(
+                    BinOp::Add,
+                    Box::new(Expr::Local(n)),
+                    Box::new(Expr::Int(1, TyTable::I32)),
+                    TyTable::I32,
+                )),
+                to: TyTable::I64,
+            },
+            Expr::Str(fmt),
+        ];
+        fill.extend(held);
+        self.push(Stmt::Expr(snprintf(fill)));
+        (Expr::Local(buf), TyTable::STR)
+    }
+
+    /// The type a already-lowered format argument carries.
+    fn infer_arg_ty(&self, e: &Expr) -> TyId {
+        match e {
+            Expr::Cast { to, .. } => *to,
+            Expr::Local(l) => self.cx.b.m.func(self.fid).locals[l.0 as usize].ty,
+            Expr::Str(_) => TyTable::STR,
+            Expr::Int(_, t) | Expr::Float(_, t) => *t,
+            Expr::Bool(_) => TyTable::BOOL,
+            Expr::Field(..) | Expr::Call(..) | Expr::Bin(..) => TyTable::I32,
+            _ => TyTable::I32,
+        }
+    }
+
     fn emit_print_str(&mut self, s: &str) {
         self.emit_printf("%s", vec![(Expr::Str(s.to_string()), TyTable::STR)]);
     }
@@ -1236,8 +1368,18 @@ impl<'a> FnLower<'a> {
                 Ok((Expr::Field(Box::new(Expr::Local(t)), RESULT_VALUE), val_ty))
             }
             ast::ExprKind::Range(_, _, _) => Err("a range is only valid in `foreach`".into()),
-            ast::ExprKind::Interp(_) => {
-                Err("string interpolation is only supported in Console.WriteLine for now".into())
+            ast::ExprKind::Interp(segs) => {
+                let mut parts: Vec<(String, Option<(Expr, TyId)>)> = Vec::new();
+                for seg in segs {
+                    match seg {
+                        ast::InterpSeg::Lit(l) => parts.push((l.clone(), None)),
+                        ast::InterpSeg::Expr(x) => {
+                            let (v, t) = self.expr(x, None)?;
+                            parts.push((String::new(), Some((v, t))));
+                        }
+                    }
+                }
+                Ok(self.build_string(parts))
             }
             ast::ExprKind::Switch(subject, arms) => self.switch(subject, arms, hint),
             ast::ExprKind::Lambda(l) => {
@@ -1847,6 +1989,18 @@ impl<'a> FnLower<'a> {
             ast::BinOp::Shr => BinOp::Shr,
             ast::BinOp::And | ast::BinOp::Or => unreachable!(),
         };
+        // `string + string` builds a new string rather than adding pointers.
+        if op == ast::BinOp::Add {
+            let probe = self.expr_raw(a, None)?;
+            if probe.1 == TyTable::STR {
+                let rhs = self.expr(b, Some(TyTable::STR))?;
+                return Ok(self.build_string(vec![
+                    (String::new(), Some(probe)),
+                    (String::new(), Some(rhs)),
+                ]));
+            }
+            // not a string: fall through, re-lowering `a` with the real hint
+        }
         let is_cmp = matches!(
             op,
             ast::BinOp::Eq

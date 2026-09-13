@@ -19,7 +19,6 @@ pub fn emit(m: &Module) -> String {
         m,
         strings: Vec::new(),
         externs: BTreeSet::new(),
-        needs_malloc: false,
         needs_gc: false,
     };
     let mut funcs = String::new();
@@ -35,7 +34,6 @@ struct Emit<'a> {
     m: &'a Module,
     strings: Vec<String>,
     externs: BTreeSet<String>,
-    needs_malloc: bool,
     needs_gc: bool,
 }
 
@@ -106,13 +104,10 @@ impl Emit<'_> {
         for d in &self.externs {
             writeln!(out, "{d}").unwrap();
         }
-        if self.needs_malloc {
-            writeln!(out, "declare ptr @malloc(i64)").unwrap();
-        }
         if self.needs_gc {
             writeln!(out, "declare void @kn_gc_set_roots(ptr, i32)").unwrap();
         }
-        if !self.externs.is_empty() || self.needs_malloc || self.needs_gc {
+        if !self.externs.is_empty() || self.needs_gc {
             out.push('\n');
         }
 
@@ -685,7 +680,9 @@ impl<'a, 'b> FnEmit<'a, 'b> {
             Layout::C { size, .. } => (*size, rec.fields.iter().map(|f| f.ty).collect()),
             Layout::Managed => unimplemented!("managed MakeRecord: kn_rec_new, later phase"),
         };
-        self.e.needs_malloc = true;
+        self.e
+            .externs
+            .insert("declare ptr @malloc(i64)".to_string());
         let base = self.fresh();
         writeln!(self.body, "  {base} = call ptr @malloc(i64 {size})").unwrap();
         let vals: Vec<V> = fields.iter().map(|f| self.expr(f)).collect();

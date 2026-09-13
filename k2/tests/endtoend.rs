@@ -490,3 +490,36 @@ public static class P
 "#;
     assert_eq!(run_k2(src), "1700\n1800\nnone\nsmall\nmedium\nlarge\n");
 }
+
+#[test]
+fn strings_build_as_values() {
+    let src = r#"
+namespace Str;
+public static class P
+{
+    public static string Describe(string name, int n) => $"{name} has {n}";
+
+    public static void Main()
+    {
+        string greeting = $"Hello, {"world"}!";
+        Console.WriteLine(greeting);
+
+        var s = Describe("kiln", 42);
+        Console.WriteLine(s);
+
+        string a = "con";
+        string b = "cat";
+        Console.WriteLine(a + b);
+
+        // a value built once and used twice
+        var twice = $"[{s}]";
+        Console.WriteLine(twice);
+        Console.WriteLine(twice);
+    }
+}
+"#;
+    assert_eq!(
+        run_k2(src),
+        "Hello, world!\nkiln has 42\nconcat\n[kiln has 42]\n[kiln has 42]\n"
+    );
+}
