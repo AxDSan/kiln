@@ -204,17 +204,27 @@ struct Lexer<'a> {
     line: usize,
     col: usize,
     pending_doc: Option<String>,
+    /// Whether an ordinary (non-doc) comment was skipped. The printer cannot
+    /// reproduce those yet, so `kiln fmt` refuses rather than eat them.
+    saw_comment: bool,
 }
 
 pub fn lex(src: &str) -> Result<Vec<Spanned>, LexError> {
+    Ok(lex_with_trivia(src)?.0)
+}
+
+/// Lex, also reporting whether the source carries ordinary comments.
+pub fn lex_with_trivia(src: &str) -> Result<(Vec<Spanned>, bool), LexError> {
     let mut lx = Lexer {
         src: src.as_bytes(),
         i: 0,
         line: 1,
         col: 1,
         pending_doc: None,
+        saw_comment: false,
     };
-    lx.run()
+    let toks = lx.run()?;
+    Ok((toks, lx.saw_comment))
 }
 
 impl Lexer<'_> {
@@ -294,6 +304,9 @@ impl Lexer<'_> {
                 while self.peek() != b'\n' && self.i < self.src.len() {
                     text.push(self.bump() as char);
                 }
+                if !is_doc {
+                    self.saw_comment = true;
+                }
                 if is_doc {
                     match &mut self.pending_doc {
                         Some(d) => {
@@ -304,6 +317,7 @@ impl Lexer<'_> {
                     }
                 }
             } else if c == b'/' && self.peek2() == b'*' {
+                self.saw_comment = true;
                 self.bump();
                 self.bump();
                 let mut depth = 1;

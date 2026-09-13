@@ -1083,3 +1083,128 @@ public static class P
     let err = kiln_k2::compile_to_llvm(src).unwrap_err();
     assert!(err.contains("to implement `INamed`"), "got: {err}");
 }
+
+/// Printing must be a fixed point: format(format(x)) == format(x), and the
+/// reprinted source must still compile to the same thing. This is what lets
+/// Studio and `kiln migrate` write source through the tree.
+fn assert_format_roundtrips(src: &str, label: &str) {
+    let once = kiln_k2::format(src).unwrap_or_else(|e| panic!("{label}: format failed: {e}"));
+    let twice = kiln_k2::format(&once)
+        .unwrap_or_else(|e| panic!("{label}: reformatting failed: {e}\n--- once ---\n{once}"));
+    assert_eq!(once, twice, "{label}: formatting is not a fixed point");
+}
+
+#[test]
+fn formatting_is_a_fixed_point() {
+    for (label, src) in [
+        (
+            "kitchen sink",
+            r#"
+namespace F;
+using Kiln.IO;
+
+public enum Colour : byte { Red, Green = 4, Blue }
+
+public interface INamed { string Name(); }
+
+[Table("rows")]
+public record Row([Auto] ulong Id, [Column("n")] int N) : INamed
+{
+    public string Name() => $"row {N}";
+}
+
+public static class P
+{
+    public const int Limit = 10;
+    private int state;
+
+    public static T Pick<T>(T a, T b) where T : INamed => a;
+
+    [Dll("c")]
+    public static extern int abs(int n);
+
+    public static void Main()
+    {
+        var xs = new List<int>();
+        foreach (var i in 1..Limit)
+        {
+            if (i % 2 == 0)
+                continue;
+            xs.Add(i * i);
+        }
+        var evens = xs.Where(x => x > 4).Select(x => $"n{x}");
+        defer Console.WriteLine("done");
+        int? maybe = null;
+        Console.WriteLine($"{maybe ?? -1} {evens.Count}");
+        var c = 3 switch { 1 => "one", < 5 => "few", _ => "many" };
+        Console.WriteLine(c);
+    }
+}
+"#,
+        ),
+        (
+            "form",
+            r#"
+namespace G;
+public partial form MainWindow
+{
+    Title = "Counter";
+    Width = 320;
+    Label count { Text = "0"; }
+    Button add { Text = "Add"; Click += OnAdd; }
+    Button two { Text = "Two"; Click += () => { n = 0; }; }
+    int n;
+    void OnAdd() { n = n + 1; count.Text = $"{n}"; }
+}
+"#,
+        ),
+    ] {
+        assert_format_roundtrips(src, label);
+    }
+}
+
+#[test]
+fn formatted_source_still_compiles_the_same() {
+    // Reformatting must not change meaning: the same program, reformatted,
+    // must produce byte-identical LLVM.
+    let src = r#"
+namespace Fmt;
+
+public record Rect(int W, int H)
+{
+    public int Area() => W * H;
+}
+
+public static class P
+{
+    public static void Main()
+    {
+        var r = new Rect(3, 4);
+        var xs = new List<int>();
+        foreach (var i in 1..5)
+            xs.Add(i * i + 1);
+        var big = xs.Where(x => x > 4);
+        Console.WriteLine($"{r.Area()} {big.Count}");
+    }
+}
+"#;
+    let before = kiln_k2::compile_to_llvm(src).unwrap();
+    let formatted = kiln_k2::format(src).unwrap();
+    let after = kiln_k2::compile_to_llvm(&formatted)
+        .unwrap_or_else(|e| panic!("reformatted: {e}\n{formatted}"));
+    assert_eq!(before, after, "reformatting changed the program");
+}
+
+#[test]
+fn formatting_refuses_to_eat_comments() {
+    // The printer does not carry ordinary comments yet. Rather than delete
+    // them, `kiln fmt` refuses — losing a comment is worse than not formatting.
+    let src = "namespace C;\n// a note worth keeping\npublic static class P { public static void Main() { } }\n";
+    let err = kiln_k2::format(src).unwrap_err();
+    assert!(err.contains("does not carry them yet"), "got: {err}");
+
+    // A doc comment is carried, so this one formats.
+    let ok = "namespace D;\n/// kept\npublic static class P { public static void Main() { } }\n";
+    let out = kiln_k2::format(ok).unwrap();
+    assert!(out.contains("/// kept"), "{out}");
+}

@@ -10,6 +10,7 @@ Updated 2026-09-13. Tracks what of the [spec](spec.md) is actually built, so the
 | `kir` | the typed middle IR + LLVM emitter | types, emitter, 5 tests (4 exit fixtures + slot-ABI) |
 | `k2` | lexer + parser + lowerer (k2-syntax/k2-lower, one crate for now) | runnable subset, 6 end-to-end tests |
 | `backend` | 1.x → LLVM, split into `lower/` modules | unchanged behaviour, 61 tests |
+| `k2::print` | the canonical printer — `kiln fmt` | round-trips as a fixed point; refuses sources with ordinary comments |
 | `cli` | `kiln k2 <file> [-o] [--run] [--emit-ir] [--runtime]` | builds+runs K2; libc by default, or the real Kiln runtime with `--runtime` |
 
 ## Language: built vs. pending
@@ -61,6 +62,11 @@ clang and checks stdout):
   An event wires to a **method group or a lambda written at the wiring site** —
   a form's state is in globals, so a handler lambda needs no environment
   pointer and binds on the ABI as it stands
+- **`kiln fmt`**: one canonical spelling per program — four-space indent,
+  braces on their own line, precedence-aware parentheses. Formatting is a fixed
+  point and does not change what a program compiles to. It **refuses** a source
+  carrying ordinary comments rather than delete them (doc comments are kept),
+  which is the honest state until the printer carries trivia
 - **Generic instance methods** (`t.With(7)`), and **interface constraints
   enforced**: `where T : INamed` is checked when the type argument is chosen,
   and a type that does not implement it is a compile error naming both
@@ -148,4 +154,7 @@ record, a `List<T>`, a `Select` lambda and a `switch` over an enum.
   collector roots. Folded into `kiln build` (with runtime linking) later.
 - **One `k2` crate** holds syntax + lowering; splits into `k2-syntax`/`k2-sema`/
   `k2-lower` as `k2-sema` grows (it is currently folded into the lowerer).
+- **The printer drops ordinary comments**, so `kiln fmt` refuses such sources.
+  Carrying comments through the tree is what `kiln edit` and `kiln migrate`
+  need next.
 - Parser cast heuristic `(T)e` is conservative; revisit with the full grammar.

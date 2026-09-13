@@ -79,6 +79,7 @@ fn run(args: &[String]) -> i32 {
         "build" => cmd_build(rest, false),
         "run" => cmd_build(rest, true),
         "k2" => cmd_k2(rest),
+        "fmt" => cmd_fmt(rest),
         "emit" => cmd_emit(rest),
         "inspect" => cmd_inspect(rest),
         "dap" => dap::run(),
@@ -449,6 +450,76 @@ fn parse_io_args(rest: &[String]) -> Result<Io, String> {
         header,
         project_output: None,
     })
+}
+
+/// Print a Kiln 2 source file in its canonical spelling.
+///
+/// `kiln fmt <file>` writes it back; `--check` reports whether it is already
+/// canonical without changing it; `-` reads standard input and writes to
+/// standard output. One spelling per program is what lets Studio and
+/// `kiln migrate` write source through the tree rather than as text.
+fn cmd_fmt(rest: &[String]) -> i32 {
+    let mut check = false;
+    let mut files = Vec::new();
+    for a in rest {
+        match a.as_str() {
+            "--check" => check = true,
+            _ if a.starts_with('-') && a != "-" => {
+                eprintln!("kiln fmt: unknown option `{a}`");
+                return 2;
+            }
+            _ => files.push(a.clone()),
+        }
+    }
+    if files.is_empty() {
+        eprintln!("usage: kiln fmt <file.kiln>... [--check]");
+        return 2;
+    }
+    let mut changed = false;
+    for f in &files {
+        let src = if f == "-" {
+            use std::io::Read as _;
+            let mut s = String::new();
+            if std::io::stdin().read_to_string(&mut s).is_err() {
+                eprintln!("kiln fmt: cannot read standard input");
+                return 1;
+            }
+            s
+        } else {
+            match std::fs::read_to_string(f) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("kiln fmt: cannot read {f}: {e}");
+                    return 1;
+                }
+            }
+        };
+        let out = match kiln_k2::format(&src) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("kiln fmt: {f}:{e}");
+                return 1;
+            }
+        };
+        if f == "-" {
+            print!("{out}");
+            continue;
+        }
+        if out != src {
+            changed = true;
+            if check {
+                println!("{f}");
+            } else if let Err(e) = std::fs::write(f, &out) {
+                eprintln!("kiln fmt: cannot write {f}: {e}");
+                return 1;
+            }
+        }
+    }
+    if check && changed {
+        1
+    } else {
+        0
+    }
 }
 
 /// Compile a Kiln 2 source file to a native binary (and optionally run it).
