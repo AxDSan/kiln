@@ -436,6 +436,11 @@ data, and stays data.
 reached as `File.ReadText`, and one whose first argument is the value it works
 on reads as a member: `length(s)` is `s.Length`.
 
+A command's parameters are checked against what you pass, and a mismatch is a
+compile error naming the command and the position. Where a command takes or
+answers with a list, a `List<T>` converts at the boundary — so `List<T>` is the
+only list a program sees.
+
 ```k2
 namespace Std;
 
@@ -492,7 +497,6 @@ Kiln 2 is not finished, and it is worth knowing where the edges are:
   ignored.
 - The designer in Studio still edits 1.x; `kiln edit` is the interface it will
   use.
-- Collections are the compiler's own structures rather than the runtime's, and
-  a `Dictionary` is not ordered.
+- A `Dictionary` is not ordered.
 
 `design/k2/status.md` in the repository tracks this precisely.

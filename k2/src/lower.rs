@@ -2973,15 +2973,18 @@ impl<'a> FnLower<'a> {
                             .zip(tags.iter())
                             .map(|(ty, tag)| SlotTy { tag: *tag, ty: *ty })
                             .collect();
-                        return Ok((
-                            Expr::Call(Box::new(Call::Command {
-                                symbol: sym,
-                                args: kargs,
-                                arg_slots: slots,
-                                ret,
-                            })),
+                        let call = Expr::Call(Box::new(Call::Command {
+                            symbol: sym,
+                            args: kargs,
+                            arg_slots: slots,
                             ret,
-                        ));
+                        }));
+                        // A command that answers with a list hands back a
+                        // runtime array; the language has `List<T>`.
+                        if let TyKind::Array(e) = *self.tt().kind(ret) {
+                            return self.array_to_list(call, e);
+                        }
+                        return Ok((call, ret));
                     }
                 }
             }
@@ -3085,15 +3088,16 @@ impl<'a> FnLower<'a> {
                     .zip(tags.iter())
                     .map(|(ty, tag)| SlotTy { tag: *tag, ty: *ty })
                     .collect();
-                return Ok((
-                    Expr::Call(Box::new(Call::Command {
-                        symbol: sym,
-                        args: kargs,
-                        arg_slots: slots,
-                        ret,
-                    })),
+                let call = Expr::Call(Box::new(Call::Command {
+                    symbol: sym,
+                    args: kargs,
+                    arg_slots: slots,
                     ret,
-                ));
+                }));
+                if let TyKind::Array(e) = *self.tt().kind(ret) {
+                    return self.array_to_list(call, e);
+                }
+                return Ok((call, ret));
             }
         }
         let sig = self
@@ -5073,11 +5077,203 @@ impl<'a> FnLower<'a> {
             // marshals it.
             return Ok(v);
         }
+        // A `List<T>` where a list of T is declared: build the runtime array
+        // the library expects. Crossing an ABI costs a copy, which is what any
+        // marshalling layer pays; the alternative is making the caller write
+        // the loop, or refusing something perfectly reasonable.
+        const ARRAY: i32 = 0x100;
+        if tag & ARRAY != 0 {
+            if let Some((_, elem)) = self.cx.as_list(actual) {
+                if self.cx.b.m.types.sdt_tag(elem) == tag & !ARRAY {
+                    return self.list_to_array(v, actual, elem);
+                }
+            }
+        }
+        // Describe what was passed as the Kiln type it is, not as the slot it
+        // marshals to: someone who wrote `List<int>` is not helped by being
+        // told they passed a record.
+        let got_text = match self.cx.as_list(actual) {
+            Some((_, e)) => format!("a list of {}", describe_slot(self.cx.b.m.types.sdt_tag(e))),
+            None => describe_slot(got),
+        };
         Err(format!(
-            "`{name}` expects {} for argument {pos}, but this is {}",
-            describe_slot(tag),
-            describe_slot(got)
+            "`{name}` expects {} for argument {pos}, but this is {got_text}",
+            describe_slot(tag)
         ))
+    }
+
+    /// Copy a runtime array into a `List<T>`, which is what the language has.
+    ///
+    /// The mirror of `list_to_array`: a command that answers with a list —
+    /// `Text.Split`, `Db.ColumnNames` — hands back a runtime array, and
+    /// without this its result can only be handed to another command. One
+    /// conversion each way keeps `List<T>` the only list a K2 program sees.
+    fn array_to_list(&mut self, v: Expr, elem: TyId) -> Result<(Expr, TyId), String> {
+        let arr_ty = self.cx.b.m.types.intern(TyKind::Array(elem));
+        let held = self.new_local("$fromary", arr_ty);
+        self.push(Stmt::Let {
+            local: held,
+            value: v,
+        });
+        // `count(xs)` is the core command that reads an array's length.
+        let tag = self.cx.b.m.types.sdt_tag(arr_ty);
+        let n = self.new_local("$fromn", TyTable::I32);
+        self.push(Stmt::Let {
+            local: n,
+            value: Expr::Call(Box::new(Call::Command {
+                symbol: "kn_ary_count".into(),
+                args: vec![Expr::Local(held)],
+                arg_slots: vec![SlotTy { tag, ty: arr_ty }],
+                ret: TyTable::I32,
+            })),
+        });
+
+        let lrid = self.cx.list_record(elem);
+        let lty = self.cx.b.m.types.intern(TyKind::Record(lrid));
+        let data_ty = self.cx.b.m.record(lrid).fields[LIST_DATA].ty;
+        let out = self.new_local("$fromlist", lty);
+        self.push(Stmt::Let {
+            local: out,
+            value: Expr::MakeRecord(
+                lrid,
+                vec![
+                    Expr::Int(0, TyTable::I32),
+                    Expr::Int(0, TyTable::I32),
+                    Expr::Null(data_ty),
+                ],
+            ),
+        });
+        let i = self.new_local("$fromi", TyTable::I32);
+        self.push(Stmt::Let {
+            local: i,
+            value: Expr::Int(0, TyTable::I32),
+        });
+        let get = Expr::Call(Box::new(Call::Dll {
+            library: "runtime".into(),
+            symbol: "kn_ary_get".into(),
+            conv: CallConv::Cdecl,
+            args: vec![
+                Expr::Local(held),
+                // Positions count from 1.
+                Expr::Bin(
+                    BinOp::Add,
+                    Box::new(Expr::Local(i)),
+                    Box::new(Expr::Int(1, TyTable::I32)),
+                    TyTable::I32,
+                ),
+            ],
+            arg_tys: vec![TyTable::PTR, TyTable::I32],
+            ret: TyTable::I64,
+            varargs: false,
+        }));
+        let mut body = vec![Stmt::If {
+            cond: Expr::Not(Box::new(Expr::Bin(
+                BinOp::Lt,
+                Box::new(Expr::Local(i)),
+                Box::new(Expr::Local(n)),
+                TyTable::I32,
+            ))),
+            then: vec![Stmt::Break],
+            els: vec![],
+        }];
+        self.blocks.push(Vec::new());
+        let val = Expr::Cast {
+            value: Box::new(get),
+            to: elem,
+        };
+        self.list_add(out, lty, val);
+        let add = self.blocks.pop().unwrap();
+        body.extend(add);
+        body.push(Stmt::Assign {
+            place: Place::Local(i),
+            value: Expr::Bin(
+                BinOp::Add,
+                Box::new(Expr::Local(i)),
+                Box::new(Expr::Int(1, TyTable::I32)),
+                TyTable::I32,
+            ),
+        });
+        self.push(Stmt::Loop { body });
+        Ok((Expr::Local(out), lty))
+    }
+
+    /// Copy a `List<T>` into a runtime array, which is what a command's
+    /// list-shaped parameter is.
+    fn list_to_array(&mut self, v: Expr, lty: TyId, elem: TyId) -> Result<Expr, String> {
+        let held = self.new_local("$tolist", lty);
+        self.push(Stmt::Let {
+            local: held,
+            value: v,
+        });
+        let len = Expr::Field(Box::new(Expr::Local(held)), LIST_LEN);
+        let tag = self.cx.b.m.types.sdt_tag(elem);
+        let arr_ty = self.cx.b.m.types.intern(TyKind::Array(elem));
+        let arr = self.new_local("$toary", arr_ty);
+        self.push(Stmt::Let {
+            local: arr,
+            value: Expr::Call(Box::new(Call::Dll {
+                library: "runtime".into(),
+                symbol: "kn_ary_new".into(),
+                conv: CallConv::Cdecl,
+                args: vec![Expr::Int(tag as i128, TyTable::I32), len.clone()],
+                arg_tys: vec![TyTable::I32, TyTable::I32],
+                ret: arr_ty,
+                varargs: false,
+            })),
+        });
+        // for i in 0 .. len-1: kn_ary_set(arr, i + 1, data[i])
+        let i = self.new_local("$toi", TyTable::I32);
+        self.push(Stmt::Let {
+            local: i,
+            value: Expr::Int(0, TyTable::I32),
+        });
+        let data = Expr::Field(Box::new(Expr::Local(held)), LIST_DATA);
+        let item = Expr::Index(Box::new(data), Box::new(Expr::Local(i)));
+        let body = vec![
+            Stmt::If {
+                cond: Expr::Not(Box::new(Expr::Bin(
+                    BinOp::Lt,
+                    Box::new(Expr::Local(i)),
+                    Box::new(len),
+                    TyTable::I32,
+                ))),
+                then: vec![Stmt::Break],
+                els: vec![],
+            },
+            Stmt::Expr(Expr::Call(Box::new(Call::Dll {
+                library: "runtime".into(),
+                symbol: "kn_ary_set".into(),
+                conv: CallConv::Cdecl,
+                args: vec![
+                    Expr::Local(arr),
+                    // Positions count from 1.
+                    Expr::Bin(
+                        BinOp::Add,
+                        Box::new(Expr::Local(i)),
+                        Box::new(Expr::Int(1, TyTable::I32)),
+                        TyTable::I32,
+                    ),
+                    Expr::Cast {
+                        value: Box::new(item),
+                        to: TyTable::I64,
+                    },
+                ],
+                arg_tys: vec![TyTable::PTR, TyTable::I32, TyTable::I64],
+                ret: TyTable::VOID,
+                varargs: false,
+            }))),
+            Stmt::Assign {
+                place: Place::Local(i),
+                value: Expr::Bin(
+                    BinOp::Add,
+                    Box::new(Expr::Local(i)),
+                    Box::new(Expr::Int(1, TyTable::I32)),
+                    TyTable::I32,
+                ),
+            },
+        ];
+        self.push(Stmt::Loop { body });
+        Ok(Expr::Local(arr))
     }
 
     /// Resolve `value.Member(...)` to a command whose first parameter is the

@@ -182,6 +182,10 @@ clang and checks stdout):
   `List<T>`. `InsertSql`/`SelectSql` still answer with the text alone
 - collection expressions `[a, b, c]` and `[]`, target-typed to an array — what
   a command taking a list of values (`db_exec`'s parameters) expects
+- **every command argument is checked against the slot its signature declares**,
+  and named in words when it does not match. A `List<T>` where a list of `T` is
+  declared is converted rather than refused, and a command answering with a list
+  converts back — so `List<T>` stays the only list a K2 program sees
 - interface bases (`: I` parsed and ignored)
 - closures over a `foreach` variable: each turn binds its own cell, so a lambda
   made in a loop holds that turn's value (C#'s post-5.0 rule), while a write
@@ -189,7 +193,7 @@ clang and checks stdout):
 
 **Not yet built** (next phases, in rough order):
 
-1. the collections are collector-allocated and hashed, but are still K2's own structures rather than the runtime's `kn_ary_*`/text commands
+1. `List<T>` is K2's own structure, converted to and from a runtime array at the command boundary. Re-platforming it onto `Kiln_Array` buys nothing now that allocation is collected — Phase 4's remaining exit is the `.kdecl`/libinfo migration, which is flip-adjacent and waits for the flip
 2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
 3. constraints beyond interfaces (`where T : class`, `new()`) are parsed and ignored
 4. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim

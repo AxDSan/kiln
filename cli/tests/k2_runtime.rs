@@ -429,6 +429,8 @@ fn a_wrong_argument_to_a_command_is_reported_not_crashed() {
     // compare the two. A `List<T>` where an array is declared reached the
     // library as a record pointer, was read as an array, and segfaulted inside
     // it — with nothing in the message to say which argument was wrong.
+    // A `List<string>` where a list of text belongs is converted, so the wrong
+    // argument here is one that cannot be: a list of numbers.
     let src = "\
 namespace Mism;
 using Kiln.Db;
@@ -437,9 +439,9 @@ public static class P
     public static void Main()
     {
         var h = Db.Open(\"sqlite::memory:\");
-        var ps = new List<string>();
-        ps.Add(\"x\");
-        Db.Exec(h, \"insert into t values (?)\", ps);
+        var ns = new List<int>();
+        ns.Add(1);
+        Db.Exec(h, \"insert into t values (?)\", ns);
     }
 }
 ";
@@ -447,7 +449,46 @@ public static class P
     assert!(err.contains("Db.Exec"), "the command is not named: {err}");
     assert!(err.contains("argument 3"), "the position is not named: {err}");
     assert!(
-        err.contains("a list of text") && err.contains("a record"),
+        err.contains("a list of text") && err.contains("a list of a whole number"),
         "expected and got are not both named: {err}"
+    );
+}
+
+#[test]
+fn a_list_converts_to_a_command_list_and_back() {
+    // `List<T>` is the only list a K2 program sees, and a command's list is a
+    // runtime array. One conversion each way at the boundary — which is what
+    // crossing an ABI costs — rather than two list types in the language.
+    let src = "\
+namespace Conv;
+using Kiln.Db;
+using Kiln.Text;
+public static class P
+{
+    public static void Main()
+    {
+        // Out: a List<string> where the command declares a list of text.
+        var h = Db.Open(\"sqlite::memory:\");
+        Db.Exec(h, \"create table t (n text)\", []);
+        var ps = new List<string>();
+        ps.Add(\"first\");
+        Console.WriteLine($\"{Db.Exec(h, \"insert into t values (?)\", ps)}\");
+
+        // Back: a command that answers with a list gives a List<string>, so it
+        // counts and iterates like any other.
+        var parts = Text.Split(\"a,b,c\", \",\");
+        Console.WriteLine($\"{parts.Count}\");
+        foreach (var p in parts)
+            Console.Write($\"{p} \");
+        Console.WriteLine(\"\");
+
+        // And the round trip: what came back can go out again.
+        Console.WriteLine($\"{Db.Exec(h, \"insert into t values (?)\", Text.Split(\"solo\", \",\"))}\");
+    }
+}
+";
+    assert_eq!(
+        build_and_run("convert", src),
+        "1\n3\na b c \n1\n",
     );
 }
