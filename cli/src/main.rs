@@ -1052,6 +1052,13 @@ fn cmd_inspect(rest: &[String]) -> i32 {
             return 1;
         }
     };
+    // A K2 file is reported in the same line shapes, from the K2 parse tree.
+    // The designer is the reader of these lines and should not have to know
+    // which language it is looking at — nor should it grow a second parser,
+    // which is the convention this whole command exists to keep.
+    if crate::lsp_k2::is_k2(&src) {
+        return inspect_k2(&src);
+    }
     let module = match kiln_ir::parse(&src) {
         Ok(m) => m,
         Err(e) => {
@@ -1114,6 +1121,128 @@ fn cmd_inspect(rest: &[String]) -> i32 {
         print_members(&c.id, &c.properties, &c.handlers);
     }
     0
+}
+
+/// Report a Kiln 2 file in the same lines `kiln inspect` gives for 1.x.
+///
+/// The shapes are deliberately identical — `form:`, `component:`, `prop:`,
+/// `handler:`, `sub:` — so a reader written for 1.x reads a K2 file without
+/// being changed. `namespace` takes the place of `module`, since that is the
+/// word K2 uses for the same thing.
+fn inspect_k2(src: &str) -> i32 {
+    let toks = match kiln_k2::lexer::lex(src) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("kiln: {}:{}: {}", e.line, e.col, e.msg);
+            return 1;
+        }
+    };
+    let program = match kiln_k2::parser::parse(toks) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("kiln: {}:{}: {}", e.span.line, e.span.col, e.msg);
+            return 1;
+        }
+    };
+    use kiln_k2::ast::*;
+    println!(
+        "module: {}",
+        program.namespace.as_deref().unwrap_or("(none)")
+    );
+    for u in &program.usings {
+        // `using Kiln.File;` is 1.x's `use file`: the designer wants the
+        // library name, which is the last segment, lowercased.
+        let lib = u.path.rsplit('.').next().unwrap_or(&u.path).to_lowercase();
+        println!("use: {lib}");
+    }
+    // A form's methods are the handlers a designer can bind to, and so are the
+    // static methods of a class — both are "a name you can put on an event".
+    for item in &program.items {
+        match item {
+            Item::Type(t) => {
+                for m in &t.methods {
+                    println!("sub: {}", m.name);
+                    if !m.params.is_empty() || !matches!(m.ret, TypeRef::Void) {
+                        let ps: Vec<String> = m
+                            .params
+                            .iter()
+                            .map(|p| format!("{}:{}", p.name, kiln_k2::print::ty(&p.ty)))
+                            .collect();
+                        println!(
+                            "subsig: {} ({}) {}",
+                            m.name,
+                            ps.join(", "),
+                            match &m.ret {
+                                TypeRef::Void => "-".to_string(),
+                                other => kiln_k2::print::ty(other),
+                            }
+                        );
+                    }
+                }
+            }
+            Item::Form(f) => {
+                for m in &f.methods {
+                    println!("sub: {}", m.name);
+                }
+            }
+            _ => {}
+        }
+    }
+    // `partial form` means a form's halves are separate items; the designer
+    // wants one form, so they are reported together.
+    let forms: Vec<&FormDecl> = program
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Form(f) => Some(f),
+            _ => None,
+        })
+        .collect();
+    let mut named: Vec<&str> = Vec::new();
+    for f in &forms {
+        if named.contains(&f.name.as_str()) {
+            continue;
+        }
+        named.push(&f.name);
+        let halves: Vec<&&FormDecl> = forms.iter().filter(|o| o.name == f.name).collect();
+        let first = halves.first().unwrap();
+        let last = halves.last().unwrap();
+        println!(
+            "form: {} span={}..{}",
+            f.name, first.span.line, last.span.line
+        );
+        for h in &halves {
+            for (name, value) in &h.properties {
+                println!("prop: {} {name} {}", f.name, escape_value(&k2_value(value)));
+            }
+        }
+        for h in &halves {
+            for c in &h.components {
+                println!("component: {} {}", c.id, c.type_name);
+                for (name, value) in &c.properties {
+                    println!("prop: {} {name} {}", c.id, escape_value(&k2_value(value)));
+                }
+                for (event, href) in &c.handlers {
+                    if let HandlerRef::Method(m) = href {
+                        println!("handler: {} {event} {m}", c.id);
+                    }
+                }
+            }
+        }
+    }
+    0
+}
+
+/// A property's value as the designer wants to see it: the text of a literal,
+/// and the source spelling of anything else.
+fn k2_value(e: &kiln_k2::ast::Expr) -> String {
+    use kiln_k2::ast::ExprKind as E;
+    match &e.kind {
+        E::Str(s) => s.clone(),
+        E::Int(v) => v.to_string(),
+        E::Bool(b) => if *b { "true" } else { "false" }.to_string(),
+        _ => kiln_k2::print::expr(e),
+    }
 }
 
 /// The `prop:` and `handler:` lines of a form or component, keyed by its id.

@@ -89,6 +89,10 @@ clang and checks stdout):
   declares plus the language's words; after a dot, only that thing's members).
   A failed parse is retried with the caret's line blanked out, since asking
   what follows a dot means looking at a file that does not parse
+- **`kiln inspect` reads a K2 file**, in exactly the lines it gives for 1.x —
+  `module:`, `use:`, `sub:`, `form:`, `component:`, `prop:`, `handler:` — so
+  Studio reads a K2 form without a second parser and without being changed. A
+  `partial form` reports once, with a span covering both halves
 - **`kiln edit`**: `set`, `add`, `remove`, `rename`, `on` change a form's
   designer block **through the tree**, not as text — so comments, the code half
   and everything else survive. This is what Studio calls: the CLI has always
@@ -198,7 +202,7 @@ clang and checks stdout):
 3. constraints beyond interfaces (`where T : class`, `new()`) are parsed and ignored
 4. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
 5. ABI v5 proper: a handler that captures a *local*; Studio itself calling `kiln edit` (the command exists; the C++ side still splices 1.x text)
-6. Studio's code view still uses its own C++ highlighting rather than the language server
+6. Studio itself: it can now *read* a K2 form through `kiln inspect` and *write* one through `kiln edit`, but its C++ still splices 1.x text on save and highlights with its own keyword list
 
 ## Milestone: the RAD half runs
 

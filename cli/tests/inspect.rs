@@ -157,3 +157,60 @@ fn commands_reports_kind_and_editor() {
         );
     }
 }
+
+#[test]
+fn a_kiln_2_form_inspects_in_the_same_lines() {
+    // Studio's entire knowledge of a file is these lines, and it must not grow
+    // a second parser to read a K2 one. So a K2 form reports in exactly the
+    // shapes a 1.x form does — `form:`, `component:`, `prop:`, `handler:`,
+    // `sub:` — and a reader written for 1.x reads it unchanged.
+    let dir = scratch("k2form");
+    let src = "\
+namespace Counter;
+
+public partial form MainWindow
+{
+    Title = \"Counter\";
+    Width = 320;
+
+    Label count { Text = \"0\"; Left = 40; }
+    Button add { Text = \"Add one\"; Click += OnAdd; }
+}
+
+public partial form MainWindow
+{
+    int n;
+    void OnAdd() { n = n + 1; count.Text = $\"{n}\"; }
+}
+";
+    let path = dir.join("counter.kiln");
+    std::fs::write(&path, src).unwrap();
+    let out = kiln(&dir, &["inspect", "counter.kiln"]);
+
+    assert!(out.contains("module: Counter"), "{out}");
+    assert!(out.contains("sub: OnAdd"), "{out}");
+    // One form, though it is written in two halves.
+    assert_eq!(
+        out.lines().filter(|l| l.starts_with("form: ")).count(),
+        1,
+        "a partial form must report once:\n{out}"
+    );
+    assert!(out.contains("form: MainWindow span="), "{out}");
+    assert!(out.contains("prop: MainWindow Title Counter"), "{out}");
+    assert!(out.contains("prop: MainWindow Width 320"), "{out}");
+    assert!(out.contains("component: count Label"), "{out}");
+    assert!(out.contains("component: add Button"), "{out}");
+    assert!(out.contains("prop: add Text Add one"), "{out}");
+    assert!(out.contains("handler: add Click OnAdd"), "{out}");
+}
+
+#[test]
+fn a_kiln_2_using_reads_as_a_library_name() {
+    // 1.x says `use file`; K2 says `using Kiln.File;`. The designer wants the
+    // library, so both report the same `use:` line.
+    let dir = scratch("k2use");
+    let src = "namespace U;\nusing Kiln.File;\npublic static class P\n{\n    public static void Main() { }\n}\n";
+    std::fs::write(dir.join("u.kiln"), src).unwrap();
+    let out = kiln(&dir, &["inspect", "u.kiln"]);
+    assert!(out.contains("use: file"), "{out}");
+}
