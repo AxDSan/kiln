@@ -65,6 +65,11 @@ clang and checks stdout):
   An event wires to a **method group or a lambda written at the wiring site** —
   a form's state is in globals, so a handler lambda needs no environment
   pointer and binds on the ABI as it stands
+- **Editor grammars**: the VS Code and Kate definitions highlight K2 — `//` and
+  `/* */` comments, the keyword and type sets, `[Attributes]`, `$"…{x}…"`
+  interpolation — while still highlighting 1.x, since both share `.kiln` during
+  the transition. A test reads the grammars against the keyword set so they
+  cannot drift from the lexer
 - **Language server**: a `.kiln` file is recognised as K2 or 1.x by its first
   line, and a K2 file gets diagnostics from the front end itself — the same
   parse and lowering a build runs, so the editor cannot disagree with the
@@ -146,7 +151,7 @@ clang and checks stdout):
 5. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
 6. binding the generated SQL to `libs/db` and returning rows (the statement text is generated; execution needs the runtime)
 7. ABI v5 proper: a handler that captures a *local*; Studio itself calling `kiln edit` (the command exists; the C++ side still splices 1.x text)
-8. editor grammars and debugger display for K2 (diagnostics, outline and formatting are done); hover and completion still read the 1.x index
+8. debugger display for K2 types; hover and completion still read the 1.x index
 
 ## Milestone: the RAD half runs
 

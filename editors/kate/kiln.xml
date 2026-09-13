@@ -29,6 +29,28 @@
 
   <highlighting>
     <!-- Reserved by the lexer: these can never be a name. -->
+    <!-- Kiln 2 keywords. Both languages use `.kiln` during the transition, so
+         one definition highlights either; the sets barely overlap. -->
+    <list name="k2keywords">
+      <item>namespace</item><item>using</item><item>public</item><item>private</item>
+      <item>internal</item><item>static</item><item>const</item><item>var</item>
+      <item>let</item><item>class</item><item>record</item><item>struct</item>
+      <item>enum</item><item>interface</item><item>form</item><item>new</item>
+      <item>this</item><item>return</item><item>if</item><item>else</item>
+      <item>switch</item><item>case</item><item>default</item><item>for</item>
+      <item>foreach</item><item>in</item><item>while</item><item>do</item>
+      <item>break</item><item>continue</item><item>defer</item><item>is</item>
+      <item>as</item><item>ref</item><item>out</item><item>partial</item>
+      <item>where</item><item>extern</item><item>readonly</item>
+    </list>
+    <list name="k2types">
+      <item>int</item><item>uint</item><item>long</item><item>ulong</item>
+      <item>short</item><item>ushort</item><item>byte</item><item>sbyte</item>
+      <item>nint</item><item>nuint</item><item>float</item><item>double</item>
+      <item>bool</item><item>char</item><item>string</item><item>void</item>
+      <item>Bytes</item><item>Ptr</item><item>List</item><item>Dictionary</item>
+      <item>Result</item><item>Func</item><item>Action</item>
+    </list>
     <list name="keywords">
       <item>module</item>
       <item>sub</item>
@@ -128,6 +150,8 @@
         <!-- `##` above a declaration is that symbol's documentation, and is
              not the same thing as a `#` note to a reader. The doc comment is
              matched first, because `#` would otherwise swallow it. -->
+        <Detect2Chars char="/" char1="/" attribute="Comment" context="Comment"/>
+        <Detect2Chars char="/" char1="*" attribute="Comment" context="BlockComment"/>
         <Detect2Chars char="#" char1="#" attribute="Documentation" context="DocComment"/>
         <DetectChar char="#" attribute="Comment" context="Comment"/>
 
@@ -138,6 +162,8 @@
         <Detect2Chars char="r" char1="&quot;" attribute="String" context="RawString"/>
         <DetectChar char="&quot;" attribute="String" context="String"/>
 
+        <keyword String="k2keywords" attribute="Keyword" context="#stay"/>
+        <keyword String="k2types" attribute="Data Type" context="#stay"/>
         <keyword String="keywords" attribute="Keyword" context="#stay"/>
         <keyword String="declarations" attribute="Keyword" context="#stay"/>
         <keyword String="sugar" attribute="Keyword" context="#stay"/>
@@ -159,6 +185,9 @@
       </context>
 
       <context name="Comment" attribute="Comment" lineEndContext="#pop"/>
+      <context name="BlockComment" attribute="Comment" lineEndContext="#stay">
+        <Detect2Chars char="*" char1="/" attribute="Comment" context="#pop"/>
+      </context>
       <context name="DocComment" attribute="Documentation" lineEndContext="#pop"/>
 
       <context name="String" attribute="String" lineEndContext="#pop">
