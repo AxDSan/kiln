@@ -123,6 +123,9 @@ clang and checks stdout):
   C function directly, with `Entry = "..."` to rename and
   `Convention = CallConv.StdCall` for Win32. Attributes parse on types and
   members generally
+- **`HashSet<T>`**: `new HashSet<T>()`, `.Add(x)` (a duplicate is ignored),
+  `.Contains(x)`, `.Count`, and `foreach` over one. String elements compare by
+  content, as dictionary keys do
 - **`Dictionary<K,V>`**: `new Dictionary<K,V>()`, `d[k] = v` (updates in place
   or appends), `.Get(k)` → `V?`, `.ContainsKey(k)`, `.Count`. String keys
   compare by content. Lookup is a linear scan for now
@@ -144,7 +147,7 @@ clang and checks stdout):
 
 **Not yet built** (next phases, in rough order):
 
-1. `HashSet<T>`; hashing for `Dictionary` (lookup is a linear scan); moving strings, lists and dictionaries onto the runtime's own text/array commands and the collector (the link path now exists; the data structures still use libc)
+1. hashing for `Dictionary` and `HashSet` (both scan linearly); moving strings and the collections onto the runtime's own text/array commands and the collector (the link path exists; the data structures still use libc)
 2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
 3. constraints beyond interfaces (`where T : class`, `new()`) are parsed and ignored
 4. capturing a `foreach` loop variable (locals and parameters are done; loop variables are reported, not compiled)

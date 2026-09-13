@@ -126,6 +126,7 @@ pub fn lower_with(p: &ast::Program, runtime: Runtime) -> Result<Module, String> 
         results: HashMap::new(),
         lists: HashMap::new(),
         dicts: HashMap::new(),
+        sets: HashMap::new(),
         dlls: HashMap::new(),
         packed: std::collections::HashSet::new(),
         tables: HashMap::new(),
@@ -594,6 +595,8 @@ struct Cx {
     lists: HashMap<TyId, RecordId>,
     /// `Dictionary<K,V>` per key/value pair: `{len, cap, keys, values}`.
     dicts: HashMap<(TyId, TyId), RecordId>,
+    /// `HashSet<T>` per element type: a list that refuses duplicates.
+    sets: HashMap<TyId, RecordId>,
     /// `[Dll]` externs, by `Type.Name` and bare `Name`.
     dlls: HashMap<String, DllSig>,
     /// Form-level state: name → its global.
@@ -688,6 +691,11 @@ impl Cx {
                     self.b.m.types.intern(TyKind::Func { params: tys, ret })
                 }
                 // `Result<T>`: a record {ok, value, err}, synthesised per T.
+                "HashSet" => {
+                    let e = self.resolve(&args[0])?;
+                    let rid = self.set_record(e);
+                    self.b.m.types.intern(TyKind::Record(rid))
+                }
                 "Dictionary" => {
                     if args.len() != 2 {
                         return Err("Dictionary takes a key and a value type".into());
@@ -919,6 +927,40 @@ impl Cx {
     fn record_name(&self, ty: TyId) -> Option<String> {
         if let TyKind::Record(rid) = *self.b.m.types.kind(ty) {
             return Some(self.b.m.record(rid).name.clone());
+        }
+        None
+    }
+
+    /// The record standing for `HashSet<T>`: the same shape as a list, with
+    /// `Add` checking for the element first.
+    fn set_record(&mut self, elem: TyId) -> RecordId {
+        if let Some(r) = self.sets.get(&elem) {
+            return *r;
+        }
+        let data_ty = self.b.m.types.intern(TyKind::Array(elem));
+        let n = self.b.m.records.len();
+        let rid = self.b.c_record(
+            &format!("$Set{n}"),
+            vec![
+                ("len", TyTable::I32),
+                ("cap", TyTable::I32),
+                ("data", data_ty),
+            ],
+            Equality::ByRef,
+        );
+        self.sets.insert(elem, rid);
+        rid
+    }
+
+    /// If `ty` is a synthesised `HashSet`, its record and element type.
+    fn as_set(&self, ty: TyId) -> Option<(RecordId, TyId)> {
+        if let TyKind::Record(rid) = *self.b.m.types.kind(ty) {
+            if self.b.m.record(rid).name.starts_with("$Set") {
+                let data = self.b.m.record(rid).fields[LIST_DATA].ty;
+                if let TyKind::Array(e) = *self.b.m.types.kind(data) {
+                    return Some((rid, e));
+                }
+            }
         }
         None
     }
@@ -1701,7 +1743,7 @@ impl<'a> FnLower<'a> {
         // `foreach (x in list)` walks positions 1..Count.
         if !matches!(coll.kind, ast::ExprKind::Range(..)) {
             let (lv, lty) = self.expr(coll, None)?;
-            if let Some((_, elem)) = self.cx.as_list(lty) {
+            if let Some((_, elem)) = self.cx.as_list(lty).or_else(|| self.cx.as_set(lty)) {
                 let holder = self.new_local("$each", lty);
                 self.push(Stmt::Let {
                     local: holder,
@@ -2393,6 +2435,15 @@ impl<'a> FnLower<'a> {
         }
         // Field access on a record value, or `.Length` etc. (later).
         let (base, bty) = self.expr(recv, None)?;
+        // A set exposes its size.
+        if self.cx.as_set(bty).is_some() {
+            return match member {
+                "Count" => Ok((Expr::Field(Box::new(base), LIST_LEN), TyTable::I32)),
+                other => Err(format!(
+                    "no member `{other}` on a HashSet — use .Add(x) or .Contains(x)"
+                )),
+            };
+        }
         // A dictionary exposes its size.
         if self.cx.as_dict(bty).is_some() {
             return match member {
@@ -2467,6 +2518,48 @@ impl<'a> FnLower<'a> {
                         })),
                         ret,
                     ));
+                }
+            }
+        }
+        // `set.Add(x)` / `set.Contains(x)` — a set is a list that refuses
+        // duplicates, so Add looks before it appends.
+        if let ast::ExprKind::Member(recv, name) = &callee.kind {
+            if name == "Add" || name == "Contains" {
+                let (sv, sty) = self.expr_raw(recv, None)?;
+                if let Some((_, elem)) = self.cx.as_set(sty) {
+                    if args.len() != 1 {
+                        return Err(format!("HashSet.{name} takes one argument"));
+                    }
+                    let holder = self.new_local("$set", sty);
+                    self.push(Stmt::Let {
+                        local: holder,
+                        value: sv,
+                    });
+                    let (v, _) = self.expr(&args[0], Some(elem))?;
+                    let vh = self.new_local("$item", elem);
+                    self.push(Stmt::Let {
+                        local: vh,
+                        value: v,
+                    });
+                    let found = self.set_find(holder, vh, elem)?;
+                    let present = Expr::Bin(
+                        BinOp::Ge,
+                        Box::new(Expr::Local(found)),
+                        Box::new(Expr::Int(0, TyTable::I32)),
+                        TyTable::I32,
+                    );
+                    if name == "Contains" {
+                        return Ok((present, TyTable::BOOL));
+                    }
+                    self.blocks.push(Vec::new());
+                    self.list_add(holder, sty, Expr::Local(vh));
+                    let append = self.blocks.pop().unwrap();
+                    self.push(Stmt::If {
+                        cond: present,
+                        then: vec![],
+                        els: append,
+                    });
+                    return Ok((Expr::Int(0, TyTable::VOID), TyTable::VOID));
                 }
             }
         }
@@ -2797,7 +2890,11 @@ impl<'a> FnLower<'a> {
     /// Append to a list held in `holder`: grow the buffer when it is full, then
     /// store and bump the length.
     fn list_add(&mut self, holder: LocalId, lty: TyId, val: Expr) {
-        let (lrid, elem) = self.cx.as_list(lty).expect("a list");
+        let (lrid, elem) = self
+            .cx
+            .as_list(lty)
+            .or_else(|| self.cx.as_set(lty))
+            .expect("a list or set");
         let l = || Expr::Local(holder);
         let len = || Expr::Field(Box::new(l()), LIST_LEN);
         let cap = || Expr::Field(Box::new(l()), LIST_CAP);
@@ -3099,6 +3196,59 @@ impl<'a> FnLower<'a> {
         } else {
             Expr::Bin(BinOp::Eq, Box::new(a), Box::new(b), kty)
         }
+    }
+
+    /// Scan a set for the value held in `$item`, yielding its index or -1.
+    fn set_find(&mut self, holder: LocalId, vh: LocalId, elem: TyId) -> Result<LocalId, String> {
+        let found = self.new_local("$sfound", TyTable::I32);
+        self.push(Stmt::Let {
+            local: found,
+            value: Expr::Int(-1, TyTable::I32),
+        });
+        let i = self.new_local("$si", TyTable::I32);
+        self.push(Stmt::Let {
+            local: i,
+            value: Expr::Int(0, TyTable::I32),
+        });
+        let cur = Expr::Index(
+            Box::new(Expr::Field(Box::new(Expr::Local(holder)), LIST_DATA)),
+            Box::new(Expr::Local(i)),
+        );
+        let eq = self.key_equal(cur, Expr::Local(vh), elem);
+        let body = vec![
+            Stmt::If {
+                cond: Expr::Not(Box::new(Expr::Bin(
+                    BinOp::Lt,
+                    Box::new(Expr::Local(i)),
+                    Box::new(Expr::Field(Box::new(Expr::Local(holder)), LIST_LEN)),
+                    TyTable::I32,
+                ))),
+                then: vec![Stmt::Break],
+                els: vec![],
+            },
+            Stmt::If {
+                cond: eq,
+                then: vec![
+                    Stmt::Assign {
+                        place: Place::Local(found),
+                        value: Expr::Local(i),
+                    },
+                    Stmt::Break,
+                ],
+                els: vec![],
+            },
+            Stmt::Assign {
+                place: Place::Local(i),
+                value: Expr::Bin(
+                    BinOp::Add,
+                    Box::new(Expr::Local(i)),
+                    Box::new(Expr::Int(1, TyTable::I32)),
+                    TyTable::I32,
+                ),
+            },
+        ];
+        self.push(Stmt::Loop { body });
+        Ok(found)
     }
 
     /// Scan a dictionary for `key`, yielding a local holding its index or -1.
@@ -3750,6 +3900,21 @@ impl<'a> FnLower<'a> {
         inits: &[(String, ast::Expr)],
     ) -> Result<(Expr, TyId), String> {
         let ty = self.cx.resolve(t)?;
+        // `new HashSet<T>()` starts empty; it grows like a list.
+        if let Some((srid, _)) = self.cx.as_set(ty) {
+            let data_ty = self.cx.b.m.record(srid).fields[LIST_DATA].ty;
+            return Ok((
+                Expr::MakeRecord(
+                    srid,
+                    vec![
+                        Expr::Int(0, TyTable::I32),
+                        Expr::Int(0, TyTable::I32),
+                        Expr::Null(data_ty),
+                    ],
+                ),
+                ty,
+            ));
+        }
         // `new Dictionary<K,V>()` starts empty; buffers grow on first set.
         if let Some((drid, _, _)) = self.cx.as_dict(ty) {
             let keys_ty = self.cx.b.m.record(drid).fields[DICT_KEYS].ty;

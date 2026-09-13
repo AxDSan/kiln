@@ -1401,3 +1401,31 @@ public partial form MainWindow
     let s = kiln_k2::edit(&s, &kiln_k2::Edit::RemoveComponent { id: "add".into() }).unwrap();
     assert!(!s.contains("Button add"), "{s}");
 }
+
+#[test]
+fn hashsets_refuse_duplicates() {
+    let src = r#"
+namespace HS;
+public static class P
+{
+    public static void Main()
+    {
+        var seen = new HashSet<int>();
+        foreach (var i in 1..10)
+            seen.Add(i % 4);
+        Console.WriteLine($"{seen.Count}");
+        Console.WriteLine($"{seen.Contains(3)} {seen.Contains(9)}");
+
+        var names = new HashSet<string>();
+        names.Add("ada");
+        names.Add("ada");
+        names.Add("grace");
+        Console.WriteLine($"{names.Count}");
+        foreach (var n in names)
+            Console.WriteLine(n);
+    }
+}
+"#;
+    // i % 4 over 1..10 yields {1,2,3,0} — four distinct values.
+    assert_eq!(run_k2(src), "4\n1 0\n2\nada\ngrace\n");
+}
