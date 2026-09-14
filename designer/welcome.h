@@ -209,7 +209,7 @@ inline std::string splash_markup(const std::string& family, int w, int h,
     // Literal UTF-8, not entities: RmlUi decodes only a small set (lt, gt, amp,
     // quot, nbsp) and prints anything else verbatim, so `&middot;` would show
     // up on screen exactly as written.
-    s += "<div id='tag'>RAD is the identity \u00b7 English-first \u00b7 Cross-platform</div>";
+    s += "<div id='tag'>Draw the form \u00b7 Wire the events \u00b7 Ship one binary</div>";
     s += "<div id='tag'>Loading the component library\u2026</div>";
     s += "</div></div></body></rml>";
     return s;

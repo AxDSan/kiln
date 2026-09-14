@@ -23,7 +23,7 @@
 extern "C" {
 #endif
 
-#define KILN_ABI_VERSION 4
+#define KILN_ABI_VERSION 5
 
 /* --- Data-type tags (SDT_*) — the ABI type system. ---------
  * Numeric values are frozen.  Phase 2 uses INT/INT64/DOUBLE/TEXT; the rest are
@@ -358,6 +358,24 @@ enum {
  * takes.  A component with no parameterised event never casts and nothing about
  * it changes. */
 typedef void (*Kiln_HandlerFn)(void);
+
+/* A handler that closes over something (ABI v5).
+ *
+ * The void-signature handler above reaches a form's own state because that
+ * state is a module global. A handler built at run time — one per row of a
+ * grid, say — has to know WHICH row, and that cannot be a global. So it is
+ * bound as a pair: the function, and the environment it closes over.
+ *
+ * The environment is a collector-allocated object held in memory the collector
+ * cannot see, so a library that stores one MUST hold it with
+ * `kn_handler_hold` and let go with `kn_handler_release`. Storing it without
+ * holding it is a use-after-free that appears only under memory pressure, in
+ * the event loop, which is the worst place this codebase has to debug.
+ *
+ * As with `Kiln_HandlerFn`, the declared signature is the binding currency: an
+ * event with parameters is dispatched by casting to a pointer that takes the
+ * environment first and then exactly those parameters. */
+typedef void (*Kiln_HandlerEnvFn)(void *env);
 
 /* Accessibility roles (subset of the AccessKit/platform role vocabulary). */
 enum {

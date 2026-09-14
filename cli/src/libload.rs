@@ -128,7 +128,7 @@ struct LibInfoC {
     components: *const ComponentDescC,
 }
 
-const KILN_ABI_VERSION: i32 = 4;
+const KILN_ABI_VERSION: i32 = 5;
 
 /// The result of resolving a module's libraries.
 pub struct LibPlan {

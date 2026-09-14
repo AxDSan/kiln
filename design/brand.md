@@ -11,9 +11,12 @@ So the words live here, in the tree, next to the thing they describe.
 
 ## What Kiln is
 
-Kiln is an open implementation of **Easy Programming Language** (易语言, EPL):
-a RAD environment where you draw a form, wire its events, and compile to a
-native binary. English-first, cross-platform, open source.
+Kiln is a **RAD environment that compiles to native code**: you draw a form,
+wire its events, and get one binary you can send to someone. English-first,
+cross-platform, open source.
+
+Kiln 2's language is C#-shaped — and compiles to a native binary with no .NET,
+no interpreter and no runtime to install.
 
 The lineage is Visual Basic 6 and Delphi — the tradition where the designer and
 the source are the same artifact, where a double-click writes the handler, and
@@ -21,13 +24,37 @@ where "build" produces one file you can send to someone. The compiler is real
 (LLVM, native code, no interpreter and no runtime to install), but the compiler
 is not the pitch. **The pitch is that building a desktop app is quick again.**
 
-## Where this is going: Kiln 2
+## What the product says about itself
 
-Kiln 2 ([`design/k2/`](k2/spec.md)) repositions the product. It stops being
-an implementation of EPL: the language becomes C#-shaped, and the audience
-becomes people who think in C# and want a native binary without .NET. What
-survives is the part above that was never about EPL — the form you draw is
-the source, and build produces one file you can send.
+These are the words, and they are short because a slogan that needs a
+paragraph is not one. Everything user-facing uses them:
+
+| Where | Words |
+|---|---|
+| Splash | Draw the form · Wire the events · Ship one binary |
+| Studio's status bar | Draw the form, wire the events, ship one binary |
+| About | Draw a window, wire a handler, press Run. What comes out is one native binary with nothing to install beside it. |
+| About, second line | An open, cross-platform heir to the VB6 and Delphi tradition: the form you draw is the source, and the compiler is real. |
+
+**Do not ship a positioning note as a slogan.** "RAD is the identity ·
+English-first · Cross-platform" was on the splash screen for a while. It is
+three true things about the product and none of them is a sentence anyone
+outside this repository would want to read; it describes the decision rather
+than the thing decided. The rule: a user-facing line says what the product
+*does for the reader*, in words they would use.
+
+The same goes for lineage. "Built from EPL and BlackMoon concepts" was in the
+About box: true, and meaningless to the person reading it. The VB6 and Delphi
+comparison stays because people know what those were.
+
+## Where this came from
+
+Kiln began as an open implementation of Easy Programming Language (易语言,
+EPL), and 1.x still is one — it is on the `1.x` branch and its documentation
+still says so. Kiln 2 stops being that: the language is C#-shaped, and the
+audience is people who think in C# and want a native binary without .NET.
+What survives is the part that was never about EPL — the form you draw is the
+source, and build produces one file you can send.
 
 Until Kiln 2 becomes the default (plan Phase 10), public copy keeps
 describing 1.x as shipped. At the flip, these replace the EPL lines:

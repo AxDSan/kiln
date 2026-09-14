@@ -125,6 +125,14 @@ KN_CMD(kn_quit);
 /* Aggregate access, NOT commands: indexing is syntax, so the backend calls
  * these directly rather than marshaling an argv array to read one element.
  * They move raw 64-bit values — what a slot's value field already holds. */
+/* Handler environments (ABI v5). A library that stores a handler's
+ * environment holds it here, so the collector keeps it alive while the
+ * handler can still fire. See runtime/kn_handlers.c. */
+int32_t kn_handler_hold(void *env);
+void    kn_handler_release(int32_t token);
+void   *kn_handler_env(int32_t token);
+int32_t kn_handler_count(void);
+
 void   *kn_ary_new(int32_t tag, int32_t len);
 int64_t kn_ary_get(void *a, int32_t i);
 void    kn_ary_set(void *a, int32_t i, int64_t v);

@@ -539,3 +539,71 @@ fn every_call_carries_a_location_so_debug_info_survives() {
         "clang discarded the debug info:\n{err}"
     );
 }
+
+#[test]
+fn a_held_handler_environment_survives_a_collection() {
+    // The whole reason `kn_handler_hold` exists. A handler's environment is
+    // allocated by the collector and then stored in a UI library's own tables,
+    // which are C++ memory the collector does not scan — so nothing on the
+    // Kiln side refers to it and the next collection frees it. The next click
+    // then calls a function whose captured variables are gone.
+    //
+    // Held, it survives: the table is collector-allocated and rooted, and the
+    // collector traces a marked block's contents. Proved by reading the
+    // environment's own bytes back afterwards, not merely by finding a
+    // non-null pointer where one was left.
+    let src = "\
+namespace HoldGc;
+
+[Packed]
+public record Captured(int Row, int Flags);
+
+public static class P
+{
+    [Dll(\"runtime\", Entry = \"kn_handler_hold\")]
+    public static extern int Hold(Bytes env);
+
+    [Dll(\"runtime\", Entry = \"kn_handler_release\")]
+    public static extern void Release(int token);
+
+    [Dll(\"runtime\", Entry = \"kn_handler_count\")]
+    public static extern int Held();
+
+    [Dll(\"runtime\", Entry = \"kn_gc_collect\")]
+    public static extern long Collect();
+
+    public static void Main()
+    {
+        // An environment the collector owns, holding real values, reachable
+        // from nowhere on the Kiln side once this method stops naming it.
+        var env = Bytes.Alloc(64);
+        var c = new Captured(7, 42);
+        c.Write(env, 0);
+        var token = Hold(env);
+        Console.WriteLine($\"held {Held()}\");
+
+        // Enough allocation to force real collections.
+        foreach (var i in 1..200)
+        {
+            var junk = new List<int>();
+            foreach (var j in 1..200)
+                junk.Add(j);
+        }
+        Collect();
+        Collect();
+
+        // The bytes are still what was written into them.
+        var back = Captured.Read(env, 0);
+        Console.WriteLine($\"{back.Row} {back.Flags}\");
+
+        Release(token);
+        Console.WriteLine($\"held {Held()}\");
+    }
+}
+";
+    let out = build_and_run("holdgc", src);
+    assert_eq!(
+        out, "held 1\n7 42\nheld 0\n",
+        "a held environment did not survive collection:\n{out}"
+    );
+}

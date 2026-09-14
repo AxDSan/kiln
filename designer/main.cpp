@@ -1538,7 +1538,7 @@ std::string build_chrome(const std::string& family, const std::string& mono,
          "<div id='splitbottom' class='split h'/>"
          "<div id='splitmid' class='split v'/>";
 
-    s << "<div id='status'>Design it, wire it, run it  |  Native binaries, nothing to unpack"
+    s << "<div id='status'>Draw the form, wire the events, ship one binary"
          "<span class='right'><span id='statustext'>Ready</span>   "
          "<span class='dot'>●</span></span></div>";
 
@@ -3901,16 +3901,17 @@ std::string about_markup() {
     s << "<div id='hero'>" << (icon.empty() ? "" : "<img class='big' src='" + icon + "'/>")
       << (mark.empty() ? "" : "<img class='mark' src='" + mark + "'/>") << "</div>";
     s << "<div id='ver'>" << esc(version) << "</div>";
-    s << "<div id='tag'>Visual builder for real desktop apps. Draw a window, wire a handler, "
-         "hit Run to a small native binary.</div>";
-    s << "<div id='her'>Open, cross-platform heir to the VB6 / Delphi RAD tradition. "
-         "Built from EPL and BlackMoon concepts.</div>";
+    s << "<div id='tag'>Draw a window, wire a handler, press Run. What comes out is "
+         "one native binary with nothing to install beside it.</div>";
+    s << "<div id='her'>An open, cross-platform heir to the VB6 and Delphi tradition: "
+         "the form you draw is the source, and the compiler is real.</div>";
     s << "<div id='pills'>";
-    for (const char* t : {"Clean native binary", "IR to LLVM to linker", "IR never ships",
-                          "Radical ease"}) {
+    for (const char* t : {"One native binary", "Compiled through LLVM", "No runtime to install"}) {
         s << "<div class='pill'>" << t << "</div>";
     }
-    s << "<div class='pill accent'>RAD is the identity</div></div>";
+    // The accent pill is the one thing to take away, so it says what Kiln does
+    // rather than what a planning note called it.
+    s << "<div class='pill accent'>The form is the source</div></div>";
     // Literal UTF-8: RmlUi prints an entity it does not know verbatim.
     // The holder and both licence arms, exactly as LICENSE states them. This
     // is the one place a user reads the licence rather than the repository, so
