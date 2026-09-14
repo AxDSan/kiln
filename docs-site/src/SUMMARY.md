@@ -22,6 +22,7 @@
 - [Interop](./interop.md)
 - [The `win` kit](./win-kit.md)
 - [Kiln 2](./kiln-2.md)
+- [Forms in Kiln 2](./kiln-2-forms.md)
 - [Moving to Kiln 2](./moving-to-kiln-2.md)
 
 # Studio
