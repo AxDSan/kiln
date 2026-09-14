@@ -2367,21 +2367,60 @@ impl<'a> FnLower<'a> {
             // `[a, b, c]` — an array, which is the shape a command taking a
             // list of values expects. The element type comes from the hint, or
             // from the first element when there is none.
+            // `[a, b, c]` — target-typed, as the spec says. Where a command
+            // wants an array it is one; everywhere else it is a `List<T>`,
+            // which is the only list a program sees.
             ast::ExprKind::Collection(items) => {
-                let elem = match hint.map(|h| self.tt().kind(h).clone()) {
-                    Some(TyKind::Array(e)) => e,
-                    _ => match items.first() {
-                        Some(first) => self.expr(first, None)?.1,
-                        None => TyTable::STR,
+                if let Some(TyKind::Array(elem)) = hint.map(|h| self.tt().kind(h).clone()) {
+                    let mut vals = Vec::new();
+                    for it in items {
+                        let (v, _) = self.expr(it, Some(elem))?;
+                        vals.push(v);
+                    }
+                    let ty = self.cx.b.m.types.intern(TyKind::Array(elem));
+                    return Ok((Expr::MakeArray(elem, vals), ty));
+                }
+                let elem = match hint.and_then(|h| self.cx.as_list(h)) {
+                    Some((_, e)) => e,
+                    None => match items.first() {
+                        Some(first) => {
+                            // Lowered only for its type; the value is lowered
+                            // again below, against that type.
+                            let probe = first.clone();
+                            self.blocks.push(Vec::new());
+                            let t = self.expr(&probe, None).map(|(_, t)| t);
+                            self.blocks.pop();
+                            t?
+                        }
+                        None => {
+                            return Err(
+                                "an empty `[]` needs a type to be — write `new List<T>()`, \
+                                 or give the variable one"
+                                    .into(),
+                            )
+                        }
                     },
                 };
-                let mut vals = Vec::new();
+                let rid = self.cx.list_record(elem);
+                let lty = self.cx.b.m.types.intern(TyKind::Record(rid));
+                let data_ty = self.cx.b.m.record(rid).fields[LIST_DATA].ty;
+                let holder = self.new_local("$lit", lty);
+                self.push(Stmt::Let {
+                    local: holder,
+                    value: Expr::MakeRecord(
+                        rid,
+                        vec![
+                            Expr::Int(0, TyTable::I32),
+                            Expr::Int(0, TyTable::I32),
+                            Expr::Null(data_ty),
+                        ],
+                    ),
+                });
                 for it in items {
                     let (v, _) = self.expr(it, Some(elem))?;
-                    vals.push(v);
+                    self.list_add(holder, lty, v);
                 }
-                let ty = self.cx.b.m.types.intern(TyKind::Array(elem));
-                Ok((Expr::MakeArray(elem, vals), ty))
+                Ok((Expr::Local(holder), lty))
             }
             ast::ExprKind::Int(v) => {
                 let ty = hint
@@ -3068,6 +3107,62 @@ impl<'a> FnLower<'a> {
                 }
             }
             // `dict.ContainsKey(k)` / `dict.Get(k)`
+            // `d.Remove(k)` — true if the key was there. In place: the dictionary
+            // is shared by reference, so everyone holding it sees it go.
+            if name == "Remove" {
+                let (dv, dty) = self.expr_raw(recv, None)?;
+                if let Some((_, kty, _)) = self.cx.as_dict(dty) {
+                    if args.len() != 1 {
+                        return Err("Dictionary.Remove takes a key".into());
+                    }
+                    let holder = self.new_local("$dict", dty);
+                    self.push(Stmt::Let {
+                        local: holder,
+                        value: dv,
+                    });
+                    let (k, _) = self.expr(&args[0], Some(kty))?;
+                    let removed = self.dict_remove(holder, dty, k)?;
+                    return Ok((Expr::Local(removed), TyTable::BOOL));
+                }
+                if let Some((_, elem)) = self.cx.as_list(dty) {
+                    if args.len() != 1 {
+                        return Err("List.Remove takes the item to remove".into());
+                    }
+                    let holder = self.new_local("$list", dty);
+                    self.push(Stmt::Let {
+                        local: holder,
+                        value: dv,
+                    });
+                    let (x, _) = self.expr(&args[0], Some(elem))?;
+                    let removed = self.list_remove(holder, dty, x)?;
+                    return Ok((Expr::Local(removed), TyTable::BOOL));
+                }
+            }
+            // `xs.Contains(x)` on a list: a scan, since a list has no index.
+            if name == "Contains" {
+                let (lv, lty) = self.expr_raw(recv, None)?;
+                if let Some((_, elem)) = self.cx.as_list(lty) {
+                    if args.len() != 1 {
+                        return Err("List.Contains takes the item to look for".into());
+                    }
+                    let holder = self.new_local("$list", lty);
+                    self.push(Stmt::Let {
+                        local: holder,
+                        value: lv,
+                    });
+                    let (x, _) = self.expr(&args[0], Some(elem))?;
+                    let at = self.list_find(holder, elem, x)?;
+                    return Ok((
+                        Expr::Bin(
+                            BinOp::Ge,
+                            Box::new(Expr::Local(at)),
+                            Box::new(Expr::Int(0, TyTable::I32)),
+                            TyTable::I32,
+                        ),
+                        TyTable::BOOL,
+                    ));
+                }
+            }
             if name == "ContainsKey" || name == "Get" {
                 let (dv, dty) = self.expr_raw(recv, None)?;
                 if let Some((_, kty, vty)) = self.cx.as_dict(dty) {
@@ -4359,6 +4454,239 @@ impl<'a> FnLower<'a> {
                 TyTable::I32,
             ),
         });
+    }
+
+    /// The 0-based position of `x` in a list, or -1.
+    fn list_find(&mut self, holder: LocalId, elem: TyId, x: Expr) -> Result<LocalId, String> {
+        let xh = self.new_local("$want", elem);
+        self.push(Stmt::Let { local: xh, value: x });
+        let at = self.new_local("$at", TyTable::I32);
+        self.push(Stmt::Let {
+            local: at,
+            value: Expr::Int(-1, TyTable::I32),
+        });
+        let i = self.new_local("$scan", TyTable::I32);
+        self.push(Stmt::Let {
+            local: i,
+            value: Expr::Int(0, TyTable::I32),
+        });
+        let len = Expr::Field(Box::new(Expr::Local(holder)), LIST_LEN);
+        let item = Expr::Index(
+            Box::new(Expr::Field(Box::new(Expr::Local(holder)), LIST_DATA)),
+            Box::new(Expr::Local(i)),
+        );
+        let same = self.key_equal(item, Expr::Local(xh), elem);
+        let body = vec![
+            Stmt::If {
+                cond: Expr::Not(Box::new(Expr::Bin(
+                    BinOp::Lt,
+                    Box::new(Expr::Local(i)),
+                    Box::new(len),
+                    TyTable::I32,
+                ))),
+                then: vec![Stmt::Break],
+                els: vec![],
+            },
+            Stmt::If {
+                cond: same,
+                then: vec![
+                    Stmt::Assign {
+                        place: Place::Local(at),
+                        value: Expr::Local(i),
+                    },
+                    Stmt::Break,
+                ],
+                els: vec![],
+            },
+            Stmt::Assign {
+                place: Place::Local(i),
+                value: Expr::Bin(
+                    BinOp::Add,
+                    Box::new(Expr::Local(i)),
+                    Box::new(Expr::Int(1, TyTable::I32)),
+                    TyTable::I32,
+                ),
+            },
+        ];
+        self.push(Stmt::Loop { body });
+        Ok(at)
+    }
+
+    /// Remove the first `x` from a list, keeping the order of the rest.
+    fn list_remove(&mut self, holder: LocalId, lty: TyId, x: Expr) -> Result<LocalId, String> {
+        let (_, elem) = self.cx.as_list(lty).expect("a list");
+        let at = self.list_find(holder, elem, x)?;
+        let removed = self.new_local("$removed", TyTable::BOOL);
+        let present = Expr::Bin(
+            BinOp::Ge,
+            Box::new(Expr::Local(at)),
+            Box::new(Expr::Int(0, TyTable::I32)),
+            TyTable::I32,
+        );
+        self.push(Stmt::Let {
+            local: removed,
+            value: present.clone(),
+        });
+        let data = || Expr::Field(Box::new(Expr::Local(holder)), LIST_DATA);
+        let len = || Expr::Field(Box::new(Expr::Local(holder)), LIST_LEN);
+        let plus1 = |e: Expr| {
+            Expr::Bin(
+                BinOp::Add,
+                Box::new(e),
+                Box::new(Expr::Int(1, TyTable::I32)),
+                TyTable::I32,
+            )
+        };
+        // Shift everything after it down by one.
+        let shift = vec![
+            Stmt::If {
+                cond: Expr::Not(Box::new(Expr::Bin(
+                    BinOp::Lt,
+                    Box::new(plus1(Expr::Local(at))),
+                    Box::new(len()),
+                    TyTable::I32,
+                ))),
+                then: vec![Stmt::Break],
+                els: vec![],
+            },
+            Stmt::Assign {
+                place: Place::Index(Box::new(data()), Box::new(Expr::Local(at))),
+                value: Expr::Index(Box::new(data()), Box::new(plus1(Expr::Local(at)))),
+            },
+            Stmt::Assign {
+                place: Place::Local(at),
+                value: plus1(Expr::Local(at)),
+            },
+        ];
+        self.push(Stmt::If {
+            cond: present,
+            then: vec![
+                Stmt::Loop { body: shift },
+                Stmt::Assign {
+                    place: Place::Field(Box::new(Expr::Local(holder)), LIST_LEN),
+                    value: Expr::Bin(
+                        BinOp::Sub,
+                        Box::new(len()),
+                        Box::new(Expr::Int(1, TyTable::I32)),
+                        TyTable::I32,
+                    ),
+                },
+            ],
+            els: vec![],
+        });
+        Ok(removed)
+    }
+
+    /// Remove `key` from a dictionary in place.
+    ///
+    /// The last entry moves into the removed one's place, and the index is
+    /// rebuilt from the entries that are left. Rebuilding rather than leaving a
+    /// tombstone keeps the rule `dict_find` relies on: nothing in the index was
+    /// ever removed, so a probe may stop at the first empty slot.
+    fn dict_remove(&mut self, holder: LocalId, dty: TyId, key: Expr) -> Result<LocalId, String> {
+        let (_, kty, _) = self.cx.as_dict(dty).expect("a dictionary");
+        let found = self.dict_find(holder, dty, key)?;
+        let removed = self.new_local("$removed", TyTable::BOOL);
+        let present = Expr::Bin(
+            BinOp::Ge,
+            Box::new(Expr::Local(found)),
+            Box::new(Expr::Int(0, TyTable::I32)),
+            TyTable::I32,
+        );
+        self.push(Stmt::Let {
+            local: removed,
+            value: present.clone(),
+        });
+        let d = || Expr::Local(holder);
+        let field = |f: usize| Expr::Field(Box::new(Expr::Local(holder)), f);
+        let one = |e: Expr, op: BinOp| {
+            Expr::Bin(op, Box::new(e), Box::new(Expr::Int(1, TyTable::I32)), TyTable::I32)
+        };
+        let _ = d;
+
+        let mut then = Vec::new();
+        let last = self.new_local("$last", TyTable::I32);
+        then.push(Stmt::Assign {
+            place: Place::Local(last),
+            value: one(field(DICT_LEN), BinOp::Sub),
+        });
+        for f in [DICT_KEYS, DICT_VALUES] {
+            then.push(Stmt::Assign {
+                place: Place::Index(Box::new(field(f)), Box::new(Expr::Local(found))),
+                value: Expr::Index(Box::new(field(f)), Box::new(Expr::Local(last))),
+            });
+        }
+        then.push(Stmt::Assign {
+            place: Place::Field(Box::new(Expr::Local(holder)), DICT_LEN),
+            value: Expr::Local(last),
+        });
+        // Clear the index…
+        let z = self.new_local("$z", TyTable::I32);
+        then.push(Stmt::Assign {
+            place: Place::Local(z),
+            value: Expr::Int(0, TyTable::I32),
+        });
+        then.push(Stmt::Loop {
+            body: vec![
+                Stmt::If {
+                    cond: Expr::Not(Box::new(Expr::Bin(
+                        BinOp::Lt,
+                        Box::new(Expr::Local(z)),
+                        Box::new(field(DICT_CAP)),
+                        TyTable::I32,
+                    ))),
+                    then: vec![Stmt::Break],
+                    els: vec![],
+                },
+                Stmt::Assign {
+                    place: Place::Index(Box::new(field(DICT_INDEX)), Box::new(Expr::Local(z))),
+                    value: Expr::Int(0, TyTable::I32),
+                },
+                Stmt::Assign {
+                    place: Place::Local(z),
+                    value: one(Expr::Local(z), BinOp::Add),
+                },
+            ],
+        });
+        // …and put every remaining entry back into it.
+        let e = self.new_local("$e", TyTable::I32);
+        let kh = self.new_local("$rekey", kty);
+        then.push(Stmt::Assign {
+            place: Place::Local(e),
+            value: Expr::Int(0, TyTable::I32),
+        });
+        self.blocks.push(Vec::new());
+        self.index_insert_at(holder, kh, kty, Expr::Local(e), DICT_CAP, DICT_INDEX);
+        let insert = self.blocks.pop().unwrap();
+        let mut body = vec![
+            Stmt::If {
+                cond: Expr::Not(Box::new(Expr::Bin(
+                    BinOp::Lt,
+                    Box::new(Expr::Local(e)),
+                    Box::new(field(DICT_LEN)),
+                    TyTable::I32,
+                ))),
+                then: vec![Stmt::Break],
+                els: vec![],
+            },
+            Stmt::Assign {
+                place: Place::Local(kh),
+                value: Expr::Index(Box::new(field(DICT_KEYS)), Box::new(Expr::Local(e))),
+            },
+        ];
+        body.extend(insert);
+        body.push(Stmt::Assign {
+            place: Place::Local(e),
+            value: one(Expr::Local(e), BinOp::Add),
+        });
+        then.push(Stmt::Loop { body });
+
+        self.push(Stmt::If {
+            cond: present,
+            then,
+            els: vec![],
+        });
+        Ok(removed)
     }
 
     /// Find `key` in a dictionary, yielding a local holding its entry number

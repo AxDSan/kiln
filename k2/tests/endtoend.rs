@@ -1876,3 +1876,66 @@ Console.WriteLine("never");
         String::from_utf8_lossy(&r.stderr)
     );
 }
+
+#[test]
+fn a_dictionary_stays_correct_through_removal_and_growth() {
+    // Removal moves the last entry into the gap and rebuilds the index, so
+    // the index never holds a tombstone and a probe may still stop at the
+    // first empty slot. This checks that promise against a model: remove every
+    // third key while the table keeps growing, then look every key up.
+    let src = r#"
+namespace DictRemove;
+public static class P
+{
+    public static void Main()
+    {
+        var d = new Dictionary<int, int>();
+        foreach (var i in 1..3000)
+        {
+            d[i] = i * 10;
+            if (i % 3 == 0)
+                d.Remove(i - 1);
+        }
+        var wrong = 0;
+        var present = 0;
+        foreach (var i in 1..3000)
+        {
+            var should = (i + 1) % 3 != 0 || i == 3000;
+            if (d.ContainsKey(i) != should)
+                wrong = wrong + 1;
+            if (d.ContainsKey(i))
+            {
+                present = present + 1;
+                if ((d.Get(i) ?? -1) != i * 10)
+                    wrong = wrong + 1;
+            }
+        }
+        Console.WriteLine($"{d.Count} {present} wrong {wrong}");
+        Console.WriteLine($"{d.Remove(1)} {d.Remove(1)} {d.ContainsKey(1)}");
+
+        var s = new Dictionary<string, string>();
+        s["ada"] = "x";
+        s["grace"] = "y";
+        s["linus"] = "z";
+        s.Remove("grace");
+        Console.WriteLine($"{s.Count} {s.ContainsKey("ada")} {s.ContainsKey("grace")} {s.Get("linus") ?? "?"}");
+    }
+}
+"#;
+    // Keys 2, 5, 8, … (every i ≡ 2 mod 3 below 3000) are removed: 1000 of them.
+    assert_eq!(run_k2(src), "2000 2000 wrong 0\n1 0 0\n2 1 0 z\n");
+}
+
+#[test]
+fn a_list_finds_and_removes_by_value() {
+    let src = r#"
+namespace ListRemove;
+var xs = [5, 7, 9, 7];
+Console.WriteLine($"{xs.Contains(7)} {xs.Contains(8)}");
+Console.WriteLine($"{xs.Remove(7)} {xs.Count} {xs[1]} {xs[2]} {xs[3]}");
+Console.WriteLine($"{xs.Remove(42)} {xs.Count}");
+var names = ["ada", "grace"];
+Console.WriteLine($"{names.Contains("grace")} {names.Remove("ada")} {names[1]}");
+"#;
+    assert_eq!(run_k2(src), "1 0\n1 3 5 9 7\n0 3\n1 1 grace\n");
+}

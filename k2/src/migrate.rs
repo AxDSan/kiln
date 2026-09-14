@@ -490,10 +490,27 @@ fn stmt(s: &ir::Stmt) -> Stmt {
             mutable: *mutable,
             value: expr(value),
         }),
-        S::Assign { name, value } => mk(StmtKind::Assign {
-            target: ident(&camel(name)),
+        // `xs = append(xs, v)` grows the list in 1.x by building a new one; in
+        // Kiln 2 the list grows itself.
+        S::Assign { name, value } => match value {
+            ir::Expr::Call { cmd, args } if cmd == "append" && args.len() == 2
+                && matches!(&args[0], ir::Expr::Var(v) if v == name) =>
+            {
+                mk(StmtKind::Expr(e(ExprKind::Call(
+                    Box::new(e(ExprKind::Member(Box::new(ident(&camel(name))), "Add".into()))),
+                    vec![expr(&args[1])],
+                ))))
+            }
+            _ => mk(StmtKind::Assign {
+                target: ident(&camel(name)),
+                op: AssignOp::Eq,
+                value: expr(value),
+            }),
+        },
+        S::Call { cmd, args } if cmd == "dict_set" && args.len() == 3 => mk(StmtKind::Assign {
+            target: e(ExprKind::Index(Box::new(expr(&args[0])), Box::new(expr(&args[1])))),
             op: AssignOp::Eq,
-            value: expr(value),
+            value: expr(&args[2]),
         }),
         S::Call { cmd, args } => mk(StmtKind::Expr(call(cmd, args))),
         S::Return { value } => mk(StmtKind::Return(value.as_ref().map(expr))),
@@ -627,6 +644,24 @@ fn call(cmd: &str, args: &[ir::Expr]) -> Expr {
         }
         return e(ExprKind::Interp(segs));
     }
+    // 1.x's collections are reached through commands; Kiln 2's are values
+    // with members. `dict_get(d, k)` is `d.Get(k)`, `count(xs)` is `xs.Count`.
+    let member = |recv: &ir::Expr, name: &str, rest: &[ir::Expr]| {
+        e(ExprKind::Call(
+            Box::new(e(ExprKind::Member(Box::new(expr(recv)), name.into()))),
+            rest.iter().map(expr).collect(),
+        ))
+    };
+    match (cmd, args) {
+        ("count" | "dict_count", [xs]) => {
+            return e(ExprKind::Member(Box::new(expr(xs)), "Count".into()));
+        }
+        ("dict_get", [d, k]) => return member(d, "Get", std::slice::from_ref(k)),
+        ("dict_has", [d, k]) => return member(d, "ContainsKey", std::slice::from_ref(k)),
+        ("dict_remove", [d, k]) => return member(d, "Remove", std::slice::from_ref(k)),
+        ("contains", [xs, x]) => return member(xs, "Contains", std::slice::from_ref(x)),
+        _ => {}
+    }
     let (owner, name) = command(cmd);
     let callee = match owner {
         Some(o) => e(ExprKind::Member(Box::new(ident(o)), name)),
@@ -717,21 +752,8 @@ fn expr(x: &ir::Expr) -> Expr {
             Box::new(ident(&camel(component))),
             pascal(property),
         )),
-        E::ArrayLit(items) => {
-            // `{a, b}` has no literal form yet; build a List and add to it.
-            let mut call_expr = e(ExprKind::New(
-                TypeRef::Generic("List".into(), vec![TypeRef::Named("object".into())]),
-                Vec::new(),
-                Vec::new(),
-            ));
-            for it in items {
-                call_expr = e(ExprKind::Call(
-                    Box::new(e(ExprKind::Member(Box::new(call_expr), "Add".into()))),
-                    vec![expr(it)],
-                ));
-            }
-            call_expr
-        }
+        // `[a, b]` is a list in Kiln 2, typed by where it is used.
+        E::ArrayLit(items) => e(ExprKind::Collection(items.iter().map(expr).collect())),
         E::RecordLit { name, fields } => e(ExprKind::New(
             TypeRef::Named(pascal(name)),
             fields.iter().map(|(_, v)| expr(v)).collect(),
