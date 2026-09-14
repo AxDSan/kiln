@@ -816,6 +816,11 @@ impl Parser {
                 self.toks[self.i].tok = Tok::Gt;
                 Ok(())
             }
+            Tok::UShr => {
+                // `List<List<List<int>>>` — consume one, leave two
+                self.toks[self.i].tok = Tok::Shr;
+                Ok(())
+            }
             Tok::Ge => {
                 self.toks[self.i].tok = Tok::Eq;
                 Ok(())
@@ -1571,6 +1576,7 @@ fn bin_op(t: &Tok) -> Option<(BinOp, u8)> {
         Tok::Ge => (BinOp::Ge, 6),
         Tok::Shl => (BinOp::Shl, 7),
         Tok::Shr => (BinOp::Shr, 7),
+        Tok::UShr => (BinOp::UShr, 7),
         Tok::Plus => (BinOp::Add, 8),
         Tok::Minus => (BinOp::Sub, 8),
         Tok::Star => (BinOp::Mul, 9),

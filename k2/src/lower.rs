@@ -616,6 +616,9 @@ fn register_dll(cx: &mut Cx, owner: &str, m: &ast::Method) -> Result<(), String>
     Ok(())
 }
 
+/// The runtime byte-set's header: `int32 dims; int32 len`.
+const BIN_HEADER: i32 = 8;
+
 /// A slot tag in words, for an error a reader can act on.
 fn describe_slot(tag: i32) -> String {
     const ARRAY: i32 = 0x100;
@@ -2364,6 +2367,27 @@ impl<'a> FnLower<'a> {
     /// The printf/snprintf conversion for a value, with any promotion applied.
     fn fmt_arg(&mut self, v: Expr, ty: TyId) -> (&'static str, Expr, TyId) {
         match self.tt().kind(ty) {
+            // A string that is not there interpolates as nothing, as 1.x's does.
+            // libc prints a null `%s` as "(null)", which is a C implementation
+            // detail leaking into a program's output.
+            TyKind::Str if !matches!(v, Expr::Str(_)) => {
+                let t = self.new_local("$text", TyTable::STR);
+                self.push(Stmt::Let { local: t, value: v });
+                self.push(Stmt::If {
+                    cond: Expr::Bin(
+                        BinOp::Eq,
+                        Box::new(Expr::Local(t)),
+                        Box::new(Expr::Null(TyTable::STR)),
+                        TyTable::STR,
+                    ),
+                    then: vec![Stmt::Assign {
+                        place: Place::Local(t),
+                        value: Expr::Str(String::new()),
+                    }],
+                    els: vec![],
+                });
+                ("%s", Expr::Local(t), TyTable::STR)
+            }
             TyKind::Str => ("%s", v, TyTable::STR),
             TyKind::F32 => (
                 "%g",
@@ -2689,7 +2713,12 @@ impl<'a> FnLower<'a> {
                                 value: Box::new(b),
                                 to: u8arr,
                             }),
-                            Box::new(i),
+                            Box::new(Expr::Bin(
+                                BinOp::Add,
+                                Box::new(i),
+                                Box::new(Expr::Int(BIN_HEADER as i128, TyTable::I32)),
+                                TyTable::I32,
+                            )),
                         ),
                         TyTable::U8,
                     ));
@@ -3270,11 +3299,7 @@ impl<'a> FnLower<'a> {
                         return Err("Bytes.Alloc takes a length".into());
                     }
                     let (n, _) = self.expr(&args[0], Some(TyTable::I32))?;
-                    let size = Expr::Cast {
-                        value: Box::new(n),
-                        to: TyTable::I64,
-                    };
-                    return Ok((self.alloc(size, TyTable::BYTES), TyTable::BYTES));
+                    return Ok((self.bytes_alloc(n), TyTable::BYTES));
                 }
                 if name == "Read" && self.cx.packed.contains(obj) {
                     if args.len() != 2 {
@@ -3611,8 +3636,18 @@ impl<'a> FnLower<'a> {
                 ));
             }
             let mut kargs = Vec::new();
+            let mut arg_tys = Vec::new();
             for (a, pty) in args.iter().zip(d.params.iter()) {
-                kargs.push(self.expr(a, Some(*pty))?.0);
+                let v = self.expr(a, Some(*pty))?.0;
+                // A C function taking a buffer wants the bytes, not the header
+                // in front of them.
+                if *pty == TyTable::BYTES {
+                    kargs.push(self.byte_ptr(v, Expr::Int(0, TyTable::I32)));
+                    arg_tys.push(TyTable::PTR);
+                } else {
+                    kargs.push(v);
+                    arg_tys.push(*pty);
+                }
             }
             return Ok((
                 Expr::Call(Box::new(Call::Dll {
@@ -3620,7 +3655,7 @@ impl<'a> FnLower<'a> {
                     symbol: d.symbol,
                     conv: d.conv,
                     args: kargs,
-                    arg_tys: d.params.clone(),
+                    arg_tys,
                     ret: d.ret,
                     varargs: false,
                 })),
@@ -4357,6 +4392,12 @@ impl<'a> FnLower<'a> {
     }
 
     /// The address of byte `offset` in a buffer (offsets are 0-based).
+    /// The address of byte `offset` (from 0) of a `Bytes`.
+    ///
+    /// A `Bytes` is the runtime's byte-set — `{ int32 dims; int32 len; data }`
+    /// — so the data starts eight bytes in. Treating the pointer as the data,
+    /// as this once did, read a command's bytes from their header and handed a
+    /// command bytes it could not read.
     fn byte_ptr(&self, buf: Expr, offset: Expr) -> Expr {
         let u8arr = self
             .cx
@@ -4370,8 +4411,62 @@ impl<'a> FnLower<'a> {
                 value: Box::new(buf),
                 to: u8arr,
             }),
-            Box::new(offset),
+            Box::new(Expr::Bin(
+                BinOp::Add,
+                Box::new(offset),
+                Box::new(Expr::Int(BIN_HEADER as i128, TyTable::I32)),
+                TyTable::I32,
+            )),
         )
+    }
+
+    /// A new `Bytes` of `n` zeroed bytes, with its header written.
+    fn bytes_alloc(&mut self, n: Expr) -> Expr {
+        let len = self.new_local("$binlen", TyTable::I32);
+        self.push(Stmt::Let { local: len, value: n });
+        let size = Expr::Cast {
+            value: Box::new(Expr::Bin(
+                BinOp::Add,
+                Box::new(Expr::Local(len)),
+                Box::new(Expr::Int(BIN_HEADER as i128, TyTable::I32)),
+                TyTable::I32,
+            )),
+            to: TyTable::I64,
+        };
+        let buf = self.new_local("$bin", TyTable::BYTES);
+        let allocated = self.alloc(size.clone(), TyTable::BYTES);
+        self.push(Stmt::Let { local: buf, value: allocated });
+        let i32arr = self.cx.b.m.types.intern(TyKind::Array(TyTable::I32));
+        let header = || Expr::Cast {
+            value: Box::new(Expr::Local(buf)),
+            to: i32arr,
+        };
+        self.push(Stmt::Assign {
+            place: Place::Index(Box::new(header()), Box::new(Expr::Int(0, TyTable::I32))),
+            value: Expr::Int(1, TyTable::I32),
+        });
+        self.push(Stmt::Assign {
+            place: Place::Index(Box::new(header()), Box::new(Expr::Int(1, TyTable::I32))),
+            value: Expr::Local(len),
+        });
+        let data = self.byte_ptr(Expr::Local(buf), Expr::Int(0, TyTable::I32));
+        self.push(Stmt::Expr(Expr::Call(Box::new(Call::Dll {
+            library: "c".into(),
+            symbol: "memset".into(),
+            conv: CallConv::Cdecl,
+            args: vec![
+                data,
+                Expr::Int(0, TyTable::I32),
+                Expr::Cast {
+                    value: Box::new(Expr::Local(len)),
+                    to: TyTable::I64,
+                },
+            ],
+            arg_tys: vec![TyTable::PTR, TyTable::I32, TyTable::I64],
+            ret: TyTable::PTR,
+            varargs: false,
+        }))));
+        Expr::Local(buf)
     }
 
     /// Are two keys equal? Strings compare by content through libc `strcmp`;
@@ -6681,7 +6776,36 @@ impl<'a> FnLower<'a> {
             return Ok((Expr::Local(t), TyTable::BOOL));
         }
 
+        // `a >>> n` — a logical shift on the operand's own width: reinterpret as
+        // the unsigned twin, shift (which KIR emits as `lshr` for unsigned),
+        // and reinterpret back.
+        if op == ast::BinOp::UShr {
+            let (av, aty) = self.expr(a, hint)?;
+            let (bv, _) = self.expr(b, Some(aty))?;
+            let uns = match self.tt().kind(aty) {
+                TyKind::I8 | TyKind::U8 => TyTable::U8,
+                TyKind::I16 | TyKind::U16 => TyTable::U16,
+                TyKind::I32 | TyKind::U32 => TyTable::U32,
+                TyKind::I64 | TyKind::U64 => TyTable::U64,
+                TyKind::Nint | TyKind::Nuint => TyTable::NUINT,
+                _ => return Err("`>>>` shifts a whole number".into()),
+            };
+            let shifted = Expr::Bin(
+                BinOp::Shr,
+                Box::new(Expr::Cast { value: Box::new(av), to: uns }),
+                Box::new(Expr::Cast { value: Box::new(bv), to: uns }),
+                uns,
+            );
+            return Ok((
+                Expr::Cast {
+                    value: Box::new(shifted),
+                    to: aty,
+                },
+                aty,
+            ));
+        }
         let kop = match op {
+            ast::BinOp::UShr => unreachable!("handled above"),
             ast::BinOp::Add => BinOp::Add,
             ast::BinOp::Sub => BinOp::Sub,
             ast::BinOp::Mul => BinOp::Mul,
@@ -6815,7 +6939,12 @@ impl<'a> FnLower<'a> {
                             value: Box::new(b),
                             to: u8arr,
                         }),
-                        Box::new(i),
+                        Box::new(Expr::Bin(
+                            BinOp::Add,
+                            Box::new(i),
+                            Box::new(Expr::Int(BIN_HEADER as i128, TyTable::I32)),
+                            TyTable::I32,
+                        )),
                     ));
                 }
                 if self.cx.as_dict(bty).is_some() {

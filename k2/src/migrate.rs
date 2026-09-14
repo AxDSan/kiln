@@ -16,8 +16,75 @@ use kiln_ir as ir;
 
 /// Convert 1.x source to K2 source.
 pub fn migrate(src: &str) -> Result<String, String> {
+    migrate_with(src, None)
+}
+
+/// As `migrate`, with the module's libraries loaded, so the types of values
+/// that come from commands are known. That is what tells a byte-set, whose
+/// 1-based 1.x positions become 0-based offsets, from a list, whose do not.
+pub fn migrate_with(src: &str, registry: Option<&ir::Registry>) -> Result<String, String> {
     let m = ir::parse(src).map_err(|e| format!("{}: {}", e.line, e.msg))?;
+    TYPES.with(|t| {
+        let mut t = t.borrow_mut();
+        t.reg = registry.cloned().unwrap_or_else(ir::Registry::core);
+        t.globals = m
+            .items
+            .iter()
+            .filter_map(|it| match it {
+                ir::Item::Var(v) => Some((v.name.clone(), v.ty)),
+                _ => None,
+            })
+            .collect();
+    });
     Ok(print::program(&module(&m)))
+}
+
+/// What the converter knows about types while it walks a subroutine. Held in
+/// a thread-local because the conversion is a set of free functions over the
+/// tree, and threading it through every one of them would be all noise.
+struct Types {
+    reg: ir::Registry,
+    globals: std::collections::HashMap<String, ir::Ty>,
+    vars: std::collections::HashMap<String, ir::Ty>,
+}
+
+thread_local! {
+    static TYPES: std::cell::RefCell<Types> = std::cell::RefCell::new(Types {
+        reg: ir::Registry::core(),
+        globals: Default::default(),
+        vars: Default::default(),
+    });
+}
+
+fn note_var(name: &str, ty: ir::Ty) {
+    TYPES.with(|t| {
+        t.borrow_mut().vars.insert(name.to_string(), ty);
+    });
+}
+
+fn type_of(x: &ir::Expr) -> Option<ir::Ty> {
+    TYPES.with(|t| {
+        let t = t.borrow();
+        let mut vars = t.globals.clone();
+        vars.extend(t.vars.iter().map(|(k, v)| (k.clone(), *v)));
+        ir::sema::type_of_expr(x, &vars, &t.reg).ok()
+    })
+}
+
+/// An index into a byte-set counts from 0 in Kiln 2 and from 1 in 1.x; into
+/// anything else, from 1 in both.
+fn position(base_is_bytes: bool, index: &ir::Expr) -> Expr {
+    if !base_is_bytes {
+        return expr(index);
+    }
+    match index {
+        ir::Expr::IntLit(v) => e(ExprKind::Int(*v as i128 - 1)),
+        other => e(ExprKind::Binary(
+            BinOp::Sub,
+            Box::new(expr(other)),
+            Box::new(e(ExprKind::Int(1))),
+        )),
+    }
 }
 
 fn sp() -> Span {
@@ -438,6 +505,9 @@ fn dll(d: &ir::DllDecl) -> Method {
 }
 
 fn sub(s: &ir::Sub) -> Method {
+    TYPES.with(|t| {
+        t.borrow_mut().vars = s.params.iter().cloned().collect();
+    });
     Method {
         leading: Vec::new(),
         attrs: Vec::new(),
@@ -495,22 +565,30 @@ fn stmt(s: &ir::Stmt) -> Stmt {
             ty: t,
             value,
             mutable,
-        } => mk(StmtKind::Local {
-            name: camel(name),
-            ty: Some(ty(*t)),
-            mutable: *mutable,
-            value: expr(value),
-        }),
+        } => {
+            note_var(name, *t);
+            mk(StmtKind::Local {
+                name: camel(name),
+                ty: Some(ty(*t)),
+                mutable: *mutable,
+                value: expr(value),
+            })
+        }
         S::LetInfer {
             name,
             value,
             mutable,
-        } => mk(StmtKind::Local {
-            name: camel(name),
-            ty: None,
-            mutable: *mutable,
-            value: expr(value),
-        }),
+        } => {
+            if let Some(t) = type_of(value) {
+                note_var(name, t);
+            }
+            mk(StmtKind::Local {
+                name: camel(name),
+                ty: None,
+                mutable: *mutable,
+                value: expr(value),
+            })
+        }
         // `xs = append(xs, v)` grows the list in 1.x by building a new one; in
         // Kiln 2 the list grows itself.
         S::Assign { name, value } => match value {
@@ -615,7 +693,13 @@ fn stmt(s: &ir::Stmt) -> Stmt {
         }),
         S::SetIndex { name, index, value } => mk(StmtKind::Assign {
             target: Expr {
-                kind: ExprKind::Index(Box::new(ident(&camel(name))), Box::new(expr(index))),
+                kind: ExprKind::Index(
+                    Box::new(ident(&camel(name))),
+                    Box::new(position(
+                        type_of(&ir::Expr::Var(name.clone())) == Some(ir::Ty::Bytes),
+                        index,
+                    )),
+                ),
                 span: sp(),
             },
             op: AssignOp::Eq,
@@ -856,14 +940,20 @@ fn expr(x: &ir::Expr) -> Expr {
                 ir::BitOp::Or => BinOp::BitOr,
                 ir::BitOp::Xor => BinOp::BitXor,
                 ir::BitOp::Shl => BinOp::Shl,
-                ir::BitOp::Shr | ir::BitOp::Ushr => BinOp::Shr,
+                ir::BitOp::Shr => BinOp::Shr,
+                // 1.x's `ushr` is C#'s `>>>`; mapping it to `>>` shifted the
+                // sign in and gave `-16 ushr 2` as -4.
+                ir::BitOp::Ushr => BinOp::UShr,
             };
             e(ExprKind::Binary(o, Box::new(expr(a)), Box::new(expr(b))))
         }
         E::Not(a) => e(ExprKind::Unary(UnOp::Not, Box::new(expr(a)))),
         E::BitNot(a) => e(ExprKind::Unary(UnOp::BitNot, Box::new(expr(a)))),
         E::Neg(a) => e(ExprKind::Unary(UnOp::Neg, Box::new(expr(a)))),
-        E::Index { base, index } => e(ExprKind::Index(Box::new(expr(base)), Box::new(expr(index)))),
+        E::Index { base, index } => e(ExprKind::Index(
+            Box::new(expr(base)),
+            Box::new(position(type_of(base) == Some(ir::Ty::Bytes), index)),
+        )),
         E::Field { base, name } => e(ExprKind::Member(Box::new(expr(base)), pascal(name))),
         E::GetProperty {
             component,

@@ -605,7 +605,17 @@ fn cmd_migrate(rest: &[String]) -> i32 {
             return 1;
         }
     };
-    let out = match kiln_k2::migrate(&src) {
+    // The program's libraries, loaded as a build would load them: a value a
+    // command returns has the type its declaration gives, which is how the
+    // converter tells a byte-set from a list.
+    let registry = kiln_ir::parse(&src).ok().and_then(|m| {
+        find_repo_root().and_then(|root| {
+            libload::load_metadata(&root, &m.uses, Arch::host())
+                .ok()
+                .map(|p| p.registry)
+        })
+    });
+    let out = match kiln_k2::migrate_with(&src, registry.as_ref()) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("kiln migrate: {input}: {e}");

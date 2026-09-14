@@ -49,6 +49,7 @@ pub enum Tok {
     Tilde,
     Shl, // <<
     Shr, // >>
+    UShr, // >>> — shifts zeroes in, whatever the sign
     AmpAmp,
     PipePipe,
     Bang,
@@ -749,6 +750,12 @@ impl Lexer<'_> {
             b'>' => match d {
                 // NB: `>>` is split by the parser when closing generics; here
                 // we only emit Shr, and the parser handles `>` `>` for types.
+                // `>>>`, C#'s unsigned shift, before `>>`.
+                b'>' if self.peek2() == b'>' => {
+                    self.bump();
+                    self.bump();
+                    return Ok(Tok::UShr);
+                }
                 b'>' => two!(Tok::Shr),
                 b'=' => two!(Tok::Ge),
                 _ => Tok::Gt,

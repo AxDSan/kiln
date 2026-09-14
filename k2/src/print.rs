@@ -645,7 +645,7 @@ fn prec(op: BinOp) -> u8 {
         BinOp::BitAnd => 4,
         BinOp::Eq | BinOp::Ne => 5,
         BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => 6,
-        BinOp::Shl | BinOp::Shr => 7,
+        BinOp::Shl | BinOp::Shr | BinOp::UShr => 7,
         BinOp::Add | BinOp::Sub => 8,
         BinOp::Mul | BinOp::Div | BinOp::Rem => 9,
     }
@@ -689,6 +689,7 @@ fn bin_sym(op: BinOp) -> &'static str {
         BinOp::BitXor => "^",
         BinOp::Shl => "<<",
         BinOp::Shr => ">>",
+        BinOp::UShr => ">>>",
     }
 }
 

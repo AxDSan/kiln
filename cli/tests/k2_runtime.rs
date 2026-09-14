@@ -844,3 +844,31 @@ public partial form MainWindow
     // Handles: form 1, hit 2.
     assert_eq!(run_form_clicks("formdefaults", src, "2"), "7 points");
 }
+
+#[test]
+fn bytes_cross_the_command_boundary_both_ways() {
+    // A `Bytes` is the runtime's byte-set, header and all. Kiln 2 used to treat
+    // the pointer as the data: bytes a command returned were read from their
+    // header, and bytes Kiln 2 made were handed to commands without one.
+    let path = tmp("bytes-roundtrip.bin");
+    let p = path.to_str().unwrap();
+    let src = format!(
+        "namespace BytesRt;\n\
+         using Kiln.File;\n\
+         public static class P\n\
+         {{\n\
+         \x20   public static void Main()\n\
+         \x20   {{\n\
+         \x20       var raw = Bytes.Alloc(3);\n\
+         \x20       raw[0] = 65;\n\
+         \x20       raw[1] = 0;\n\
+         \x20       raw[2] = 66;\n\
+         \x20       File.WriteBytes(\"{p}\", raw);\n\
+         \x20       var back = File.ReadBytes(\"{p}\");\n\
+         \x20       Console.WriteLine($\"{{back[0]}} {{back[1]}} {{back[2]}}\");\n\
+         \x20   }}\n\
+         }}\n"
+    );
+    assert_eq!(build_and_run("bytesrt", &src), "65 0 66\n");
+    assert_eq!(std::fs::read(&path).unwrap(), b"A\0B");
+}

@@ -396,4 +396,6 @@ pub enum BinOp {
     BitXor,
     Shl,
     Shr,
+    /// `>>>` — a logical shift: zeroes come in at the top.
+    UShr,
 }

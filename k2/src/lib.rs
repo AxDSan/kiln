@@ -28,6 +28,11 @@ pub fn edit(src: &str, e: &Edit) -> Result<String, String> {
 }
 
 /// Convert a Kiln 1.x program to Kiln 2 source — `kiln migrate`.
+/// As `migrate`, with the program's libraries loaded for exact types.
+pub fn migrate_with(src: &str, registry: Option<&kiln_ir::Registry>) -> Result<String, String> {
+    migrate::migrate_with(src, registry)
+}
+
 pub fn migrate(src: &str) -> Result<String, String> {
     migrate::migrate(src)
 }
