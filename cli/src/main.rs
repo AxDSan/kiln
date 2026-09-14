@@ -707,12 +707,14 @@ fn cmd_k2(rest: &[String]) -> i32 {
     let mut run = false;
     let mut emit_ir = false;
     let mut use_runtime = false;
+    let mut release = false;
     let mut it = rest.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--run" => run = true,
             "--emit-ir" => emit_ir = true,
             "--runtime" => use_runtime = true,
+            "--release" => release = true,
             "-o" => output = it.next().cloned(),
             _ if a.starts_with('-') => {
                 eprintln!("kiln k2: unknown option `{a}`");
@@ -722,9 +724,22 @@ fn cmd_k2(rest: &[String]) -> i32 {
         }
     }
     let Some(input) = input else {
-        eprintln!("usage: kiln k2 <in.kiln> [-o out] [--run] [--emit-ir]");
+        eprintln!("usage: kiln k2 <in.kiln> [-o out] [--run] [--emit-ir] [--runtime] [--release]");
         return 2;
     };
+    build_k2(input, output, run, emit_ir, use_runtime, release)
+}
+
+/// Build a Kiln 2 program. `kiln build` calls this for a K2 file with the
+/// runtime linked, which is what a program is; `kiln k2` exposes the switches.
+fn build_k2(
+    input: String,
+    output: Option<String>,
+    run: bool,
+    emit_ir: bool,
+    use_runtime: bool,
+    release: bool,
+) -> i32 {
     let src = match std::fs::read_to_string(&input) {
         Ok(s) => s,
         Err(e) => {
@@ -802,7 +817,7 @@ fn cmd_k2(rest: &[String]) -> i32 {
             if is_gui { Target::Gui } else { Target::Console },
             Os::Linux,
             Arch::host(),
-            false,
+            release,
         )
         .is_err()
         {
@@ -835,6 +850,7 @@ fn cmd_k2(rest: &[String]) -> i32 {
         return 1;
     }
     let status = std::process::Command::new("clang")
+        .args(if release { &["-O2"][..] } else { &[][..] })
         .arg("-Wno-override-module")
         .arg(ll_path.to_str().unwrap())
         .arg(shim_path.to_str().unwrap())
@@ -1400,7 +1416,12 @@ fn escape_value(v: &str) -> String {
 }
 
 fn cmd_build(rest: &[String], then_run: bool) -> i32 {
-    let io = match parse_io(rest) {
+    // `--1x` builds a Kiln 1.x program without the deprecation note. It is
+    // taken out before the arguments are parsed, since only this command knows
+    // what it means.
+    let explicit_1x = rest.iter().any(|a| a == "--1x");
+    let rest: Vec<String> = rest.iter().filter(|a| *a != "--1x").cloned().collect();
+    let io = match parse_io(&rest) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("kiln: {e}");
@@ -1408,6 +1429,45 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
         }
     };
     let input = io.input;
+
+    // Kiln 2 is the language. A file says which one it is by its first line —
+    // the rule the language server and Studio use too — so there is no flag to
+    // forget and no way for the build to disagree with the editor.
+    let src = std::fs::read_to_string(&input).unwrap_or_default();
+    if crate::lsp_k2::is_k2(&src) {
+        if explicit_1x {
+            eprintln!("kiln: `--1x` was given, but {} is a Kiln 2 program", input.display());
+            return 2;
+        }
+        if io.os != Os::host() || io.arch != Arch::host() {
+            eprintln!(
+                "kiln: Kiln 2 builds for this machine only so far — `--os` and `--arch` \
+                 are 1.x's until the Kiln 2 backend learns other targets"
+            );
+            return 2;
+        }
+        let output = io
+            .output
+            .clone()
+            .or(io.project_output.clone())
+            .map(|p| p.to_string_lossy().to_string());
+        return build_k2(
+            input.to_string_lossy().to_string(),
+            output,
+            then_run,
+            false,
+            true, // a built program links the runtime and its collector
+            io.release,
+        );
+    }
+    if !explicit_1x {
+        eprintln!(
+            "kiln: note: {} is a Kiln 1.x program. 1.x is deprecated — `kiln migrate {}` \
+             converts it, and `--1x` builds it without this note.",
+            input.display(),
+            input.display()
+        );
+    }
     if io.arch == Arch::X86 && io.os != Os::Windows {
         eprintln!(
             "kiln: the 32-bit backend targets Windows x86 only — build with \

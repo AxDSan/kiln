@@ -5,7 +5,7 @@ resource file beside the source, not a generated file you are told not to edit.
 Kiln 2 keeps that, which is the part of Kiln worth keeping.
 
 ```sh
-kiln k2 counter.kiln --run
+kiln run counter.kiln
 ```
 
 A program with a form links the UI library and enters the event loop; you do

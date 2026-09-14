@@ -1,15 +1,15 @@
 # Moving to Kiln 2
 
 Kiln 2 is not source-compatible with 1.x. Nothing you have written stops
-working — 1.x still builds with `kiln build` and still ships — but a program
-is one language or the other, decided by its first line, and moving it across
-is a deliberate step.
+working — `kiln build` still builds a 1.x program, with a note saying it is
+deprecated — but a program is one language or the other, decided by its first
+line, and moving it across is a deliberate step.
 
 `kiln migrate` does the mechanical part:
 
 ```sh
 kiln migrate old.kiln > new.kiln
-kiln k2 new.kiln --run
+kiln run new.kiln
 ```
 
 It converts syntax, naming and structure, and leaves a `// TODO(migrate):`
@@ -152,8 +152,8 @@ made by dragging something.
 
 ## Doing it gradually
 
-You do not have to move everything at once, because you do not have to move
-anything at all yet. A sensible order:
+You do not have to move everything at once: a 1.x program keeps building until
+you have moved it. A sensible order:
 
 1. Migrate a small program and run it. The output is the best documentation of
    what the two languages have in common.

@@ -1,12 +1,12 @@
 # Kiln 2
 
-Kiln 2 is the language Kiln is becoming: C#-shaped, compiled to one native
-binary, with the form you draw still the source. It is not source-compatible
-with Kiln 1.x — `kiln migrate` converts a 1.x program — and it does not ship as
-the default yet. Build one with:
+Kiln 2 is Kiln's language: C#-shaped, compiled to one native binary, with the
+form you draw still the source. It is not source-compatible with Kiln 1.x —
+`kiln migrate` converts a 1.x program, and 1.x still builds, with a note. Build
+and run one with:
 
 ```sh
-kiln k2 hello.kiln --run
+kiln run hello.kiln
 ```
 
 Everything on this page compiles; the samples are checked on every build.
@@ -478,9 +478,9 @@ public static class P
 
 | Command | What it does |
 | --- | --- |
-| `kiln k2 <file> [--run]` | build a Kiln 2 program, and run it |
-| `kiln k2 <file> --runtime` | print through the slot ABI and allocate collectably, rather than through libc. A program that calls a command links the runtime either way |
-| `kiln k2 <file> --emit-ir` | print the LLVM it hands clang |
+| `kiln build <file>` | build a program into one native binary; `--release` optimises it |
+| `kiln run <file>` | build it and run it |
+| `kiln k2 <file> --emit-ir` | print the LLVM the build hands clang |
 | `kiln fmt <file>` | print it in the canonical spelling; `--check` reports without writing |
 | `kiln migrate <file>` | convert a Kiln 1.x program to Kiln 2 source |
 | `kiln edit <file> …` | change a form's designer block through the tree |
@@ -492,7 +492,7 @@ locals by name, and shows a record as its fields.
 
 Kiln 2 is not finished, and it is worth knowing where the edges are:
 
-- It is **not the default**. 1.x still builds with `kiln build` and still ships.
+- It builds for the machine it runs on. Cross-compiling (`--os windows`) is still 1.x's.
 - Non-interface generic constraints (`where T : class`, `new()`) parse and are
   ignored.
 - The designer in Studio still edits 1.x; `kiln edit` is the interface it will

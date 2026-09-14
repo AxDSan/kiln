@@ -743,3 +743,74 @@ public partial form MainWindow
         "lambda 7\nmethod\nlambda 7"
     );
 }
+
+#[test]
+fn kiln_build_builds_kiln_2_by_default() {
+    // The flip: `kiln build` is how a Kiln 2 program is built, with the
+    // runtime and its collector linked — not a separate `kiln k2` command. The
+    // file says which language it is, by the same first-line rule the language
+    // server and Studio use, so the build cannot disagree with the editor.
+    let path = tmp("flip.kiln");
+    let exe = tmp("flip");
+    std::fs::write(
+        &path,
+        "namespace Flip;\npublic static class P\n{\n    [Dll(\"runtime\", Entry = \"kn_gc_live_bytes\")]\n    static extern long Live();\n    public static void Main()\n    {\n        var xs = new List<string>();\n        xs.Add(\"collected\");\n        Console.WriteLine($\"{xs[1]} {Live() > 0}\");\n    }\n}\n",
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["build", path.to_str().unwrap(), "-o", exe.to_str().unwrap()])
+        .output()
+        .expect("kiln build");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("deprecated"), "a K2 build was called 1.x:\n{err}");
+    // The runtime is linked: allocation goes through the collector.
+    let run = Command::new(&exe).output().expect("runs");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "collected 1\n");
+}
+
+#[test]
+fn a_1x_build_is_deprecated_but_still_works() {
+    // The 1.x engine stays, behind a note: a program that has not moved yet
+    // still builds, and says how to move it. `--1x` builds it quietly.
+    let path = tmp("old.kiln");
+    let exe = tmp("old");
+    std::fs::write(
+        &path,
+        "module old\ntarget console\n\nsub main\n  call print_text(\"still here\")\nend\n",
+    )
+    .unwrap();
+    let noisy = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["build", path.to_str().unwrap(), "-o", exe.to_str().unwrap()])
+        .output()
+        .expect("kiln build");
+    assert!(noisy.status.success(), "{}", String::from_utf8_lossy(&noisy.stderr));
+    let err = String::from_utf8_lossy(&noisy.stderr);
+    assert!(err.contains("deprecated") && err.contains("kiln migrate"), "{err}");
+    let run = Command::new(&exe).output().expect("runs");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "still here\n");
+
+    let quiet = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["build", "--1x", path.to_str().unwrap(), "-o", exe.to_str().unwrap()])
+        .output()
+        .expect("kiln build --1x");
+    assert!(quiet.status.success());
+    assert!(
+        !String::from_utf8_lossy(&quiet.stderr).contains("deprecated"),
+        "--1x should build without the note"
+    );
+
+    // And `--1x` on a Kiln 2 file is a mistake worth naming.
+    let k2 = tmp("notold.kiln");
+    std::fs::write(&k2, "namespace N;\nConsole.WriteLine(\"x\");\n").unwrap();
+    let wrong = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["build", "--1x", k2.to_str().unwrap()])
+        .output()
+        .expect("kiln build --1x on K2");
+    assert!(!wrong.status.success());
+    assert!(String::from_utf8_lossy(&wrong.stderr).contains("is a Kiln 2 program"));
+}
