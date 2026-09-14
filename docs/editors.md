@@ -72,7 +72,7 @@ rather than going silent.
 
 ## Neovim
 
-With `nvim-lspconfig` (or plain `vim.lsp.start`):
+Neovim 0.10 or later needs no plugin — this is `editors/lsp/neovim.lua`:
 
 ```lua
 vim.filetype.add({ extension = { kiln = "kiln" } })
@@ -80,10 +80,11 @@ vim.filetype.add({ extension = { kiln = "kiln" } })
 vim.api.nvim_create_autocmd("FileType", {
   pattern = "kiln",
   callback = function(args)
+    vim.bo[args.buf].commentstring = "// %s"
     vim.lsp.start({
       name = "kiln",
       cmd = { "kiln", "lsp" },
-      root_dir = vim.fs.root(args.buf, { "runtime", ".git" }),
+      root_dir = vim.fs.root(args.buf, { "project.kproj", ".git" }),
     })
   end,
 })
@@ -91,8 +92,9 @@ vim.api.nvim_create_autocmd("FileType", {
 
 ## VS Code
 
-`editors/vscode/` is a working extension: syntax highlighting, `.kiln` file
-association, and an LSP client that launches `kiln lsp`. It is not published
+`editors/vscode/` is a working extension: syntax highlighting, snippets
+(`program`, `form`, `record`, `class`, `foreach`, `dll`, …), `.kiln` file
+association, a debugger, and an LSP client that launches `kiln lsp`. It is not published
 to the marketplace, so install it locally:
 
 ```sh
@@ -151,7 +153,7 @@ instead if it is not, or run `kiln install` first.
 
 ## Helix
 
-In `languages.toml`:
+Append `editors/lsp/helix-languages.toml` to `~/.config/helix/languages.toml`:
 
 ```toml
 [language-server.kiln]
@@ -162,19 +164,54 @@ args = ["lsp"]
 name = "kiln"
 scope = "source.kiln"
 file-types = ["kiln"]
-roots = ["runtime", ".git"]
+roots = ["project.kproj"]
+comment-token = "//"
+block-comment-tokens = { start = "/*", end = "*/" }
+indent = { tab-width = 4, unit = "    " }
 language-servers = ["kiln"]
-comment-token = "#"
-indent = { tab-width = 2, unit = "  " }
 ```
 
 ## Zed
 
+Merge `editors/lsp/zed-settings.json` into `~/.config/zed/settings.json`:
+
 ```json
 {
-  "lsp": { "kiln": { "binary": { "path": "kiln", "arguments": ["lsp"] } } }
+  "file_types": { "Kiln": ["kiln"] },
+  "lsp": { "kiln": { "binary": { "path": "kiln", "arguments": ["lsp"] } } },
+  "languages": { "Kiln": { "language_servers": ["kiln"], "tab_size": 4 } }
 }
 ```
+
+## Sublime Text
+
+`editors/sublime/` holds a syntax definition and the client entry for the
+[LSP](https://packagecontrol.io/packages/LSP) package:
+
+1. Copy `Kiln.sublime-syntax` and `Comments.tmPreferences` into your
+   `Packages/User` folder (**Preferences → Browse Packages…**).
+2. Install **LSP** from Package Control.
+3. Merge `LSP-kiln.sublime-settings` into **Preferences → Package Settings →
+   LSP → Settings**:
+
+```json
+{
+  "clients": {
+    "kiln": { "enabled": true, "command": ["kiln", "lsp"], "selector": "source.kiln" }
+  }
+}
+```
+
+## JetBrains IDEs
+
+IntelliJ IDEA, CLion, Rider and the rest need no Kiln plugin.
+
+1. **Highlighting:** **Settings → Editor → TextMate Bundles → +**, and choose
+   `editors/vscode`. It is a TextMate bundle as well as the VS Code extension.
+2. **The server:** install **LSP4IJ** from the Marketplace, then **Settings →
+   Languages & Frameworks → Language Servers → +** with command `kiln lsp` and
+   file name pattern `*.kiln` (language id `kiln`). `editors/jetbrains/lsp4ij-kiln.json`
+   holds the same settings.
 
 ## Putting `kiln` on your PATH
 

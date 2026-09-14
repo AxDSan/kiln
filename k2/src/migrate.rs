@@ -317,7 +317,7 @@ fn elem(e: ir::Elem) -> TypeRef {
 
 fn module(m: &ir::Module) -> Program {
     let mut items = Vec::new();
-    let mut leading = vec![format!(
+    let leading = vec![format!(
         " Migrated from Kiln 1.x by `kiln migrate`. Positions are still 1-based."
     )];
 

@@ -482,3 +482,210 @@ const K2_WORDS: &[&str] = &[
     "sbyte", "nint", "nuint", "float", "double", "bool", "char", "string", "void", "true", "false",
     "null", "Result", "List", "Dictionary", "HashSet", "Action", "Func", "Console",
 ];
+
+/// A name as it appears in a K2 file: where, and whether it declares something.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Occurrence {
+    pub line: usize,
+    /// 1-based byte column.
+    pub col: usize,
+    pub len: usize,
+    pub is_declaration: bool,
+}
+
+/// Words that can stand before a name without making it a declaration.
+const NOT_A_TYPE: &[&str] = &[
+    "return", "new", "else", "in", "is", "as", "case", "default", "using", "this",
+    "true", "false", "null", "ref", "out", "break", "continue", "defer", "do",
+    "switch", "if", "for", "foreach", "while", "public", "private", "internal",
+    "static", "partial", "extern", "const",
+];
+
+/// Every occurrence of `name` in code — outside comments and string literals,
+/// inside the holes of a `$"…"` string.
+///
+/// A name is a declaration when a type (or a declaring keyword) stands right
+/// before it: `int count`, `var x`, `class Point`, `Label title`. That is the
+/// one shape C#'s grammar gives a declaration, so reading the text is enough
+/// and navigation keeps working in a file that does not yet parse.
+pub fn occurrences(src: &str, name: &str) -> Vec<Occurrence> {
+    let mut out = Vec::new();
+    // One pass over the whole text, since block comments span lines.
+    let b = src.as_bytes();
+    let (mut i, mut line, mut line_start) = (0usize, 1usize, 0usize);
+    // The last significant token before the current position: a word, or a
+    // punctuation byte.
+    let mut prev: String = String::new();
+    // Inside `$"…"`: how deep in `{}` we are (0 = in the literal part).
+    let mut interp: Option<usize> = None;
+    let is_word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    while i < b.len() {
+        let c = b[i];
+        if c == b'\n' {
+            line += 1;
+            line_start = i + 1;
+            i += 1;
+            continue;
+        }
+        if let Some(depth) = interp {
+            if depth == 0 {
+                match c {
+                    b'\\' => i += 2,
+                    b'"' => {
+                        interp = None;
+                        prev = "\"".into();
+                        i += 1;
+                    }
+                    b'{' => {
+                        interp = Some(1);
+                        prev = "{".into();
+                        i += 1;
+                    }
+                    _ => i += 1,
+                }
+                continue;
+            }
+            if c == b'{' {
+                interp = Some(depth + 1);
+            } else if c == b'}' {
+                interp = Some(depth - 1);
+                i += 1;
+                continue;
+            }
+        }
+        if interp.is_none() {
+            if c == b'/' && b.get(i + 1) == Some(&b'/') {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            if c == b'/' && b.get(i + 1) == Some(&b'*') {
+                i += 2;
+                while i < b.len() && !(b[i] == b'*' && b.get(i + 1) == Some(&b'/')) {
+                    if b[i] == b'\n' {
+                        line += 1;
+                        line_start = i + 1;
+                    }
+                    i += 1;
+                }
+                i += 2;
+                continue;
+            }
+            if c == b'$' && b.get(i + 1) == Some(&b'"') {
+                interp = Some(0);
+                i += 2;
+                continue;
+            }
+            if c == b'"' || c == b'\'' {
+                i += 1;
+                while i < b.len() && b[i] != c && b[i] != b'\n' {
+                    if b[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                i += 1;
+                prev = "\"".into();
+                continue;
+            }
+        }
+        if c.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if is_word(c) {
+            let start = i;
+            while i < b.len() && is_word(b[i]) {
+                i += 1;
+            }
+            let word = &src[start..i];
+            if word == name && !c.is_ascii_digit() {
+                let after = src[i..].trim_start();
+                let prev_is_type = prev == ">" || prev == "]" || prev == "?"
+                    || (prev.as_bytes().first().is_some_and(|p| is_word(*p) && !p.is_ascii_digit())
+                        && !NOT_A_TYPE.contains(&prev.as_str()));
+                // `a b` followed by what can end or continue a declaration.
+                let ends = after.is_empty()
+                    || [";", ",", ")", "=", "(", "{", "<", ":", "in "]
+                        .iter()
+                        .any(|e| after.starts_with(e))
+                    && !after.starts_with("==");
+                out.push(Occurrence {
+                    line,
+                    col: start - line_start + 1,
+                    len: word.len(),
+                    is_declaration: interp.is_none() && prev_is_type && ends,
+                });
+            }
+            prev = word.to_string();
+            continue;
+        }
+        // `List<int> xs` and `int? x` hug their type; `a > b` and `c ? a : b`
+        // do not, and are not declarations.
+        let tight = i > 0 && (is_word(b[i - 1]) || b[i - 1] == b'>' || b[i - 1] == b']');
+        prev = if (c == b'>' || c == b'?') && !tight {
+            " ".into()
+        } else {
+            (c as char).to_string()
+        };
+        i += 1;
+    }
+    // Enum members and positional record fields sit after `{`, `(` or `,`;
+    // the parse tree knows them where the text cannot.
+    if let Some(program) = parse_tolerantly(src, None) {
+        for item in &program.items {
+            if let kiln_k2::ast::Item::Enum(e) = item {
+                if e.members.iter().any(|(n, _)| n == name) {
+                    if let Some(o) = out.iter_mut().find(|o| o.line >= e.span.line) {
+                        o.is_declaration = true;
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Where the name under the caret is declared: the nearest declaration above
+/// it (a local shadows a field), else the first one anywhere in the file (a
+/// method declared further down).
+pub fn definition(src: &str, line: usize, col: usize) -> Option<Occurrence> {
+    let (word, _) = word_at(src, line, col);
+    if word.is_empty() {
+        return None;
+    }
+    let decls: Vec<Occurrence> = occurrences(src, &word)
+        .into_iter()
+        .filter(|o| o.is_declaration)
+        .collect();
+    decls
+        .iter()
+        .rev()
+        .find(|o| (o.line, o.col) <= (line, col))
+        .or_else(|| decls.first())
+        .cloned()
+}
+
+/// Every use of the name under the caret.
+pub fn references(src: &str, line: usize, col: usize, include_declaration: bool) -> Vec<Occurrence> {
+    let (word, _) = word_at(src, line, col);
+    if word.is_empty() {
+        return Vec::new();
+    }
+    occurrences(src, &word)
+        .into_iter()
+        .filter(|o| include_declaration || !o.is_declaration)
+        .collect()
+}
+
+/// The signature of a method this file declares, for signature help.
+pub fn signature(src: &str, caret_line: usize, name: &str) -> Option<String> {
+    let model = build_model(src, Some(caret_line));
+    model
+        .entries
+        .iter()
+        .chain(model.members.iter().flat_map(|(_, ms)| ms.iter()))
+        .find(|(n, _, what)| n == name && *what == "method")
+        .map(|(_, sig, _)| sig.clone())
+}

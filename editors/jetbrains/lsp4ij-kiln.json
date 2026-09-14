@@ -1,0 +1,7 @@
+{
+  "name": "Kiln",
+  "commandLine": "kiln lsp",
+  "fileTypeMappings": [
+    { "fileType": { "patterns": ["*.kiln"] }, "languageId": "kiln" }
+  ]
+}

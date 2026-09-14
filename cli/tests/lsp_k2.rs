@@ -260,3 +260,52 @@ fn a_forms_component_is_offered_and_described() {
         .collect();
     assert!(labels.iter().any(|l| l == "Text"), "no property: {labels:?}");
 }
+
+const NAV: &str = concat!(
+    "namespace N;\n",                                     // 0
+    "public static class P\n",                            // 1
+    "{\n",                                                // 2
+    "    static int Add(int a, int b) => a + b;\n",       // 3
+    "    public static void Main()\n",                    // 4
+    "    {\n",                                            // 5
+    "        int total = Add(1, 2);\n",                   // 6
+    "        // total in a comment is not a use\n",       // 7
+    "        if (total > 2) total = total + 1;\n",        // 8
+    "        Console.WriteLine($\"{total} \\\"total\\\"\");\n", // 9
+    "    }\n",
+    "}\n",
+);
+
+#[test]
+fn go_to_definition_finds_a_k2_local_and_a_method() {
+    let reply = ask(NAV, 21, "textDocument/definition",
+        serde_json::json!({"position": {"line": 9, "character": 29}}));
+    assert_eq!(reply["result"]["range"]["start"], serde_json::json!({"line": 6, "character": 12}), "{reply}");
+    let reply = ask(NAV, 22, "textDocument/definition",
+        serde_json::json!({"position": {"line": 6, "character": 21}}));
+    assert_eq!(reply["result"]["range"]["start"], serde_json::json!({"line": 3, "character": 15}), "{reply}");
+}
+
+#[test]
+fn references_skip_comments_and_strings_but_see_interpolation() {
+    let reply = ask(NAV, 23, "textDocument/references",
+        serde_json::json!({"position": {"line": 6, "character": 13}, "context": {"includeDeclaration": true}}));
+    let lines: Vec<u64> = reply["result"].as_array().unwrap_or(&vec![]).iter()
+        .map(|l| l["range"]["start"]["line"].as_u64().unwrap()).collect();
+    // The declaration, three on line 8, the hole on line 9 — not the comment
+    // on 7 or the quoted word on 9.
+    assert_eq!(lines, vec![6, 8, 8, 8, 9], "{reply}");
+    let reply = ask(NAV, 24, "textDocument/references",
+        serde_json::json!({"position": {"line": 6, "character": 13}, "context": {"includeDeclaration": false}}));
+    assert_eq!(reply["result"].as_array().map(|a| a.len()), Some(4), "{reply}");
+}
+
+#[test]
+fn signature_help_shows_a_k2_method() {
+    let src = NAV.replace("Add(1, 2);", "Add(1, ");
+    let reply = ask(&src, 25, "textDocument/signatureHelp",
+        serde_json::json!({"position": {"line": 6, "character": 27}}));
+    let sig = &reply["result"]["signatures"][0];
+    assert!(sig["label"].as_str().unwrap_or("").contains("int Add(int a, int b)"), "{reply}");
+    assert_eq!(reply["result"]["activeParameter"], 1, "{reply}");
+}

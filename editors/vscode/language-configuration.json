@@ -39,6 +39,13 @@
       "notIn": [
         "string"
       ]
+    },
+    {
+      "open": "/*",
+      "close": " */",
+      "notIn": [
+        "string"
+      ]
     }
   ],
   "surroundingPairs": [
@@ -60,7 +67,16 @@
     ]
   ],
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*(sub|form|if|else|while|for|repeat|match|when|enum|record)\\b.*$|\\{\\s*$|^\\s*[A-Za-z_][A-Za-z0-9_]*\\s+[A-Za-z_][A-Za-z0-9_]*\\s*$",
-    "decreaseIndentPattern": "^\\s*(end|else|when)\\b|^\\s*\\}"
-  }
+    "increaseIndentPattern": "^.*\\{[^}\"']*$|^\\s*(if|else|for|foreach|while)\\b[^;{]*$",
+    "decreaseIndentPattern": "^\\s*\\}"
+  },
+  "onEnterRules": [
+    {
+      "beforeText": "^\\s*///.*$",
+      "action": {
+        "indent": "none",
+        "appendText": "/// "
+      }
+    }
+  ]
 }

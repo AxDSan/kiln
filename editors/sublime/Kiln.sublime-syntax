@@ -1,0 +1,92 @@
+%YAML 1.2
+---
+# Kiln 2 for Sublime Text. Diagnostics, completion, hover and formatting come
+# from the language server through the LSP package — see LSP-kiln.sublime-settings.
+name: Kiln
+file_extensions: [kiln]
+scope: source.kiln
+
+variables:
+  ident: '[A-Za-z_][A-Za-z0-9_]*'
+
+contexts:
+  main:
+    - include: comments
+    - include: strings
+    - include: attributes
+    - include: numbers
+    - include: keywords
+    - include: types
+    - include: calls
+
+  comments:
+    - match: '///.*$'
+      scope: comment.line.documentation.kiln
+    - match: '//.*$'
+      scope: comment.line.double-slash.kiln
+    - match: '/\*'
+      scope: punctuation.definition.comment.begin.kiln
+      push:
+        - meta_scope: comment.block.kiln
+        - match: '\*/'
+          scope: punctuation.definition.comment.end.kiln
+          pop: true
+
+  strings:
+    - match: '\$"'
+      scope: punctuation.definition.string.begin.kiln
+      push: interpolated
+    - match: '"'
+      scope: punctuation.definition.string.begin.kiln
+      push:
+        - meta_scope: string.quoted.double.kiln
+        - match: '\\.'
+          scope: constant.character.escape.kiln
+        - match: '"'
+          scope: punctuation.definition.string.end.kiln
+          pop: true
+    - match: "'(\\\\.|[^'])'"
+      scope: string.quoted.single.kiln
+
+  interpolated:
+    - meta_scope: string.interpolated.kiln
+    - match: '\{'
+      scope: punctuation.section.interpolation.begin.kiln
+      push:
+        - clear_scopes: 1
+        - meta_scope: meta.interpolation.kiln
+        - match: '\}'
+          scope: punctuation.section.interpolation.end.kiln
+          pop: true
+        - include: main
+    - match: '\\.'
+      scope: constant.character.escape.kiln
+    - match: '"'
+      scope: punctuation.definition.string.end.kiln
+      pop: true
+
+  attributes:
+    - match: '^\s*\[({{ident}})'
+      captures:
+        1: entity.other.attribute-name.kiln
+
+  numbers:
+    - match: '\b0[xX][0-9A-Fa-f_]+\b|\b0[bB][01_]+\b|\b[0-9][0-9_]*(\.[0-9_]+)?[fFdDmM]?\b'
+      scope: constant.numeric.kiln
+
+  keywords:
+    - match: '\b(namespace|using|public|private|internal|static|const|var|let|new|this|return|if|else|switch|case|default|for|foreach|in|while|do|break|continue|defer|is|as|ref|out|extern|partial)\b'
+      scope: keyword.control.kiln
+    - match: '\b(class|record|struct|enum|interface|form)\b'
+      scope: storage.type.kiln
+    - match: '\b(true|false|null)\b'
+      scope: constant.language.kiln
+
+  types:
+    - match: '\b(void|bool|byte|sbyte|short|ushort|int|uint|long|ulong|nint|nuint|float|double|char|string|Bytes|Ptr|Result|List|Dictionary|HashSet|Action|Func)\b'
+      scope: storage.type.primitive.kiln
+
+  calls:
+    - match: '\b({{ident}})\s*(?=\()'
+      captures:
+        1: variable.function.kiln

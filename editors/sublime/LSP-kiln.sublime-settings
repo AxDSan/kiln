@@ -1,0 +1,11 @@
+// Add this to Preferences > Package Settings > LSP > Settings, under "clients".
+// Requires the LSP package (packagecontrol.io/packages/LSP).
+{
+  "clients": {
+    "kiln": {
+      "enabled": true,
+      "command": ["kiln", "lsp"],
+      "selector": "source.kiln"
+    }
+  }
+}

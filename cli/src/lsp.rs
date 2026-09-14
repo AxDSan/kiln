@@ -520,13 +520,18 @@ impl Server {
         let (name, active) = enclosing_call(&line_text[..cut])?;
 
         let ix = Index::build(&src);
-        let label = match ix.sub_headers.get(&name) {
+        let k2_label = if crate::lsp_k2::is_k2(&src) {
+            Some(crate::lsp_k2::signature(&src, line, &name)?)
+        } else {
+            None
+        };
+        let label = if let Some(l) = k2_label { l } else { match ix.sub_headers.get(&name) {
             Some(header) => format!("{name}{header}"),
             None => {
                 let reg = self.registry_for_src(&ix)?;
                 signature_text(&name, &reg.get(&name)?.sig)
             }
-        };
+        } };
 
         let params_info: Vec<ParameterInformation> = parameter_labels(&label)
             .into_iter()
@@ -562,6 +567,10 @@ impl Server {
         let p: TextDocumentPositionParams = serde_json::from_value(params.clone()).ok()?;
         let uri = p.text_document.uri.clone();
         let (src, line, col) = self.context(params)?;
+        if crate::lsp_k2::is_k2(&src) {
+            let d = crate::lsp_k2::definition(&src, line, col)?;
+            return serde_json::to_value(Location { uri, range: k2_range(&src, &d) }).ok();
+        }
         let ix = Index::build(&src);
         let occ = ix.at(line, col)?;
         // Commands live in C support libraries: there is no `.kiln` position to
@@ -581,9 +590,16 @@ impl Server {
         let line = p.text_document_position.position.line as usize + 1;
         let col = utf16_col_to_byte(&src, line, p.text_document_position.position.character);
 
+        let include_decl = p.context.include_declaration;
+        if crate::lsp_k2::is_k2(&src) {
+            let locs: Vec<Location> = crate::lsp_k2::references(&src, line, col, include_decl)
+                .iter()
+                .map(|o| Location { uri: uri.clone(), range: k2_range(&src, o) })
+                .collect();
+            return serde_json::to_value(locs).ok();
+        }
         let ix = Index::build(&src);
         let occ = ix.at(line, col)?;
-        let include_decl = p.context.include_declaration;
         let locs: Vec<Location> = ix
             .references_to(occ)
             .into_iter()
@@ -1265,6 +1281,14 @@ fn byte_col_to_utf16(src: &str, line_1based: usize, byte_col: usize) -> u32 {
 }
 
 /// The LSP range covering one identifier occurrence.
+fn k2_range(src: &str, o: &crate::lsp_k2::Occurrence) -> Range {
+    let line = o.line.saturating_sub(1) as u32;
+    Range {
+        start: Position::new(line, byte_col_to_utf16(src, o.line, o.col)),
+        end: Position::new(line, byte_col_to_utf16(src, o.line, o.col + o.len)),
+    }
+}
+
 fn occ_range(src: &str, occ: &Occurrence) -> Range {
     let line = occ.line.saturating_sub(1) as u32;
     Range {

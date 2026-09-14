@@ -1,0 +1,102 @@
+{
+  "Program": {
+    "prefix": "program",
+    "body": [
+      "namespace ${1:App};",
+      "",
+      "public static class ${2:Program}",
+      "{",
+      "    public static void Main()",
+      "    {",
+      "        $0",
+      "    }",
+      "}"
+    ],
+    "description": "A console program"
+  },
+  "Form": {
+    "prefix": "form",
+    "body": [
+      "namespace ${1:App};",
+      "",
+      "public partial form ${2:MainWindow}",
+      "{",
+      "    Title = \"${3:Title}\";",
+      "    Width = ${4:480};",
+      "    Height = ${5:320};",
+      "",
+      "    Button ${6:go} { Text = \"${7:Go}\"; Left = 20; Top = 20; Width = 100; Height = 32; Click += ${8:OnGo}; }",
+      "}",
+      "",
+      "public partial form ${2:MainWindow}",
+      "{",
+      "    void ${8:OnGo}()",
+      "    {",
+      "        $0",
+      "    }",
+      "}"
+    ],
+    "description": "A window: the designer's half and yours"
+  },
+  "Record": {
+    "prefix": "record",
+    "body": ["public record ${1:Name}(${2:int X}, ${3:int Y});"],
+    "description": "A record, compared by value"
+  },
+  "Class": {
+    "prefix": "class",
+    "body": ["public class ${1:Name}", "{", "    $0", "}"],
+    "description": "A class"
+  },
+  "Interface": {
+    "prefix": "interface",
+    "body": ["public interface ${1:IName}", "{", "    ${2:void Run();}", "}"],
+    "description": "An interface"
+  },
+  "Method": {
+    "prefix": "method",
+    "body": ["public static ${1:void} ${2:Name}(${3})", "{", "    $0", "}"],
+    "description": "A static method"
+  },
+  "foreach": {
+    "prefix": "foreach",
+    "body": ["foreach (var ${1:item} in ${2:items})", "{", "    $0", "}"],
+    "description": "Walk a list, a range or a dictionary"
+  },
+  "foreach pair": {
+    "prefix": "foreachkv",
+    "body": ["foreach (var (${1:key}, ${2:value}) in ${3:dict})", "{", "    $0", "}"],
+    "description": "Walk a dictionary's entries in insertion order"
+  },
+  "if": {
+    "prefix": "if",
+    "body": ["if (${1:condition})", "{", "    $0", "}"],
+    "description": "if"
+  },
+  "Result method": {
+    "prefix": "result",
+    "body": [
+      "public static Result<${1:int}> ${2:Name}(${3})",
+      "{",
+      "    if (${4:false}) return Error(\"${5:what went wrong}\");",
+      "    return ${6:0};",
+      "}"
+    ],
+    "description": "A method that can fail, without exceptions"
+  },
+  "Dll import": {
+    "prefix": "dll",
+    "body": ["[Dll(\"${1:library}\", Entry = \"${2:symbol}\")]", "public static extern ${3:int} ${4:Name}(${5});"],
+    "description": "A C function, bound at its first call"
+  },
+  "Table record": {
+    "prefix": "table",
+    "body": ["[Table(\"${1:table}\")]", "public record ${2:Row}([Auto] long Id, ${3:string Name});"],
+    "description": "A record mapped to a database table"
+  },
+  "WriteLine": {
+    "prefix": "cw",
+    "body": ["Console.WriteLine(\\$\"${1}\");"],
+    "description": "Console.WriteLine"
+  }
+}

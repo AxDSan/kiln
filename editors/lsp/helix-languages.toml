@@ -1,0 +1,14 @@
+# Kiln for Helix. Append to ~/.config/helix/languages.toml.
+[language-server.kiln]
+command = "kiln"
+args = ["lsp"]
+
+[[language]]
+name = "kiln"
+scope = "source.kiln"
+file-types = ["kiln"]
+roots = ["project.kproj"]
+comment-token = "//"
+block-comment-tokens = { start = "/*", end = "*/" }
+indent = { tab-width = 4, unit = "    " }
+language-servers = ["kiln"]

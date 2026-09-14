@@ -1868,7 +1868,7 @@ impl<'a> FnLower<'a> {
                 // `d[k] = v` updates in place, or appends when the key is new.
                 if let ast::ExprKind::Index(base, key) = &target.kind {
                     let (dv, dty) = self.expr_raw(base, None)?;
-                    if let Some((_, kty, vty)) = self.cx.as_dict(dty) {
+                    if self.cx.as_dict(dty).is_some() {
                         if *op != ast::AssignOp::Eq {
                             return Err(
                                 "compound assignment to a Dictionary entry is not supported".into(),

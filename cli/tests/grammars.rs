@@ -91,3 +91,38 @@ fn the_grammars_still_know_the_1x_keywords() {
         assert!(kate.contains(kw), "Kate forgot 1.x `{kw}`");
     }
 }
+
+#[test]
+fn the_sublime_syntax_knows_the_k2_keywords() {
+    let g = std::fs::read_to_string(repo_root().join("editors/sublime/Kiln.sublime-syntax")).unwrap();
+    assert!(g.starts_with("%YAML 1.2"), "a sublime-syntax file opens with its YAML header");
+    assert!(g.contains("scope: source.kiln"));
+    for kw in K2_KEYWORDS {
+        assert!(g.contains(&format!("|{kw}|")) || g.contains(&format!("({kw}|")) || g.contains(&format!("|{kw})")),
+            "the Sublime syntax does not know `{kw}`");
+    }
+    assert!(g.contains("'\\$\""), "no `$\"` interpolation rule");
+}
+
+#[test]
+fn the_snippets_and_lsp_configs_are_valid_and_run_the_server() {
+    let read = |p: &str| std::fs::read_to_string(repo_root().join(p)).unwrap();
+    let snippets: serde_json::Value =
+        serde_json::from_str(&read("editors/vscode/snippets/kiln.json")).expect("snippets are JSON");
+    for (name, s) in snippets.as_object().unwrap() {
+        assert!(s["prefix"].is_string() && s["body"].is_array(), "snippet `{name}` is malformed");
+    }
+    let pkg: serde_json::Value = serde_json::from_str(&read("editors/vscode/package.json")).unwrap();
+    assert_eq!(pkg["contributes"]["snippets"][0]["path"], "./snippets/kiln.json");
+    let lsp4ij: serde_json::Value =
+        serde_json::from_str(&read("editors/jetbrains/lsp4ij-kiln.json")).unwrap();
+    assert_eq!(lsp4ij["commandLine"], "kiln lsp");
+    for p in [
+        "editors/sublime/LSP-kiln.sublime-settings",
+        "editors/lsp/neovim.lua",
+        "editors/lsp/helix-languages.toml",
+        "editors/lsp/zed-settings.json",
+    ] {
+        assert!(read(p).contains("\"lsp\""), "{p} does not start `kiln lsp`");
+    }
+}

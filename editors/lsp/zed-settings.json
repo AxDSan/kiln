@@ -1,0 +1,10 @@
+// Kiln for Zed. Merge into ~/.config/zed/settings.json.
+{
+  "file_types": { "Kiln": ["kiln"] },
+  "lsp": {
+    "kiln": { "binary": { "path": "kiln", "arguments": ["lsp"] } }
+  },
+  "languages": {
+    "Kiln": { "language_servers": ["kiln"], "tab_size": 4 }
+  }
+}
