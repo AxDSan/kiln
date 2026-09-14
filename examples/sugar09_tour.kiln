@@ -25,7 +25,7 @@ public static class Sugar09Tour
     /// Add a word to the trail that the tour prints at the end.
     public static void Note(string what)
     {
-        trail = trail + what + " ";
+        trail += what + " ";
     }
 
     /// Name a severity: an `else if` chain tests one value against several.

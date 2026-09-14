@@ -910,3 +910,66 @@ fn every_shipped_example_is_kiln_2_and_builds() {
     assert!(seen >= 45, "expected the shipped examples, found {seen}");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+#[test]
+fn compound_assignment_on_a_property_updates_it_and_on_an_event_wires_it() {
+    let src = "\
+namespace PropPlus;
+
+public partial form MainWindow
+{
+    Title = \"x\";
+    Label note { Text = \"a\"; }
+    Button hit { Text = \"go\"; }
+}
+
+public partial form MainWindow
+{
+    public static void Main()
+    {
+        hit.Click += OnHit;
+    }
+
+    void OnHit()
+    {
+        note.Text += \"b\";
+        Console.WriteLine(note.Text);
+    }
+}
+";
+    // Handles: form 1, note 2, hit 3.
+    assert_eq!(run_form_clicks("propplus", src, "3;3"), "ab\nabb");
+}
+
+#[test]
+fn string_append_ternary_arms_chained_commands_and_division_by_zero() {
+    let src = concat!(
+        "using Kiln.Hello;\n",
+        "namespace Fixes;\n",
+        "public static class P\n",
+        "{\n",
+        "    public static void Main()\n",
+        "    {\n",
+        "        var s = \"x\";\n",
+        "        s += \"y\";\n",
+        "        var xs = new List<int>();\n",
+        "        int v = xs.Count > 5 ? xs[99] : 7;\n",
+        "        Console.WriteLine($\"{s} {v} {Greet(\"bob\").Uppercase().Lowercase()}\");\n",
+        "        int zero = xs.Count;\n",
+        "        Console.WriteLine($\"{10 / zero}\");\n",
+        "    }\n",
+        "}\n",
+    );
+    let exe = tmp("fixes-bin");
+    let file = tmp("fixes.kiln");
+    std::fs::write(&file, src).unwrap();
+    let b = std::process::Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["build", file.to_str().unwrap(), "-o", exe.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(b.status.success(), "{}", String::from_utf8_lossy(&b.stderr));
+    let r = std::process::Command::new(&exe).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&r.stdout), "xy 7 hello, bob!\n");
+    assert!(String::from_utf8_lossy(&r.stderr).contains("division by zero"));
+    assert_eq!(r.status.code(), Some(1));
+}

@@ -90,6 +90,11 @@ impl Parser {
 
     fn program(&mut self) -> Result<Program, ParseError> {
         let file_leading = self.leading();
+        // C# puts `using` either side of a file-scoped namespace.
+        let mut usings = Vec::new();
+        while self.peek() == &Tok::Keyword(Kw::Using) {
+            usings.push(self.using()?);
+        }
         let mut namespace = None;
         if self.peek() == &Tok::Keyword(Kw::Namespace) {
             self.bump();
@@ -103,7 +108,6 @@ impl Parser {
                 // block body handled below; closing brace consumed at end
             }
         }
-        let mut usings = Vec::new();
         while self.peek() == &Tok::Keyword(Kw::Using) {
             usings.push(self.using()?);
         }

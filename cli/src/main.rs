@@ -461,6 +461,14 @@ fn k2_uses(src: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in src.lines() {
         let t = line.trim();
+        // A form's components are described by `ui`: without its metadata a
+        // property read is untyped, and `ok.Left + 10` pastes text.
+        if !t.starts_with("//")
+            && t.split_whitespace().take_while(|w| !w.starts_with('{')).any(|w| w == "form")
+            && !out.iter().any(|l| l == "ui")
+        {
+            out.push("ui".into());
+        }
         let Some(rest) = t.strip_prefix("using ") else {
             continue;
         };

@@ -1827,6 +1827,45 @@ impl<'a> FnLower<'a> {
                 if let ast::ExprKind::Member(recv, prop) = &target.kind {
                     if let ast::ExprKind::Ident(id) = &recv.kind {
                         if let Some(g) = self.cx.components.get(id).map(|(g, _)| *g) {
+                            let type_name = self.cx.components.get(id).map(|(_, t)| t.clone());
+                            let is_property = type_name.is_some_and(|t| {
+                                self.cx.registry.as_ref().is_some_and(|r| {
+                                    r.component(&snake_case(&t)).is_some_and(|d| {
+                                        d.properties.iter().any(|p| p.name == snake_case(prop))
+                                    })
+                                })
+                            });
+                            // `title.Text += "!"` on a property is `title.Text =
+                            // title.Text + "!"`; on an event it wires a handler.
+                            if *op != ast::AssignOp::Eq && is_property {
+                                let bop = match op {
+                                    ast::AssignOp::Add => ast::BinOp::Add,
+                                    ast::AssignOp::Sub => ast::BinOp::Sub,
+                                    ast::AssignOp::Mul => ast::BinOp::Mul,
+                                    ast::AssignOp::Div => ast::BinOp::Div,
+                                    ast::AssignOp::Rem => ast::BinOp::Rem,
+                                    ast::AssignOp::Eq | ast::AssignOp::NullCoalesce => {
+                                        return Err("`??=` on a component property is not supported".into())
+                                    }
+                                };
+                                let expanded = ast::Stmt {
+                                    kind: ast::StmtKind::Assign {
+                                        target: target.clone(),
+                                        op: ast::AssignOp::Eq,
+                                        value: ast::Expr {
+                                            kind: ast::ExprKind::Binary(
+                                                bop,
+                                                Box::new(target.clone()),
+                                                Box::new(value.clone()),
+                                            ),
+                                            span: value.span,
+                                        },
+                                    },
+                                    leading: Vec::new(),
+                                    span: s.span,
+                                };
+                                return self.stmt(&expanded);
+                            }
                             if *op != ast::AssignOp::Eq {
                                 // `go.Click += handler` in code wires an event
                                 // at run time; `-=` unwires it.
@@ -1908,6 +1947,14 @@ impl<'a> FnLower<'a> {
                 };
                 let value = if *op == ast::AssignOp::Eq {
                     rhs
+                } else if *op == ast::AssignOp::Add && pty == TyTable::STR {
+                    // `s += t` appends: a new string, not pointer arithmetic.
+                    let cur = self.read_place(&place);
+                    self.build_string(vec![
+                        (String::new(), Some((cur, TyTable::STR))),
+                        (String::new(), Some((rhs, TyTable::STR))),
+                    ])
+                    .0
                 } else {
                     let cur = self.read_place(&place);
                     let bop = match op {
@@ -3886,8 +3933,8 @@ impl<'a> FnLower<'a> {
                 }
             }
         }
-        let (key, this_arg): (String, Option<Expr>) = match &callee.kind {
-            ast::ExprKind::Ident(name) => (name.clone(), None),
+        let (key, this_arg, this_ty): (String, Option<Expr>, TyId) = match &callee.kind {
+            ast::ExprKind::Ident(name) => (name.clone(), None, TyTable::VOID),
             ast::ExprKind::Member(recv, name) => {
                 if let ast::ExprKind::Ident(obj) = &recv.kind {
                     let qualified = format!("{obj}.{name}");
@@ -3896,7 +3943,7 @@ impl<'a> FnLower<'a> {
                         || self.cx.dlls.contains_key(&qualified))
                         && self.is_type_name(obj)
                     {
-                        (qualified, None)
+                        (qualified, None, TyTable::VOID)
                     } else {
                         // instance call: prefer the receiver's own method.
                         let (recv_v, rty) = self.expr(recv, None)?;
@@ -3906,7 +3953,7 @@ impl<'a> FnLower<'a> {
                             .map(|r| format!("{r}.{name}"))
                             .filter(|k| self.cx.methods.contains_key(k))
                             .unwrap_or_else(|| name.clone());
-                        (key, Some(recv_v))
+                        (key, Some(recv_v), rty)
                     }
                 } else {
                     let (recv_v, rty) = self.expr(recv, None)?;
@@ -3916,7 +3963,7 @@ impl<'a> FnLower<'a> {
                         .map(|r| format!("{r}.{name}"))
                         .filter(|k| self.cx.methods.contains_key(k))
                         .unwrap_or_else(|| name.clone());
-                    (key, Some(recv_v))
+                    (key, Some(recv_v), rty)
                 }
             }
             _ => return Err("unsupported call target".into()),
@@ -3981,9 +4028,8 @@ impl<'a> FnLower<'a> {
 
         // `value.Member(args)` may be a command taking the receiver first.
         if let (Some(this), ast::ExprKind::Member(_, member)) = (&this_arg, &callee.kind) {
-            let recv_ty = self.expr_ty_of(this);
             if let Some((sym, params, ret, tags)) =
-                self.lookup_instance_command(recv_ty, member, args.len())
+                self.lookup_instance_command(this_ty, member, args.len())
             {
                 let mut kargs = vec![this.clone()];
                 for (i, (a, pty)) in args.iter().zip(params.iter().skip(1)).enumerate() {
@@ -7194,20 +7240,27 @@ impl<'a> FnLower<'a> {
         hint: Option<TyId>,
     ) -> Result<(Expr, TyId), String> {
         let cond = self.condition(c)?;
-        let (av, aty) = self.expr(a, hint)?;
-        let (bv, _) = self.expr(b, hint.or(Some(aty)))?;
+        // Each arm is lowered into its own branch, with whatever statements it
+        // emits to compute itself: `ok ? xs[99] : 0` must not check the index
+        // when `ok` is false.
+        self.blocks.push(Vec::new());
+        let a_res = self.expr(a, hint);
+        let mut then = self.blocks.pop().unwrap();
+        let (av, aty) = a_res?;
+        self.blocks.push(Vec::new());
+        let b_res = self.expr(b, hint.or(Some(aty)));
+        let mut els = self.blocks.pop().unwrap();
+        let (bv, _) = b_res?;
         let t = self.new_local("$tern", aty);
-        self.push(Stmt::If {
-            cond,
-            then: vec![Stmt::Assign {
-                place: Place::Local(t),
-                value: av,
-            }],
-            els: vec![Stmt::Assign {
-                place: Place::Local(t),
-                value: bv,
-            }],
+        then.push(Stmt::Assign {
+            place: Place::Local(t),
+            value: av,
         });
+        els.push(Stmt::Assign {
+            place: Place::Local(t),
+            value: bv,
+        });
+        self.push(Stmt::If { cond, then, els });
         Ok((Expr::Local(t), aty))
     }
 
@@ -7386,6 +7439,52 @@ impl<'a> FnLower<'a> {
                 }
             }
         }
+        // Whole-number division by zero stops with a message, as 1.x does,
+        // rather than dying on SIGFPE with nothing said.
+        let int_div = matches!(kop, BinOp::Div | BinOp::Rem)
+            && !self.tt().is_float(operand_ty)
+            && !matches!(bv, Expr::Int(n, _) if n != 0);
+        let (av, bv) = if int_div {
+            let l = self.new_local("$dividend", aty);
+            self.push(Stmt::Let { local: l, value: av });
+            let r = self.new_local("$divisor", bty);
+            self.push(Stmt::Let { local: r, value: bv });
+            let report = Expr::Call(Box::new(Call::Dll {
+                library: "c".into(),
+                symbol: "dprintf".into(),
+                conv: CallConv::Cdecl,
+                args: vec![
+                    Expr::Int(2, TyTable::I32),
+                    Expr::Str("kiln: division by zero\n".into()),
+                ],
+                arg_tys: vec![TyTable::I32, TyTable::STR],
+                ret: TyTable::I32,
+                varargs: true,
+            }));
+            let stop = Expr::Call(Box::new(Call::Dll {
+                library: "c".into(),
+                symbol: "exit".into(),
+                conv: CallConv::Cdecl,
+                args: vec![Expr::Int(1, TyTable::I32)],
+                arg_tys: vec![TyTable::I32],
+                ret: TyTable::VOID,
+                varargs: false,
+            }));
+            let zero = Expr::Bin(
+                BinOp::Eq,
+                Box::new(Expr::Local(r)),
+                Box::new(Expr::Int(0, bty)),
+                bty,
+            );
+            self.push(Stmt::If {
+                cond: zero,
+                then: vec![Stmt::Expr(report), Stmt::Expr(stop)],
+                els: vec![],
+            });
+            (Expr::Local(l), Expr::Local(r))
+        } else {
+            (av, bv)
+        };
         let out = Expr::Bin(kop, Box::new(av), Box::new(bv), operand_ty);
         let rty = if is_cmp { TyTable::BOOL } else { operand_ty };
         Ok((out, rty))

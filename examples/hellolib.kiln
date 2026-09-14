@@ -15,7 +15,7 @@ public static class Hellolib
     public static void Main()
     {
         Console.WriteLine(Greet("Kiln"));
-        // Read inside out: greet, then shout.
-        Console.WriteLine(Uppercase(Greet("world")));
+        // Left to right: greet, then shout.
+        Console.WriteLine(Greet("world").Uppercase());
     }
 }

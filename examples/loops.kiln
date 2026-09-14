@@ -86,7 +86,7 @@ public static class Loops
                 {
                     break;
                 }
-                line = $"{line}{row * col} ";
+                line += $"{row * col} ";
             }
             Console.WriteLine(line);
         }

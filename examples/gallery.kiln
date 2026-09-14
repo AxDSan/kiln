@@ -7,7 +7,7 @@
 // so a list has to arrive as one value — and it is what a method appends to as
 // well:
 //
-//   colours.Items = colours.Items + "\nPurple";
+//   colours.Items += "\nPurple";
 //
 // Positions count from 1, so `Selected = 2` is the second entry and 0 is
 // "nothing chosen".
