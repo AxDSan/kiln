@@ -1813,3 +1813,66 @@ public static class P
 "#;
     assert_eq!(run_k2(src), "7 bumps\n7\n");
 }
+
+#[test]
+fn a_list_position_is_stored_into_and_checked() {
+    // `xs[2] = 20` crashed the compiler: the store handed the emitter the list
+    // record as if it were an array. And a position outside the list read
+    // whatever lay past the buffer, silently. Both are fixed; the index is
+    // evaluated once, so a call in it runs once.
+    let src = r#"
+namespace ListStore;
+public static class P
+{
+    static int calls = 0;
+    static int Two() { calls = calls + 1; return 2; }
+    public static void Main()
+    {
+        var xs = new List<int>();
+        xs.Add(1);
+        xs.Add(2);
+        xs[Two()] = 20;
+        Console.WriteLine($"{xs[1]} {xs[2]} calls={calls}");
+        var b = Bytes.Alloc(2);
+        b[0] = 65;
+        b[1] = 66;
+        Console.WriteLine($"{b[0]} {b[1]}");
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "1 20 calls=1\n65 66\n");
+}
+
+#[test]
+fn a_position_outside_a_list_stops_the_program_and_says_so() {
+    let src = r#"
+namespace Outside;
+var xs = new List<int>();
+xs.Add(1);
+Console.WriteLine($"{xs[9]}");
+Console.WriteLine("never");
+"#;
+    let ll = kiln_k2::compile_to_llvm(src).unwrap();
+    let dir = std::env::temp_dir().join(format!("k2-oob-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("m.ll"), &ll).unwrap();
+    std::fs::write(
+        dir.join("shim.c"),
+        "extern int ECodeStart(void); int main(void){return ECodeStart();}\n",
+    )
+    .unwrap();
+    let built = Proc::new("clang")
+        .args(["m.ll", "shim.c", "-o", "m"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let r = Proc::new(dir.join("m")).output().unwrap();
+    assert_eq!(r.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&r.stdout), "", "it carried on past the bad read");
+    assert!(
+        String::from_utf8_lossy(&r.stderr).contains("index 9 is outside a list of 1 element(s)"),
+        "{}",
+        String::from_utf8_lossy(&r.stderr)
+    );
+}

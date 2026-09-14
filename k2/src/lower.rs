@@ -1775,12 +1775,18 @@ impl<'a> FnLower<'a> {
                     }
                 }
                 let place = self.place(target)?;
-                let pty = self.place_ty(target)?;
+                // The type comes from the place already built, not from lowering
+                // the target again: that ran any call in it a second time, so
+                // `xs[Next()] = v` advanced twice.
+                let pty = match self.type_of_place(&place) {
+                    Some(t) => t,
+                    None => self.place_ty(target)?,
+                };
                 let (rhs, _) = self.expr(value, Some(pty))?;
                 let value = if *op == ast::AssignOp::Eq {
                     rhs
                 } else {
-                    let cur = self.expr(target, Some(pty))?.0;
+                    let cur = self.read_place(&place);
                     let bop = match op {
                         ast::AssignOp::Add => BinOp::Add,
                         ast::AssignOp::Sub => BinOp::Sub,
@@ -2459,16 +2465,8 @@ impl<'a> FnLower<'a> {
                 // `list[i]` reads the buffer; positions are 1-based.
                 if let Some((_, elem)) = self.cx.as_list(bty) {
                     let (i, _) = self.expr(idx, Some(TyTable::I32))?;
-                    let i0 = Expr::Bin(
-                        BinOp::Sub,
-                        Box::new(i),
-                        Box::new(Expr::Int(1, TyTable::I32)),
-                        TyTable::I32,
-                    );
-                    return Ok((
-                        Expr::Index(Box::new(Expr::Field(Box::new(b), LIST_DATA)), Box::new(i0)),
-                        elem,
-                    ));
+                    let (data, i0) = self.checked_list_index(b, bty, i);
+                    return Ok((Expr::Index(Box::new(data), Box::new(i0)), elem));
                 }
                 let elem = match self.tt().kind(bty) {
                     TyKind::Array(e) => *e,
@@ -5549,6 +5547,78 @@ impl<'a> FnLower<'a> {
         Ok(Expr::Local(arr))
     }
 
+    /// A list position checked against the list's length, as a 0-based index.
+    ///
+    /// Reading or writing outside a list stops the program with a message
+    /// naming the position and the length, as 1.x does. Without it a read
+    /// returned whatever lay past the buffer and a write corrupted it — the
+    /// one outcome an index must never have, and silent.
+    fn checked_list_index(&mut self, list: Expr, lty: TyId, pos: Expr) -> (Expr, Expr) {
+        let held = self.new_local("$ixlist", lty);
+        self.push(Stmt::Let {
+            local: held,
+            value: list,
+        });
+        let p = self.new_local("$ixpos", TyTable::I32);
+        self.push(Stmt::Let {
+            local: p,
+            value: pos,
+        });
+        let len = Expr::Field(Box::new(Expr::Local(held)), LIST_LEN);
+        let outside = Expr::Bin(
+            BinOp::Or,
+            Box::new(Expr::Bin(
+                BinOp::Lt,
+                Box::new(Expr::Local(p)),
+                Box::new(Expr::Int(1, TyTable::I32)),
+                TyTable::I32,
+            )),
+            Box::new(Expr::Bin(
+                BinOp::Gt,
+                Box::new(Expr::Local(p)),
+                Box::new(len.clone()),
+                TyTable::I32,
+            )),
+            TyTable::BOOL,
+        );
+        let report = Expr::Call(Box::new(Call::Dll {
+            library: "c".into(),
+            symbol: "dprintf".into(),
+            conv: CallConv::Cdecl,
+            args: vec![
+                Expr::Int(2, TyTable::I32),
+                Expr::Str("kiln: index %d is outside a list of %d element(s)\n".into()),
+                Expr::Local(p),
+                len,
+            ],
+            arg_tys: vec![TyTable::I32, TyTable::STR],
+            ret: TyTable::I32,
+            varargs: true,
+        }));
+        let stop = Expr::Call(Box::new(Call::Dll {
+            library: "c".into(),
+            symbol: "exit".into(),
+            conv: CallConv::Cdecl,
+            args: vec![Expr::Int(1, TyTable::I32)],
+            arg_tys: vec![TyTable::I32],
+            ret: TyTable::VOID,
+            varargs: false,
+        }));
+        self.push(Stmt::If {
+            cond: outside,
+            then: vec![Stmt::Expr(report), Stmt::Expr(stop)],
+            els: vec![],
+        });
+        let data = Expr::Field(Box::new(Expr::Local(held)), LIST_DATA);
+        let i0 = Expr::Bin(
+            BinOp::Sub,
+            Box::new(Expr::Local(p)),
+            Box::new(Expr::Int(1, TyTable::I32)),
+            TyTable::I32,
+        );
+        (data, i0)
+    }
+
     /// `Name(args)` as the command `name(args)`, when the registry has one
     /// taking that many arguments.
     fn bare_command(
@@ -5931,18 +6001,77 @@ impl<'a> FnLower<'a> {
                 }
                 Err(format!("cannot assign to member `{member}`"))
             }
+            // A store mirrors the read of the same shape exactly. It used to
+            // hand the emitter the list record or the Bytes pointer as if it
+            // were an array, and `xs[2] = 20` crashed the compiler.
             ast::ExprKind::Index(base, idx) => {
-                let (b, _) = self.expr(base, None)?;
+                let (b, bty) = self.expr(base, None)?;
                 let (i, _) = self.expr(idx, Some(TyTable::I32))?;
+                // Bytes are addressed by offset, from 0, as the read is.
+                if bty == TyTable::BYTES {
+                    let u8arr = self.cx.b.m.types.intern(TyKind::Array(TyTable::U8));
+                    return Ok(Place::Index(
+                        Box::new(Expr::Cast {
+                            value: Box::new(b),
+                            to: u8arr,
+                        }),
+                        Box::new(i),
+                    ));
+                }
+                if self.cx.as_dict(bty).is_some() {
+                    return Err("store into a Dictionary with `d[key] = value`".into());
+                }
+                if self.cx.as_list(bty).is_some() {
+                    let (data, i0) = self.checked_list_index(b, bty, i);
+                    return Ok(Place::Index(Box::new(data), Box::new(i0)));
+                }
                 let i0 = Expr::Bin(
                     BinOp::Sub,
                     Box::new(i),
                     Box::new(Expr::Int(1, TyTable::I32)),
                     TyTable::I32,
                 );
-                Ok(Place::Index(Box::new(b), Box::new(i0)))
+                if matches!(self.tt().kind(bty), TyKind::Array(_)) {
+                    return Ok(Place::Index(Box::new(b), Box::new(i0)));
+                }
+                Err("only a List, an array or Bytes can be stored into by position".into())
             }
             _ => Err("invalid assignment target".into()),
+        }
+    }
+
+    /// The type a place holds, when it can be read off the place itself.
+    fn type_of_place(&self, p: &Place) -> Option<TyId> {
+        match p {
+            Place::Local(l) => Some(self.cx.b.m.func(self.fid).locals[l.0 as usize].ty),
+            Place::Global(g) => Some(self.cx.b.m.global(*g).ty),
+            Place::Field(base, i) => match self.tt().kind(self.expr_ty_of(base)) {
+                TyKind::Record(rid) => self.cx.b.m.record(*rid).fields.get(*i).map(|f| f.ty),
+                _ => None,
+            },
+            Place::Index(base, _) => {
+                let bty = match base.as_ref() {
+                    Expr::Field(inner, i) => match self.tt().kind(self.expr_ty_of(inner)) {
+                        TyKind::Record(rid) => self.cx.b.m.record(*rid).fields.get(*i).map(|f| f.ty)?,
+                        _ => return None,
+                    },
+                    other => self.expr_ty_of(other),
+                };
+                match self.tt().kind(bty) {
+                    TyKind::Array(e) => Some(*e),
+                    _ => None,
+                }
+            }
+        }
+    }
+
+    /// The current value of a place, for a compound assignment.
+    fn read_place(&self, p: &Place) -> Expr {
+        match p {
+            Place::Local(l) => Expr::Local(*l),
+            Place::Global(g) => Expr::Global(*g),
+            Place::Field(base, i) => Expr::Field(base.clone(), *i),
+            Place::Index(base, i) => Expr::Index(base.clone(), i.clone()),
         }
     }
 
