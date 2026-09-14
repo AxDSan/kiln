@@ -1464,6 +1464,13 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
             );
             return 2;
         }
+        if matches!(io.target, Some(Target::SharedLib) | Some(Target::StaticLib)) {
+            eprintln!(
+                "kiln: Kiln 2 builds programs only so far — a shared or static library \
+                 is 1.x's (`--1x`) until the Kiln 2 backend learns to export"
+            );
+            return 2;
+        }
         let output = io
             .output
             .clone()

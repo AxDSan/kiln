@@ -292,8 +292,13 @@ pub fn cmd_new(repo_root: &Path, args: &[String]) -> i32 {
     let entry_path = dest.join(&t.entry);
     let kits = std::fs::read_to_string(&entry_path)
         .ok()
-        .and_then(|src| kiln_ir::parse(&src).ok())
-        .map(|m| m.uses.clone())
+        .and_then(|src| {
+            if crate::lsp_k2::is_k2(&src) {
+                Some(crate::k2_uses(&src))
+            } else {
+                kiln_ir::parse(&src).ok().map(|m| m.uses.clone())
+            }
+        })
         .unwrap_or_default();
     let proj = dest.join(crate::project::FILE_NAME);
     let text = crate::project::render(&module, &t.entry, t.target, &kits, "0.1.0");

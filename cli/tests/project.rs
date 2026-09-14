@@ -67,10 +67,10 @@ fn kits_follow_the_entry_file() {
     assert!(out.status.success(), "{}", stderr(&out));
     let text = std::fs::read_to_string(dir.join("project.kproj")).unwrap();
     let src = std::fs::read_to_string(dir.join("main.kiln")).unwrap();
-    let uses: Vec<&str> = src
+    let uses: Vec<String> = src
         .lines()
-        .filter_map(|l| l.strip_prefix("use "))
-        .map(str::trim)
+        .filter_map(|l| l.strip_prefix("using Kiln."))
+        .map(|l| l.trim().trim_end_matches(';').to_lowercase())
         .collect();
     assert!(!uses.is_empty(), "the template should `use` something");
     assert!(
@@ -255,9 +255,9 @@ fn a_gui_project_is_untitled_until_titled() {
         stdout(&out)
     );
     let src = std::fs::read_to_string(dir.join("main.kiln")).unwrap();
-    assert!(src.contains("title = \"Untitled App\""), "{src}");
+    assert!(src.contains("Title = \"Untitled App\";"), "{src}");
     assert!(
-        src.contains("module kiln_proj_untitled"),
+        src.contains("namespace kiln_proj_untitled;"),
         "the module still follows the folder:\n{src}"
     );
     let _ = std::fs::remove_dir_all(&dir);

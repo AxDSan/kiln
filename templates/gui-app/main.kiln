@@ -1,34 +1,43 @@
-# A windowed program. The form is the entry: it is built, then `main` runs
-# (if present), then the event loop starts.
-module __MODULE__
-target gui
-use ui
+// A windowed program. The form is built, then `Main` runs if the form has one,
+// then the event loop starts.
+//
+// The first `partial form` block is the designer's: Studio reads and writes it.
+// The second is yours.
 
-form main_window
-  title = "__TITLE__"
-  width = 480
-  height = 300
-  icon = "app.png"
+namespace __MODULE__;
 
-  label greeting
-    text = "Click the button."
-    left = 40
-    top = 50
-    width = 200
-    height = 24
-  end
+using Kiln.Ui;
 
-  button ok_button
-    text = "Click me"
-    left = 40
-    top = 110
-    width = 160
-    height = 32
-    on click: on_ok_click
-  end
-end
+public partial form MainWindow
+{
+    Title = "__TITLE__";
+    Width = 480;
+    Height = 300;
+    Icon = "app.png";
 
-# Bound by function pointer — the handler's name never appears as data.
-sub on_ok_click
-  greeting.text = "Button clicked."
-end
+    Label greeting
+    {
+        Text = "Click the button.";
+        Left = 40;
+        Top = 50;
+        Width = 200;
+    }
+
+    Button okButton
+    {
+        Text = "Click me";
+        Left = 40;
+        Top = 110;
+        Width = 160;
+        Height = 32;
+        Click += OnOkClick;
+    }
+}
+
+public partial form MainWindow
+{
+    void OnOkClick()
+    {
+        greeting.Text = "Button clicked.";
+    }
+}
