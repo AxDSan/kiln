@@ -544,6 +544,7 @@ fn stmt(s: &ir::Stmt) -> Stmt {
         } => {
             let s = mk(StmtKind::ForEach {
                 var: camel(var),
+                value: None,
                 coll: Expr {
                     kind: ExprKind::Range(Box::new(expr(start)), Box::new(expr(limit)), true),
                     span: sp(),
@@ -560,9 +561,10 @@ fn stmt(s: &ir::Stmt) -> Stmt {
             }
         }
         S::ForEach {
-            elem, coll, body, ..
+            elem, value, coll, body, ..
         } => mk(StmtKind::ForEach {
             var: camel(elem),
+            value: value.as_deref().map(camel),
             coll: expr(coll),
             body: body.iter().map(stmt).collect(),
         }),

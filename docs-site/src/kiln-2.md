@@ -157,7 +157,10 @@ public static class P
 
         var ages = new Dictionary<string, int>();
         ages["ada"] = 36;
+        ages["grace"] = 45;
         Console.WriteLine($"{ages.Get("ada") ?? 0} {ages.ContainsKey("nobody")}");
+        foreach (var (who, age) in ages)       // in the order the keys were added
+            Console.WriteLine($"{who} is {age}");
 
         var seen = new HashSet<int>();
         seen.Add(1);
@@ -497,6 +500,5 @@ Kiln 2 is not finished, and it is worth knowing where the edges are:
   ignored.
 - The designer in Studio still edits 1.x; `kiln edit` is the interface it will
   use.
-- A `Dictionary` is not ordered.
 
 `design/k2/status.md` in the repository tracks this precisely.

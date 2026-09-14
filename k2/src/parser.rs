@@ -953,18 +953,33 @@ impl Parser {
         let span = self.span();
         self.expect(&Tok::Keyword(Kw::Foreach))?;
         self.expect(&Tok::LParen)?;
-        // `var x` or `T x`
-        if !self.eat_kw(Kw::Var) {
-            self.type_ref()?; // explicit element type, ignored (inferred)
-        }
-        let var = self.ident()?;
+        // `var x`, `T x`, or `var (key, value)` over a dictionary.
+        let is_var = self.eat_kw(Kw::Var);
+        let (var, value) = if is_var && self.peek() == &Tok::LParen {
+            self.bump();
+            let k = self.ident()?;
+            self.expect(&Tok::Comma)?;
+            let v = self.ident()?;
+            self.expect(&Tok::RParen)?;
+            (k, Some(v))
+        } else {
+            if !is_var {
+                self.type_ref()?; // explicit element type, ignored (inferred)
+            }
+            (self.ident()?, None)
+        };
         self.expect(&Tok::Keyword(Kw::In))?;
         let coll = self.expr()?;
         self.expect(&Tok::RParen)?;
         let body = self.body_or_stmt()?;
         Ok(Stmt {
             leading: Vec::new(),
-            kind: StmtKind::ForEach { var, coll, body },
+            kind: StmtKind::ForEach {
+                var,
+                value,
+                coll,
+                body,
+            },
             span,
         })
     }

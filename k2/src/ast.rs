@@ -249,8 +249,10 @@ pub enum StmtKind {
         body: Vec<Stmt>,
     },
     /// `foreach (var x in coll) { }` — coll may be a range.
+    /// `foreach (var (k, v) in dict)` binds the second name to the value.
     ForEach {
         var: String,
+        value: Option<String>,
         coll: Expr,
         body: Vec<Stmt>,
     },

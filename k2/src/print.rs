@@ -474,8 +474,16 @@ fn stmt(o: &mut Out, s: &Stmt) {
             }
             o.close();
         }
-        StmtKind::ForEach { var, coll, body } => {
-            o.open(&format!("foreach (var {var} in {})", expr(coll)));
+        StmtKind::ForEach {
+            var,
+            value,
+            coll,
+            body,
+        } => {
+            match value {
+                Some(v) => o.open(&format!("foreach (var ({var}, {v}) in {})", expr(coll))),
+                None => o.open(&format!("foreach (var {var} in {})", expr(coll))),
+            }
             for s in body {
                 stmt(o, s);
             }

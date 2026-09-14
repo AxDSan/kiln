@@ -133,7 +133,7 @@ fn the_standard_library_is_reachable() {
          }}\n"
     );
     let out = build_and_run("stdlib", &src);
-    assert_eq!(out, "written by Kiln 2\nexists: 1\nKILN TWO\n", "{out}");
+    assert_eq!(out, "written by Kiln 2\nexists: true\nKILN TWO\n", "{out}");
 }
 
 #[test]
@@ -179,7 +179,7 @@ fn a_command_failure_becomes_a_result() {
          }}\n"
     );
     let out = build_and_run("result", &src);
-    assert_eq!(out, "ok=1 value=here\nok=0\n(missing)\n", "{out}");
+    assert_eq!(out, "ok=true value=here\nok=false\n(missing)\n", "{out}");
 }
 
 #[test]
@@ -211,7 +211,7 @@ fn a_failure_propagates_with_question_mark() {
          \x20   }}\n\
          }}\n"
     );
-    assert_eq!(build_and_run("try", &src), "1 AB\n0\n");
+    assert_eq!(build_and_run("try", &src), "true AB\nfalse\n");
 }
 
 #[test]
@@ -674,7 +674,7 @@ public partial form MainWindow
 }
 ";
     // Handles: the form is 1, `go` is 2.
-    assert_eq!(run_form_clicks("formdll", src, "2"), "1");
+    assert_eq!(run_form_clicks("formdll", src, "2"), "true");
 }
 
 #[test]
@@ -770,7 +770,7 @@ fn kiln_build_builds_kiln_2_by_default() {
     assert!(!err.contains("deprecated"), "a K2 build was called 1.x:\n{err}");
     // The runtime is linked: allocation goes through the collector.
     let run = Command::new(&exe).output().expect("runs");
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "collected 1\n");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "collected true\n");
 }
 
 #[test]

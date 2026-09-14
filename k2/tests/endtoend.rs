@@ -331,7 +331,7 @@ public static class P
 }
 "#;
     // 84/2=42; 7 is odd -> failure; 40 -> 20 -> 10; 6 -> 3 -> odd, propagated.
-    assert_eq!(run_k2(src), "42\n0\nnot even\n-1\n5\n10\n0 not even\n");
+    assert_eq!(run_k2(src), "42\nfalse\nnot even\n-1\n5\n10\nfalse not even\n");
 }
 
 #[test]
@@ -447,7 +447,7 @@ public static class P
     }
 }
 "#;
-    assert_eq!(run_k2(src), "42\nno value\n-1\n5\n0\n");
+    assert_eq!(run_k2(src), "42\nno value\n-1\n5\nfalse\n");
 }
 
 #[test]
@@ -642,7 +642,7 @@ public static class P
     }
 }
 "#;
-    assert_eq!(run_k2(src), "3\n3\n37\n-1\n1\n0\n10 81\n");
+    assert_eq!(run_k2(src), "3\n3\n37\n-1\ntrue\nfalse\n10 81\n");
 }
 
 #[test]
@@ -1425,7 +1425,7 @@ public static class P
 }
 "#;
     // i % 4 over 1..10 yields {1,2,3,0} — four distinct values.
-    assert_eq!(run_k2(src), "4\n1 0\n2\nada\ngrace\n");
+    assert_eq!(run_k2(src), "4\ntrue false\n2\nada\ngrace\n");
 }
 
 #[test]
@@ -1463,7 +1463,7 @@ public static class P
     }
 }
 "#;
-    assert_eq!(run_k2(src), "2000\nwrong 0\n2000 999\n2 4 0\n");
+    assert_eq!(run_k2(src), "2000\nwrong 0\n2000 999\n2 4 false\n");
 }
 
 #[test]
@@ -1494,7 +1494,7 @@ public static class P
     }
 }
 "#;
-    assert_eq!(run_k2(src), "1500\nmissing 0\n0\n2 1 0\n");
+    assert_eq!(run_k2(src), "1500\nmissing 0\nfalse\n2 true false\n");
 }
 
 #[test]
@@ -1923,7 +1923,7 @@ public static class P
 }
 "#;
     // Keys 2, 5, 8, … (every i ≡ 2 mod 3 below 3000) are removed: 1000 of them.
-    assert_eq!(run_k2(src), "2000 2000 wrong 0\n1 0 0\n2 1 0 z\n");
+    assert_eq!(run_k2(src), "2000 2000 wrong 0\ntrue false false\n2 true false z\n");
 }
 
 #[test]
@@ -1937,5 +1937,32 @@ Console.WriteLine($"{xs.Remove(42)} {xs.Count}");
 var names = ["ada", "grace"];
 Console.WriteLine($"{names.Contains("grace")} {names.Remove("ada")} {names[1]}");
 "#;
-    assert_eq!(run_k2(src), "1 0\n1 3 5 9 7\n0 3\n1 1 grace\n");
+    assert_eq!(run_k2(src), "true false\ntrue 3 5 9 7\nfalse 3\ntrue true grace\n");
+}
+
+#[test]
+fn a_dictionary_is_walked_in_the_order_its_keys_were_added() {
+    // `foreach (var (key, value) in d)`, and the order survives a removal: the
+    // later entries shift down rather than the last one jumping into the gap,
+    // which is what 1.x promised and what makes iterating one reproducible.
+    let src = r#"
+namespace DictWalk;
+var ages = new Dictionary<string, int>();
+ages["Ada"] = 36;
+ages["Alan"] = 41;
+ages["Grace"] = 45;
+ages["Linus"] = 29;
+ages.Remove("Alan");
+foreach (var (who, age) in ages)
+    Console.WriteLine($"{who} -> {age}");
+var n = 7;
+Console.WriteLine(n.ToString() + "/" + true.ToString());
+var xs = [10, 20, 30, 40];
+xs.RemoveAt(2);
+Console.WriteLine($"{xs.Count} {xs[1]} {xs[2]} {xs[3]}");
+"#;
+    assert_eq!(
+        run_k2(src),
+        "Ada -> 36\nGrace -> 45\nLinus -> 29\n7/true\n3 10 30 40\n"
+    );
 }
