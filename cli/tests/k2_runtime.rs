@@ -607,3 +607,139 @@ public static class P
         "a held environment did not survive collection:\n{out}"
     );
 }
+
+/// Build a K2 form program and run it headless, clicking the given widget
+/// handles in order. Returns stdout.
+fn run_form_clicks(name: &str, src: &str, clicks: &str) -> String {
+    let path = tmp(&format!("{name}.kiln"));
+    let exe = tmp(name);
+    std::fs::write(&path, src).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["k2", path.to_str().unwrap(), "--runtime", "-o", exe.to_str().unwrap()])
+        .output()
+        .expect("kiln k2");
+    assert!(
+        out.status.success(),
+        "build failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let run = Command::new(&exe)
+        .env("KILN_UI_SYNTH_CLICK", clicks)
+        .env("KILN_UI_EXIT_AFTER_FRAMES", "2")
+        .env("SDL_VIDEODRIVER", "offscreen")
+        // Poison freed memory, so a handler reading a collected environment
+        // reads garbage or crashes instead of the stale values still there.
+        .env("MALLOC_PERTURB_", "165")
+        .output()
+        .expect("the form runs");
+    assert!(
+        run.status.success(),
+        "the form exited {:?} — a crash here is a handler reaching freed memory:\n{}",
+        run.status.code(),
+        String::from_utf8_lossy(&run.stdout)
+    );
+    String::from_utf8_lossy(&run.stdout)
+        .lines()
+        .filter(|l| !l.starts_with("Loaded font") && !l.contains("a11y"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn an_extern_in_a_form_calls_the_function() {
+    // A `[Dll]` extern declared in a form compiled to an empty body returning
+    // 0 — the call to C silently never happened. Here it has to report a real
+    // collection over a heap that has real bytes in it.
+    let src = "\
+namespace FormDll;
+
+public partial form MainWindow
+{
+    Title = \"x\";
+    Button go { Text = \"Go\"; Click += OnGo; }
+}
+
+public partial form MainWindow
+{
+    [Dll(\"runtime\", Entry = \"kn_gc_live_bytes\")]
+    static extern long Live();
+
+    void OnGo()
+    {
+        var xs = new List<string>();
+        foreach (var i in 1..200)
+            xs.Add($\"item {i}\");
+        Console.WriteLine($\"{Live() > 0}\");
+    }
+}
+";
+    // Handles: the form is 1, `go` is 2.
+    assert_eq!(run_form_clicks("formdll", src, "2"), "1");
+}
+
+#[test]
+fn a_handler_wired_at_run_time_keeps_its_environment_through_a_collection() {
+    // ABI v5's reason to exist. Three buttons are wired in a loop, each
+    // capturing its own row; a separate click then churns the heap and forces
+    // a collection, when nothing on the stack refers to those environments any
+    // more. Only the runtime's handler table keeps them alive.
+    //
+    // This test was checked against a build with the hold removed: that build
+    // segfaults on the first row click. A version with the collection inside
+    // the wiring method passed either way, because the environments were still
+    // on the stack — which is why the churn is its own click.
+    let src = ROWS_FIXTURE;
+    // Handles: form 1, shown 2, r1 3, r2 4, r3 5, wire 6, churn 7.
+    let out = run_form_clicks("rowsgc", src, "6;7;5;3;4");
+    let lines: Vec<&str> = out.lines().collect();
+    assert!(lines[0].starts_with("live before "), "{out}");
+    let freed: i64 = lines[1]
+        .trim_start_matches("collect freed ")
+        .split(',')
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(freed > 100_000, "the churn did not force a real collection:\n{out}");
+    assert_eq!(&lines[2..], ["gamma #3", "alpha #1", "beta #2"], "{out}");
+}
+
+const ROWS_FIXTURE: &str = include_str!("fixtures/k2_rows_gc.kiln");
+
+#[test]
+fn a_method_wired_at_run_time_can_be_unwired() {
+    // `+=` binds, `-=` unbinds by the same (function, environment) pair a
+    // delegate compares — so removing `OnGo` leaves the lambda alone.
+    let src = "\
+namespace Unwire;
+
+public partial form MainWindow
+{
+    Title = \"x\";
+    Label shown { Text = \"none\"; }
+    Button go { Text = \"Go\"; }
+    Button wire { Text = \"Wire\"; Click += OnWire; }
+    Button unwire { Text = \"Unwire\"; Click += OnUnwire; }
+}
+
+public partial form MainWindow
+{
+    void OnWire()
+    {
+        var row = 7;
+        go.Click += () => { Console.WriteLine($\"lambda {row}\"); };
+        go.Click += OnGo;
+    }
+
+    void OnGo() { Console.WriteLine(\"method\"); }
+
+    void OnUnwire() { go.Click -= OnGo; }
+}
+";
+    // Handles: form 1, shown 2, go 3, wire 4, unwire 5.
+    // Wire, click go, unwire, click go.
+    assert_eq!(
+        run_form_clicks("unwire", src, "4;3;5;3"),
+        "lambda 7\nmethod\nlambda 7"
+    );
+}

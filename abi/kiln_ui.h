@@ -57,6 +57,24 @@ int32_t     kn_ui_get_int(Kiln_Widget w, const char *property);
 /* Bind an event by name (generic vocabulary, e.g. "click") to a handler. */
 int kn_ui_on(Kiln_Widget w, const char *event, Kiln_EventFn handler);
 
+/* A handler that closes over something (ABI v5): called with its environment.
+ *
+ * This is what makes a button per row possible — each one's handler has to
+ * know its own row, and that cannot be a global. The library holds `env` with
+ * `kn_handler_hold` for as long as the handler is bound, so the collector
+ * cannot free it out from under a click. `env` may be NULL for a handler that
+ * captures nothing.
+ *
+ * An event may have any number of these bound; they run in the order they were
+ * added. Unbinding matches on the (fn, env) pair — the same rule a delegate's
+ * `-=` follows — and removes the most recently added match. Returns 0 on
+ * success; 1 when the widget or event is unknown, 2 when the event hands its
+ * handler arguments (a grid's row), which an environment handler does not take
+ * yet. */
+typedef void (*Kiln_EventEnvFn)(void *env);
+int kn_ui_on_env(Kiln_Widget w, const char *event, Kiln_EventEnvFn fn, void *env);
+int kn_ui_off_env(Kiln_Widget w, const char *event, Kiln_EventEnvFn fn, void *env);
+
 /* Accessibility (D16): every widget carries a role plus an accessible name.
  * The AccessKit bridge lands in Phase 3; these record the intent now so the
  * information exists when the bridge is built, rather than being retrofitted. */
@@ -72,7 +90,7 @@ int kn_ui_set_a11y(Kiln_Widget w, int32_t role, const char *name);
  * Test hooks (honoured only when the corresponding environment variable is set,
  * so they cost nothing in a shipped app):
  *   KILN_UI_EXIT_AFTER_FRAMES=<n>   render n frames, then return
- *   KILN_UI_SYNTH_CLICK=<handle>    dispatch a synthetic click to that widget
+ *   KILN_UI_SYNTH_CLICK=<h>[;<h>…] dispatch synthetic clicks, in order
  *                                      (a handle, not an id — ids never ship);
  *                                      `5.3` hits the third part of widget 5,
  *                                      `5.1.3` the third part of that part —

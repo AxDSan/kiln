@@ -144,10 +144,51 @@ public partial form MainWindow
 }
 ```
 
-An event is wired **in the designer's block**, not in code. Writing
-`go.Click += OnGo;` inside a method is a compile error that says so. A form's
-state lives in globals, so a handler needs nothing handed to it; wiring at run
-time would need an environment pointer the ABI does not carry yet.
+## Wiring an event at run time
+
+An event can also be wired from code, with `+=`, and unwired with `-=`. A
+handler wired this way may capture what it needs, which is what makes a UI
+built from data possible — each button knows which row it belongs to:
+
+```k2
+namespace Rows;
+
+public partial form MainWindow
+{
+    Title = "Rows";
+
+    Label shown { Text = "pick one"; Left = 20; Top = 20; Width = 240; Height = 24; }
+    Button first { Text = "First"; Left = 20; Top = 60; Width = 80; Height = 30; }
+    Button second { Text = "Second"; Left = 110; Top = 60; Width = 80; Height = 30; }
+    Button setup { Text = "Set up"; Left = 200; Top = 60; Width = 80; Height = 30; Click += OnSetup; }
+}
+
+public partial form MainWindow
+{
+    void OnSetup()
+    {
+        var names = new List<string>();
+        names.Add("alpha");
+        names.Add("beta");
+        var i = 0;
+        foreach (var name in names)
+        {
+            i = i + 1;
+            if (i == 1) first.Click += () => { shown.Text = name; };
+            if (i == 2) second.Click += () => { shown.Text = name; };
+        }
+        setup.Click -= OnSetup;
+    }
+}
+```
+
+Each turn of the loop gives its lambda its own `name`, so the two buttons show
+different things. `-=` removes a handler by the same rule a delegate follows:
+a method comes off by name, and a lambda only if it is the very same one.
+
+A captured variable stays alive exactly as long as the handler that needs it,
+however much the program allocates in between — the runtime holds it on the
+handler's behalf, where the collector can see it.
 
 ## Setting a property at run time
 

@@ -1,0 +1,54 @@
+namespace Rows;
+
+public partial form MainWindow
+{
+    Title = "Rows";
+
+    Label shown { Text = "none"; Left = 20; Top = 20; Width = 300; Height = 24; }
+    Button r1 { Text = "1"; Left = 20; Top = 60; Width = 60; Height = 30; }
+    Button r2 { Text = "2"; Left = 90; Top = 60; Width = 60; Height = 30; }
+    Button r3 { Text = "3"; Left = 160; Top = 60; Width = 60; Height = 30; }
+    Button wire { Text = "Wire"; Left = 230; Top = 60; Width = 80; Height = 30; Click += OnWire; }
+    Button churn { Text = "Churn"; Left = 320; Top = 60; Width = 80; Height = 30; Click += OnChurn; }
+}
+
+public partial form MainWindow
+{
+    [Dll("runtime", Entry = "kn_gc_collect")]
+    static extern long Collect();
+
+    [Dll("runtime", Entry = "kn_gc_live_bytes")]
+    static extern long Live();
+
+    void OnWire()
+    {
+        var names = new List<string>();
+        names.Add("alpha");
+        names.Add("beta");
+        names.Add("gamma");
+        var i = 0;
+        foreach (var name in names)
+        {
+            i = i + 1;
+            var label = $"{name} #{i}";
+            if (i == 1) r1.Click += () => { shown.Text = label; Console.WriteLine(label); };
+            if (i == 2) r2.Click += () => { shown.Text = label; Console.WriteLine(label); };
+            if (i == 3) r3.Click += () => { shown.Text = label; Console.WriteLine(label); };
+        }
+    }
+
+    void OnChurn()
+    {
+        // A separate click, so OnWire's frame is gone: nothing on the stack
+        // refers to the three environments. Only the handler table can.
+        foreach (var k in 1..300)
+        {
+            var junk = new List<string>();
+            foreach (var j in 1..100)
+                junk.Add($"junk {j}");
+        }
+        Console.WriteLine($"live before {Live()}");
+        var freed = Collect();
+        Console.WriteLine($"collect freed {freed}, live after {Live()}");
+    }
+}

@@ -1735,11 +1735,11 @@ public partial form MainWindow
 }
 
 #[test]
-fn wiring_an_event_in_code_says_where_it_belongs() {
-    // A handler is wired in the designer's block. Written in code it used to
-    // be refused as "compound assignment to a component property", which is
-    // true of the syntax and says nothing about the mistake.
-    let src = r#"
+fn an_event_can_be_wired_in_code() {
+    // With ABI v5 a handler can be bound at run time, capturing what it needs.
+    // What it cannot be is anything other than a method of the form or a
+    // lambda written where it is wired — that is refused, and says so.
+    let ok = r#"
 namespace Wiring;
 
 public partial form MainWindow
@@ -1752,16 +1752,19 @@ public partial form MainWindow
 {
     void Setup()
     {
+        var row = 3;
+        go.Click += () => { Console.WriteLine($"{row}"); };
         go.Click += OnGo;
+        go.Click -= OnGo;
     }
     void OnGo() { }
 }
 "#;
-    let err = kiln_k2::compile(src).err().expect("this should not compile");
-    assert!(
-        err.contains("designer block") && err.contains("Click +="),
-        "unhelpful error: {err}"
-    );
+    kiln_k2::compile(ok).expect("run-time wiring compiles");
+
+    let bad = ok.replace("go.Click += OnGo;", "go.Click += 42;");
+    let err = kiln_k2::compile(&bad).err().expect("a number is not a handler");
+    assert!(err.contains("method of the form or a lambda"), "unhelpful error: {err}");
 }
 
 #[test]

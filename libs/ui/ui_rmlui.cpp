@@ -148,6 +148,28 @@ struct HandlerBridge : Rml::EventListener {
     }
 };
 std::vector<HandlerBridge*> g_bridges;   // owned; freed at shutdown
+
+/* An environment-carrying handler (ABI v5). Its environment is held in the
+ * runtime's rooted table for exactly as long as the bridge is bound, because
+ * this vector is C++ memory the collector never scans.
+ *
+ * An unbound bridge is marked dead rather than deleted: it may be unbound from
+ * inside its own ProcessEvent, and RmlUi may still be walking the listener list
+ * that holds it. Dead bridges are freed at shutdown with the rest. */
+struct EnvBridge : Rml::EventListener {
+    Kiln_EventEnvFn fn;
+    void*           env;
+    Kiln_Widget     widget;
+    std::string     event;
+    int32_t         token;
+    bool            live = true;
+    EnvBridge(Kiln_EventEnvFn f, void* e, Kiln_Widget w, const char* ev, int32_t t)
+        : fn(f), env(e), widget(w), event(ev), token(t) {}
+    void ProcessEvent(Rml::Event&) override {
+        if (live && fn && !widget_disabled(widget)) fn(env);
+    }
+};
+std::vector<EnvBridge*> g_env_bridges;   // owned; freed at shutdown
 /* The form's `load`. RmlUi raises no such event — the window simply comes
  * up — so it is held here and called by kn_ui_run once everything the
  * handler could touch exists and before the first frame is drawn. */
@@ -1550,6 +1572,39 @@ int kn_ui_on(Kiln_Widget w, const char* event, Kiln_EventFn handler) {
     return 0;
 }
 
+int kn_ui_on_env(Kiln_Widget w, const char* event, Kiln_EventEnvFn fn, void* env) {
+    Rml::Element* e = resolve(w);
+    if (!e || !event || !fn) return 1;
+    // A grid's events hand the handler its row, and an environment handler's
+    // signature has no room for one yet. Refused rather than called wrongly.
+    if (g_grids.count(w) &&
+        (std::strcmp(event, "select") == 0 || std::strcmp(event, "activate") == 0)) {
+        return 2;
+    }
+    const int32_t token = env ? kn_handler_hold(env) : -1;
+    if (env && token < 0) return 1;
+    auto* bridge = new EnvBridge(fn, env, w, event, token);
+    g_env_bridges.push_back(bridge);
+    e->AddEventListener(event, bridge);
+    return 0;
+}
+
+int kn_ui_off_env(Kiln_Widget w, const char* event, Kiln_EventEnvFn fn, void* env) {
+    Rml::Element* e = resolve(w);
+    if (!e || !event) return 1;
+    // The most recent match, as a delegate's `-=` removes the last one added.
+    for (auto it = g_env_bridges.rbegin(); it != g_env_bridges.rend(); ++it) {
+        EnvBridge* b = *it;
+        if (!b->live || b->widget != w || b->fn != fn || b->env != env || b->event != event)
+            continue;
+        b->live = false;
+        e->RemoveEventListener(event, b);
+        if (b->token >= 0) kn_handler_release(b->token);
+        return 0;
+    }
+    return 1;
+}
+
 /* --- the library's non-visual components (abi/kiln_abi.h) ------------
  *
  * `action` and `datasource`, addressed through these rather than through the
@@ -1802,28 +1857,41 @@ int kn_ui_run(void) {
          * before that would find nothing. */
         sync_grids();
         g.context->Update();
-        char* after = nullptr;
-        Kiln_Widget target = (Kiln_Widget)std::strtoull(synth_click, &after, 10);
-        Rml::Element* e = resolve(target);
-        /* `5.3` clicks the third part of widget 5 — a listbox row, a spinner
-         * arrow — and `5.1.3` the third part of that part, which is how a grid
-         * row is reached through the table holding it (with `columns` set the
-         * header is part 1 and row N is `.1.N+1`; without, row N is `.1.N`).
-         * A control assembled from several elements is
-         * only exercised by hitting one of them, and its parts have no handles
-         * of their own: a part is not a component, so it must not become
-         * addressable from a program just to be testable from a test. */
-        while (e && after && *after == '.') {
-            const int nth = (int)std::strtol(after + 1, &after, 10);
-            e = (nth >= 1 && nth <= e->GetNumChildren()) ? e->GetChild(nth - 1) : nullptr;
+        /* `;` separates clicks, dispatched in order, so a test can wire an
+         * event with one click and fire it with the next — the only way to
+         * exercise a handler bound at run time without a person. */
+        std::string all(synth_click);
+        size_t start = 0;
+        while (start <= all.size()) {
+            size_t semi = all.find(';', start);
+            const std::string one = all.substr(start, semi == std::string::npos ? std::string::npos : semi - start);
+            start = semi == std::string::npos ? all.size() + 1 : semi + 1;
+            if (one.empty()) continue;
+            const char* spec = one.c_str();
+            char* after = nullptr;
+            Kiln_Widget target = (Kiln_Widget)std::strtoull(spec, &after, 10);
+            Rml::Element* e = resolve(target);
+            /* `5.3` clicks the third part of widget 5 — a listbox row, a spinner
+             * arrow — and `5.1.3` the third part of that part, which is how a grid
+             * row is reached through the table holding it (with `columns` set the
+             * header is part 1 and row N is `.1.N+1`; without, row N is `.1.N`).
+             * A control assembled from several elements is
+             * only exercised by hitting one of them, and its parts have no handles
+             * of their own: a part is not a component, so it must not become
+             * addressable from a program just to be testable from a test. */
+            while (e && after && *after == '.') {
+                const int nth = (int)std::strtol(after + 1, &after, 10);
+                e = (nth >= 1 && nth <= e->GetNumChildren()) ? e->GetChild(nth - 1) : nullptr;
+            }
+            /* `KILN_UI_SYNTH_EVENT` names what is dispatched, for the events a
+             * click cannot stand in for — a grid's double-click. */
+            const char* synth_event = std::getenv("KILN_UI_SYNTH_EVENT");
+            if (e)
+                e->DispatchEvent(synth_event ? synth_event : "click", Rml::Dictionary());
+            else
+                std::fprintf(stderr, "kiln-ui: no widget handle %s to click\n", spec);
+            g.context->Update();
         }
-        /* `KILN_UI_SYNTH_EVENT` names what is dispatched, for the events a
-         * click cannot stand in for — a grid's double-click. */
-        const char* synth_event = std::getenv("KILN_UI_SYNTH_EVENT");
-        if (e)
-            e->DispatchEvent(synth_event ? synth_event : "click", Rml::Dictionary());
-        else
-            std::fprintf(stderr, "kiln-ui: no widget handle %s to click\n", synth_click);
     }
 
     /* A shortcut cannot be verified by looking at a frame, so there is a hook
@@ -1888,6 +1956,11 @@ void kn_ui_shutdown(void) {
     Backend::Shutdown();
     for (auto* b : g_bridges) delete b;
     g_bridges.clear();
+    for (auto* b : g_env_bridges) {
+        if (b->live && b->token >= 0) kn_handler_release(b->token);
+        delete b;
+    }
+    g_env_bridges.clear();
     for (auto* s : g_stylers) delete s;
     g_stylers.clear();
     for (auto* a : g_action_bridges) delete a;

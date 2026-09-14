@@ -377,6 +377,14 @@ typedef void (*Kiln_HandlerFn)(void);
  * environment first and then exactly those parameters. */
 typedef void (*Kiln_HandlerEnvFn)(void *env);
 
+/* Hold a handler's environment so the collector keeps it alive, and let go of
+ * it. The token is an index, stable while the table grows. -1 on failure.
+ * Implemented in runtime/kn_handlers.c. */
+int32_t kn_handler_hold(void *env);
+void    kn_handler_release(int32_t token);
+void   *kn_handler_env(int32_t token);
+int32_t kn_handler_count(void);
+
 /* Accessibility roles (subset of the AccessKit/platform role vocabulary). */
 enum {
     KN_ROLE_UNKNOWN = 0,

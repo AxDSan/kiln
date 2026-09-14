@@ -319,52 +319,7 @@ pub fn lower_full(
                 };
                 // `[Dll]` extern: a foreign function, not a body to lower.
                 if m.is_extern {
-                    let dll = m.attrs.iter().find(|a| a.name == "Dll");
-                    let Some(dll) = dll else {
-                        return Err(format!(
-                            "`{}` is extern but has no [Dll(\"library\")] attribute",
-                            m.name
-                        ));
-                    };
-                    let library = match dll.args.first().map(|e| &e.kind) {
-                        Some(ast::ExprKind::Str(s)) => s.clone(),
-                        _ => return Err("[Dll] needs a library name".into()),
-                    };
-                    let symbol = dll
-                        .named
-                        .iter()
-                        .find(|(k, _)| k == "Entry")
-                        .and_then(|(_, v)| match &v.kind {
-                            ast::ExprKind::Str(s) => Some(s.clone()),
-                            _ => None,
-                        })
-                        .unwrap_or_else(|| m.name.clone());
-                    let conv = dll
-                        .named
-                        .iter()
-                        .find(|(k, _)| k == "Convention")
-                        .map(|(_, v)| match &v.kind {
-                            ast::ExprKind::Member(_, n) if n == "StdCall" => CallConv::Stdcall,
-                            ast::ExprKind::Member(_, n) if n == "System" => CallConv::System,
-                            _ => CallConv::Cdecl,
-                        })
-                        .unwrap_or(CallConv::Cdecl);
-                    let params: Vec<TyId> = m
-                        .params
-                        .iter()
-                        .map(|p| cx.resolve(&p.ty))
-                        .collect::<Result<_, String>>()?;
-                    let ret = cx.resolve(&m.ret)?;
-                    let sig = DllSig {
-                        library,
-                        symbol,
-                        conv,
-                        params,
-                        ret,
-                    };
-                    cx.dlls
-                        .insert(format!("{}.{}", td.name, m.name), sig.clone());
-                    cx.dlls.entry(m.name.clone()).or_insert(sig);
+                    register_dll(&mut cx, &td.name, m)?;
                     continue;
                 }
                 // A generic method is a template: nothing is emitted until a
@@ -477,6 +432,14 @@ pub fn lower_full(
         }
         // Declare the handlers first so the build sequence can bind them.
         for m in &f.methods {
+            // An extern in a form is a foreign function exactly as it is in a
+            // class. Declared and lowered like a method instead, it compiled to
+            // an empty body returning 0 — a call to C that silently never
+            // happened.
+            if m.is_extern {
+                register_dll(&mut cx, &f.name, m)?;
+                continue;
+            }
             let owned: Vec<(String, TyId)> = m
                 .params
                 .iter()
@@ -496,7 +459,7 @@ pub fn lower_full(
                 .insert(format!("{}.{}", f.name, m.name), sig.clone());
             cx.methods.entry(m.name.clone()).or_insert(sig);
         }
-        for m in &f.methods {
+        for m in f.methods.iter().filter(|m| !m.is_extern) {
             let sig = cx.methods[&format!("{}.{}", f.name, m.name)].clone();
             cx.lower_into(sig.fid, m, false, None, None)?;
         }
@@ -538,6 +501,56 @@ struct Sig {
     this: bool,
     params: Vec<TyId>,
     ret: TyId,
+}
+
+/// Record a `[Dll]` extern method as the foreign function it declares, under
+/// both its qualified and its bare name.
+fn register_dll(cx: &mut Cx, owner: &str, m: &ast::Method) -> Result<(), String> {
+    let Some(dll) = m.attrs.iter().find(|a| a.name == "Dll") else {
+        return Err(format!(
+            "`{}` is extern but has no [Dll(\"library\")] attribute",
+            m.name
+        ));
+    };
+    let library = match dll.args.first().map(|e| &e.kind) {
+        Some(ast::ExprKind::Str(s)) => s.clone(),
+        _ => return Err("[Dll] needs a library name".into()),
+    };
+    let symbol = dll
+        .named
+        .iter()
+        .find(|(k, _)| k == "Entry")
+        .and_then(|(_, v)| match &v.kind {
+            ast::ExprKind::Str(s) => Some(s.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| m.name.clone());
+    let conv = dll
+        .named
+        .iter()
+        .find(|(k, _)| k == "Convention")
+        .map(|(_, v)| match &v.kind {
+            ast::ExprKind::Member(_, n) if n == "StdCall" => CallConv::Stdcall,
+            ast::ExprKind::Member(_, n) if n == "System" => CallConv::System,
+            _ => CallConv::Cdecl,
+        })
+        .unwrap_or(CallConv::Cdecl);
+    let params: Vec<TyId> = m
+        .params
+        .iter()
+        .map(|p| cx.resolve(&p.ty))
+        .collect::<Result<_, String>>()?;
+    let ret = cx.resolve(&m.ret)?;
+    let sig = DllSig {
+        library,
+        symbol,
+        conv,
+        params,
+        ret,
+    };
+    cx.dlls.insert(format!("{owner}.{}", m.name), sig.clone());
+    cx.dlls.entry(m.name.clone()).or_insert(sig);
+    Ok(())
 }
 
 /// A slot tag in words, for an error a reader can act on.
@@ -1360,13 +1373,37 @@ impl Cx {
                         hid
                     }
                 };
-                let target = Expr::FuncPtr(fid);
-                fl.push(Stmt::Expr(ui_call(
-                    "kn_ui_on",
-                    vec![Expr::Global(g), Expr::Str(snake_case(event)), target],
-                    vec![TyTable::I64, TyTable::STR, TyTable::PTR],
+                // Bound as a (function, null environment) pair, the same as a
+                // handler wired in code — so `-= OnGo` finds one wired here.
+                // An event that hands its handler arguments (a grid's row) is
+                // refused by the environment binding with 2, and bound the
+                // older way instead.
+                let on_env = ui_call(
+                    "kn_ui_on_env",
+                    vec![
+                        Expr::Global(g),
+                        Expr::Str(snake_case(event)),
+                        Expr::FuncPtr(fid),
+                        Expr::Null(TyTable::PTR),
+                    ],
+                    vec![TyTable::I64, TyTable::STR, TyTable::PTR, TyTable::PTR],
                     TyTable::I32,
-                )));
+                );
+                fl.push(Stmt::If {
+                    cond: Expr::Bin(
+                        BinOp::Eq,
+                        Box::new(on_env),
+                        Box::new(Expr::Int(2, TyTable::I32)),
+                        TyTable::I32,
+                    ),
+                    then: vec![Stmt::Expr(ui_call(
+                        "kn_ui_on",
+                        vec![Expr::Global(g), Expr::Str(snake_case(event)), Expr::FuncPtr(fid)],
+                        vec![TyTable::I64, TyTable::STR, TyTable::PTR],
+                        TyTable::I32,
+                    ))],
+                    els: vec![],
+                });
             }
         }
 
@@ -1576,14 +1613,15 @@ impl<'a> FnLower<'a> {
                     if let ast::ExprKind::Ident(id) = &recv.kind {
                         if let Some(g) = self.cx.components.get(id).map(|(g, _)| *g) {
                             if *op != ast::AssignOp::Eq {
-                                // `go.Click += OnGo` outside the form block is
-                                // the one that gets written by mistake, and it
-                                // is not a compound assignment at all.
-                                if *op == ast::AssignOp::Add {
-                                    return Err(format!(
-                                        "an event is wired in the form's designer block, not in \
-                                         code: write `{prop} += …` inside `{id} {{ … }}`"
-                                    ));
+                                // `go.Click += handler` in code wires an event
+                                // at run time; `-=` unwires it.
+                                if matches!(op, ast::AssignOp::Add | ast::AssignOp::Sub) {
+                                    return self.wire_event(
+                                        g,
+                                        prop,
+                                        value,
+                                        *op == ast::AssignOp::Add,
+                                    );
                                 }
                                 return Err(
                                     "compound assignment to a component property is not supported"
@@ -4941,6 +4979,85 @@ impl<'a> FnLower<'a> {
             },
             want,
         ))
+    }
+
+    /// `button.Click += handler` / `-= handler` in code: bind or unbind an
+    /// event at run time (ABI v5).
+    ///
+    /// The handler becomes a (function, environment) pair. A lambda's lifted
+    /// function already takes its environment as its first parameter, which is
+    /// exactly the shape the UI library calls; the library holds the
+    /// environment for as long as the handler is bound, so a click can never
+    /// reach a captured variable the collector has freed.
+    fn wire_event(
+        &mut self,
+        g: GlobalId,
+        event: &str,
+        value: &ast::Expr,
+        add: bool,
+    ) -> Result<(), String> {
+        let action = self.cx.b.m.types.intern(TyKind::Func {
+            params: Vec::new(),
+            ret: TyTable::VOID,
+        });
+        let (fn_ptr, env) = match &value.kind {
+            ast::ExprKind::Ident(nm) => {
+                // The component's global is `{Form}__{id}`, which names the form
+                // whose method this is.
+                let form = self
+                    .cx
+                    .b
+                    .m
+                    .global(g)
+                    .name
+                    .split("__")
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                let sig = self
+                    .cx
+                    .methods
+                    .get(&format!("{form}.{nm}"))
+                    .ok_or_else(|| format!("`{nm}` is not a method of `{form}`"))?;
+                // A form method takes nothing, and an environment handler takes
+                // one pointer. A callee ignoring an extra argument is sound under
+                // the C convention the library calls through, where the caller
+                // cleans the stack — and binding the method itself, with a null
+                // environment, gives the same pair every time, which is what
+                // lets a later `-=` find it.
+                (Expr::FuncPtr(sig.fid), Expr::Null(TyTable::PTR))
+            }
+            ast::ExprKind::Lambda(l) => {
+                if !l.params.is_empty() {
+                    return Err("an event handler lambda takes no parameters yet".into());
+                }
+                let (v, _) = self.expr(value, Some(action))?;
+                match v {
+                    Expr::MakeClosure { func, env } => (
+                        Expr::FuncPtr(func),
+                        Expr::Cast {
+                            value: env,
+                            to: TyTable::PTR,
+                        },
+                    ),
+                    _ => return Err("this lambda could not be made into a handler".into()),
+                }
+            }
+            _ => {
+                return Err(
+                    "an event takes a method of the form or a lambda written where it is wired"
+                        .into(),
+                )
+            }
+        };
+        let symbol = if add { "kn_ui_on_env" } else { "kn_ui_off_env" };
+        self.push(Stmt::Expr(ui_call(
+            symbol,
+            vec![Expr::Global(g), Expr::Str(snake_case(event)), fn_ptr, env],
+            vec![TyTable::I64, TyTable::STR, TyTable::PTR, TyTable::PTR],
+            TyTable::I32,
+        )));
+        Ok(())
     }
 
     /// Monomorphise a generic method for the argument types at this call site.

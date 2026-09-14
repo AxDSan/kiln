@@ -216,6 +216,16 @@ clang and checks stdout):
   and named in words when it does not match. A `List<T>` where a list of `T` is
   declared is converted rather than refused, and a command answering with a list
   converts back — so `List<T>` stays the only list a K2 program sees
+- **ABI v5 — events wired at run time**: `button.Click += () => …` and
+  `-= OnGo` in code, the handler capturing what it needs. The UI library binds
+  a (function, environment) pair, any number per event, and unbinds by the same
+  pair a delegate compares. The environment is held in a rooted,
+  collector-allocated table in `runtime/kn_handlers.c` for exactly as long as
+  the handler is bound. A test churns the heap and forces a collection between
+  wiring and clicking; with the hold removed the same build segfaults on the
+  first click, which is how the test is known to test something
+- a `[Dll]` extern declared inside a form calls its function (it compiled to an
+  empty body returning 0)
 - interface bases (`: I` parsed and ignored)
 - closures over a `foreach` variable: each turn binds its own cell, so a lambda
   made in a loop holds that turn's value (C#'s post-5.0 rule), while a write
@@ -227,12 +237,7 @@ clang and checks stdout):
 2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
 3. constraints beyond interfaces (`where T : class`, `new()`) are parsed and ignored
 4. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
-5. ABI v5: **not reachable, rather than not exercised.** A handler is wired in
-   the form's designer block, where there are no locals to capture; wiring one
-   in code is refused, and now says where it belongs. So the plan's Phase 6
-   ABI work — an env pointer on a handler, handler lists, a rooted registry —
-   has no program that needs it. It is the right change the day events can be
-   wired at run time, and speculative until then
+5. ABI v5 is done; a handler wired at run time cannot yet take an event's arguments (a grid's row) — `kn_ui_on_env` refuses those with 2 rather than calling wrongly
 6. Studio's code pane highlights K2 from its own line tokenizer rather than from the language server's semantic tokens — the shapes are right, but the toolchain is not the one deciding them
 
 ## Milestone: the RAD half runs
