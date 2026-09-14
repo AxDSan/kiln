@@ -654,6 +654,8 @@ fn stmt(s: &ir::Stmt) -> Stmt {
             note_var(name, *t);
             let value = match value {
                 ir::Expr::DictLit(pairs) => dict_init(ty(*t), pairs),
+                // `var p: Point` with no value is a zeroed record.
+                ir::Expr::ZeroInit => e(ExprKind::New(ty(*t), Vec::new(), Vec::new())),
                 other => expr(other),
             };
             mk(StmtKind::Local {
@@ -1312,8 +1314,21 @@ fn expr(x: &ir::Expr) -> Expr {
         ),
         // `address of summer` — in Kiln 2 the method itself, where a pointer is
         // wanted, is its address.
-        E::AddressOf(sub) => ident(&pascal(sub)),
-        E::SizeOf(_) | E::ZeroInit => {
+        E::AddressOf(name) => {
+            // A variable's address: a record is already held by reference, so
+            // the record itself goes where a pointer is wanted.
+            if type_of(&ir::Expr::Var(name.clone())).is_some() {
+                ident(&camel(name))
+            } else {
+                ident(&pascal(name))
+            }
+        }
+        // `size of Point` — the laid-out size, known while compiling.
+        E::SizeOf(t) => e(ExprKind::Member(Box::new(e(ExprKind::Ident(match ty(*t) {
+            TypeRef::Named(n) => n,
+            other => print::ty(&other),
+        }))), "Size".into())),
+        E::ZeroInit => {
             lit_str("TODO(migrate): interop expression")
         }
         other => {

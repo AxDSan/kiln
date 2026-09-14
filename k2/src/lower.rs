@@ -155,6 +155,7 @@ pub fn lower_full(
         form_state: HashMap::new(),
         static_inits: Vec::new(),
         nonvisual: HashMap::new(),
+        c_bools: Default::default(),
         namespace_components: Vec::new(),
         components: HashMap::new(),
         generic_types: HashMap::new(),
@@ -260,9 +261,17 @@ pub fn lower_full(
                 continue;
             }
             let rid = cx.type_ids[&td.name];
+            let clayout = td.attrs.iter().any(|a| a.name == "CLayout");
             let mut fields = Vec::new();
-            for f in td.record_params.iter().chain(td.fields.iter()) {
-                let ty = cx.resolve(&f.ty)?;
+            for (i, f) in td.record_params.iter().chain(td.fields.iter()).enumerate() {
+                let mut ty = cx.resolve(&f.ty)?;
+                // A `bool` in a C struct is a C int — a Win32 `BOOL` — and a C
+                // API writes truth as any non-zero value. It is stored as an int
+                // and read back as `!= 0`, so a 7 is true.
+                if clayout && ty == TyTable::BOOL {
+                    ty = TyTable::I32;
+                    cx.c_bools.insert((rid, i));
+                }
                 fields.push(FieldDef {
                     name: f.name.clone(),
                     ty,
@@ -769,6 +778,8 @@ struct Cx {
     /// Components with no rectangle, by id: the library whose own entry
     /// points create and address them (`core` for a timer, `net` for a server).
     nonvisual: HashMap<String, String>,
+    /// `bool` fields of `[CLayout]` records, stored as a C int.
+    c_bools: std::collections::HashSet<(RecordId, usize)>,
     /// Namespace-level non-visual components, built before the entry point.
     namespace_components: Vec<ast::ComponentDecl>,
     /// Component id → (global holding its runtime handle, component type).
@@ -1882,6 +1893,19 @@ impl<'a> FnLower<'a> {
                 };
                 let (rhs, rty) = self.expr(value, Some(pty))?;
                 self.check_fits(rty, pty, "this assignment")?;
+                // A number stored where a number of another width lives is
+                // converted — a `bool` into a C `BOOL` field, an `int` into a
+                // `long`.
+                let rhs = if rty != pty
+                    && !self.tt().is_pointer(rty)
+                    && !self.tt().is_pointer(pty)
+                    && !matches!(self.tt().kind(pty), TyKind::Optional(_))
+                    && !matches!(self.tt().kind(rty), TyKind::Optional(_) | TyKind::Record(_) | TyKind::Func { .. })
+                {
+                    Expr::Cast { value: Box::new(rhs), to: pty }
+                } else {
+                    rhs
+                };
                 let value = if *op == ast::AssignOp::Eq {
                     rhs
                 } else {
@@ -3028,7 +3052,9 @@ impl<'a> FnLower<'a> {
     fn member(&mut self, recv: &ast::Expr, member: &str) -> Result<(Expr, TyId), String> {
         // `T.Size` on a [Packed] record.
         if let ast::ExprKind::Ident(obj) = &recv.kind {
-            if member == "Size" && self.cx.packed.contains(obj) {
+            // Every record is laid out as C lays out a struct, so every record
+            // has a size known while compiling — not only a `[Packed]` one.
+            if member == "Size" && self.cx.type_ids.contains_key(obj.as_str()) {
                 let rty = self.cx.record_ty(obj);
                 if let TyKind::Record(rid) = *self.tt().kind(rty) {
                     if let Layout::C { size, .. } = self.cx.b.m.record(rid).layout {
@@ -3247,6 +3273,17 @@ impl<'a> FnLower<'a> {
             let rec = self.cx.b.m.record(rid);
             if let Some(idx) = rec.fields.iter().position(|f| f.name == member) {
                 let fty = rec.fields[idx].ty;
+                if self.cx.c_bools.contains(&(rid, idx)) {
+                    return Ok((
+                        Expr::Bin(
+                            BinOp::Ne,
+                            Box::new(Expr::Field(Box::new(base), idx)),
+                            Box::new(Expr::Int(0, TyTable::I32)),
+                            TyTable::I32,
+                        ),
+                        TyTable::BOOL,
+                    ));
+                }
                 return Ok((Expr::Field(Box::new(base), idx), fty));
             }
         }
@@ -6628,6 +6665,15 @@ impl<'a> FnLower<'a> {
             // marshals it.
             return Ok(v);
         }
+        // A number where a number of another width is wanted converts, as it
+        // does for any call: an `int` handed to a command taking an `int64`.
+        let is_num = |t: i32| matches!(t, 3 | 4 | 6);
+        if is_num(got) && is_num(tag) {
+            return Ok(Expr::Cast {
+                value: Box::new(v),
+                to: pty,
+            });
+        }
         // A `List<T>` where a list of T is declared: build the runtime array
         // the library expects. Crossing an ABI costs a copy, which is what any
         // marshalling layer pays; the alternative is making the caller write
@@ -7104,15 +7150,34 @@ impl<'a> FnLower<'a> {
             .collect();
         let mut values: Vec<Expr> = Vec::with_capacity(field_tys.len());
         if !args.is_empty() {
-            // positional
-            for (a, (_, fty)) in args.iter().zip(field_tys.iter()) {
-                values.push(self.expr(a, Some(*fty))?.0);
+            // Positional: one argument per field, in order. `zip` dropped what
+            // did not line up, so a short list left fields holding garbage.
+            if args.len() != field_tys.len() {
+                return Err(format!(
+                    "`new {}` takes {} value(s), one per field, but this passes {}",
+                    self.cx.b.m.record(rid).name,
+                    field_tys.len(),
+                    args.len()
+                ));
+            }
+            for (i, (a, (fname, fty))) in args.iter().zip(field_tys.iter()).enumerate() {
+                let (v, vty) = self.expr(a, Some(*fty))?;
+                let _ = i;
+                self.check_fits(vty, *fty, &format!("field `{fname}`"))?;
+                values.push(v);
             }
         } else {
-            // object initialiser: default missing to zero
+            // An object initialiser, or `new T()`: a field not given is zero —
+            // 0, false, or no value for anything held by reference.
             for (fname, fty) in &field_tys {
                 if let Some((_, e)) = inits.iter().find(|(n, _)| n == fname) {
                     values.push(self.expr(e, Some(*fty))?.0);
+                } else if self.tt().is_pointer(*fty) {
+                    values.push(Expr::Null(*fty));
+                } else if self.tt().is_float(*fty) {
+                    values.push(Expr::Float(0.0, *fty));
+                } else if *fty == TyTable::BOOL {
+                    values.push(Expr::Bool(false));
                 } else {
                     values.push(Expr::Int(0, *fty));
                 }
