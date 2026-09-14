@@ -133,6 +133,17 @@ fn module(m: &ir::Module) -> Program {
         }
     }
 
+    // A module with a form becomes the form: its components in the designer's
+    // half, and its state, subroutines and foreign functions in the other,
+    // where the handlers can reach them. Constants stay in a static class,
+    // since a form holds none.
+    if let Some(form) = m.items.iter().find_map(|it| match it {
+        ir::Item::Form(f) => Some(f),
+        _ => None,
+    }) {
+        return form_module(m, form, items, leading);
+    }
+
     // Everything else hangs off one static class, which is what a 1.x module is.
     let mut consts = Vec::new();
     let mut fields = Vec::new();
@@ -180,6 +191,138 @@ fn module(m: &ir::Module) -> Program {
         record_params: Vec::new(),
         fields,
         consts,
+        methods,
+        doc: None,
+        span: sp(),
+    }));
+
+    Program {
+        leading,
+        namespace: Some(pascal(&m.name)),
+        usings: m
+            .uses
+            .iter()
+            .map(|u| Using {
+                path: format!("Kiln.{}", pascal(u)),
+                is_static: false,
+                alias: None,
+                span: sp(),
+            })
+            .collect(),
+        items,
+        top_level: Vec::new(),
+    }
+}
+
+/// A 1.x module with a form, as two `partial form` blocks.
+fn form_module(
+    m: &ir::Module,
+    form: &ir::Form,
+    mut items: Vec<Item>,
+    mut leading: Vec<String>,
+) -> Program {
+    let name = pascal(&form.name);
+    let component = |c: &ir::Component| ComponentDecl {
+        type_name: pascal(&c.type_name),
+        leading: Vec::new(),
+        id: camel(&c.id),
+        properties: c
+            .properties
+            .iter()
+            .map(|(n, v)| (pascal(n), expr(v)))
+            .collect(),
+        handlers: c
+            .handlers
+            .iter()
+            .map(|(ev, h)| (pascal(ev), HandlerRef::Method(pascal(h))))
+            .collect(),
+        span: sp(),
+    };
+    if !form.handlers.is_empty() {
+        leading.push(todo_note(
+            "the form itself had event handlers; wire them in code from `Main`",
+        ));
+    }
+
+    let mut consts = Vec::new();
+    let mut fields = Vec::new();
+    let mut methods = Vec::new();
+    for it in &m.items {
+        match it {
+            ir::Item::Const(c) => consts.push(ConstDecl {
+                leading: Vec::new(),
+                vis: Vis::Public,
+                name: const_name(&c.name),
+                ty: ty(c.ty),
+                value: expr(&c.value),
+                span: sp(),
+            }),
+            ir::Item::Var(v) => fields.push(Field {
+                leading: Vec::new(),
+                attrs: Vec::new(),
+                vis: Vis::Internal,
+                name: camel(&v.name),
+                ty: ty(v.ty),
+                default: Some(expr(&v.value)),
+                is_readonly: false,
+                is_const: false,
+                span: sp(),
+            }),
+            ir::Item::Sub(s) => {
+                let mut method = sub(s);
+                // A form's methods are its own, not a class's statics.
+                method.is_static = false;
+                method.vis = Vis::Internal;
+                methods.push(method);
+            }
+            ir::Item::Dll(d) => methods.push(dll(d)),
+            ir::Item::Component(c) => leading.push(todo_note(&format!(
+                "`{} {}` has no rectangle; Kiln 2 does not declare non-visual components yet",
+                c.type_name, c.id
+            ))),
+            ir::Item::Form(_) | ir::Item::UserType(_) => {}
+        }
+    }
+
+    if !consts.is_empty() {
+        items.push(Item::Type(TypeDecl {
+            leading: Vec::new(),
+            attrs: Vec::new(),
+            implements: Vec::new(),
+            type_params: Vec::new(),
+            kind: TypeKind::StaticClass,
+            vis: Vis::Public,
+            name: format!("{name}Constants"),
+            record_params: Vec::new(),
+            fields: Vec::new(),
+            consts,
+            methods: Vec::new(),
+            doc: None,
+            span: sp(),
+        }));
+    }
+    items.push(Item::Form(FormDecl {
+        vis: Vis::Public,
+        leading: Vec::new(),
+        name: name.clone(),
+        properties: form
+            .properties
+            .iter()
+            .map(|(n, v)| (pascal(n), expr(v)))
+            .collect(),
+        components: form.children.iter().map(component).collect(),
+        fields: Vec::new(),
+        methods: Vec::new(),
+        doc: None,
+        span: sp(),
+    }));
+    items.push(Item::Form(FormDecl {
+        vis: Vis::Public,
+        leading: Vec::new(),
+        name,
+        properties: Vec::new(),
+        components: Vec::new(),
+        fields,
         methods,
         doc: None,
         span: sp(),

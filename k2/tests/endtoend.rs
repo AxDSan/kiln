@@ -1789,3 +1789,27 @@ fn a_migrated_constant_keeps_one_name() {
     // And the whole point: what comes out compiles.
     kiln_k2::compile(&out).expect("a migrated program compiles");
 }
+
+#[test]
+fn a_static_field_is_one_variable_with_its_initial_value() {
+    // A static class's field is a module global, set before Main runs. It was
+    // not a variable at all — "cannot assign to unknown" — which is how every
+    // migrated 1.x module with state failed to build.
+    let src = r#"
+namespace Statics;
+public static class P
+{
+    static int count = 5;
+    static string label = "bumps";
+    static void Bump() { count = count + 1; }
+    public static void Main()
+    {
+        Bump();
+        Bump();
+        Console.WriteLine($"{count} {label}");
+        Console.WriteLine($"{P.count}");
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "7 bumps\n7\n");
+}

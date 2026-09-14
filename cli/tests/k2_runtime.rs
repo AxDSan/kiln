@@ -814,3 +814,33 @@ fn a_1x_build_is_deprecated_but_still_works() {
     assert!(!wrong.status.success());
     assert!(String::from_utf8_lossy(&wrong.stderr).contains("is a Kiln 2 program"));
 }
+
+#[test]
+fn a_form_field_starts_with_the_value_it_was_given() {
+    // `string label = "points";` in a form used to be dropped: the field began
+    // as null, and the forms guide's own sample showed "7 (null)" on screen
+    // while compiling cleanly — a docs gate that only compiles cannot see it.
+    let src = "\
+namespace Defaults;
+
+public partial form MainWindow
+{
+    Title = \"x\";
+    Button hit { Text = \"+7\"; Click += OnHit; }
+}
+
+public partial form MainWindow
+{
+    int points = 0;
+    string label = \"points\";
+
+    void OnHit()
+    {
+        points = points + 7;
+        Console.WriteLine($\"{points} {label}\");
+    }
+}
+";
+    // Handles: form 1, hit 2.
+    assert_eq!(run_form_clicks("formdefaults", src, "2"), "7 points");
+}

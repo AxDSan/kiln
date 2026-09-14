@@ -152,6 +152,7 @@ pub fn lower_full(
         packed: std::collections::HashSet::new(),
         tables: HashMap::new(),
         form_state: HashMap::new(),
+        static_inits: Vec::new(),
         components: HashMap::new(),
         generic_types: HashMap::new(),
         type_mono: HashMap::new(),
@@ -305,6 +306,31 @@ pub fn lower_full(
         }
     }
 
+    // A static class's fields are module globals: there is one of each, for
+    // the life of the program, which is what `static` means. Their initial
+    // values run before the entry point does.
+    for item in &p.items {
+        if let ast::Item::Type(td) = item {
+            if td.kind != ast::TypeKind::StaticClass {
+                continue;
+            }
+            for fld in &td.fields {
+                let ty = cx.resolve(&fld.ty)?;
+                let g = cx.b.add_global(
+                    &format!("{}__static_{}", td.name, fld.name),
+                    ty,
+                    cx.b.m.types.is_pointer(ty),
+                );
+                cx.form_state.insert(fld.name.clone(), (g, ty));
+                cx.form_state
+                    .insert(format!("{}.{}", td.name, fld.name), (g, ty));
+                if let Some(init) = &fld.default {
+                    cx.static_inits.push((g, ty, init.clone()));
+                }
+            }
+        }
+    }
+
     // Pass 3: declare all methods (symbol + signature) before lowering bodies.
     for item in &p.items {
         if let ast::Item::Type(td) = item {
@@ -429,6 +455,12 @@ pub fn lower_full(
                 cx.b.m.types.is_pointer(ty),
             );
             cx.form_state.insert(fld.name.clone(), (g, ty));
+            // `string label = "points";` — the default used to be dropped, so
+            // the field started as null and the first handler to read it did
+            // not get what the source said.
+            if let Some(init) = &fld.default {
+                cx.static_inits.push((g, ty, init.clone()));
+            }
         }
         // Declare the handlers first so the build sequence can bind them.
         for m in &f.methods {
@@ -466,7 +498,8 @@ pub fn lower_full(
         let build =
             cx.b.declare_func(&format!("{}_Build", f.name), vec![], TyTable::I32);
         cx.lower_form(build, f)?;
-        cx.b.set_entry(build);
+        let entry = cx.wrap_entry_with_inits(build)?;
+        cx.b.set_entry(entry);
         cx.drain_pending()?;
         return Ok(cx.b.build());
     }
@@ -481,9 +514,11 @@ pub fn lower_full(
         }
         let body = fl.finish();
         cx.b.set_body(main, body);
-        cx.b.set_entry(main);
+        let entry = cx.wrap_entry_with_inits(main)?;
+        cx.b.set_entry(entry);
     } else if let Some(sig) = cx.methods.get("Main").cloned() {
-        cx.b.set_entry(sig.fid);
+        let entry = cx.wrap_entry_with_inits(sig.fid)?;
+        cx.b.set_entry(entry);
     }
 
     // Every generic instance and lifted lambda queued by *any* of the above —
@@ -672,6 +707,9 @@ struct Cx {
     dlls: HashMap<String, DllSig>,
     /// Form-level state: name → its global.
     form_state: HashMap<String, (GlobalId, TyId)>,
+    /// Globals with an initial value — static fields and form fields — set by
+    /// a wrapper around the entry point before it runs.
+    static_inits: Vec<(GlobalId, TyId, ast::Expr)>,
     /// Component id → (global holding its runtime handle, component type).
     components: HashMap<String, (GlobalId, String)>,
     /// Generic type declarations, awaiting type arguments.
@@ -693,6 +731,39 @@ struct Cx {
 }
 
 impl Cx {
+    /// The entry point, preceded by every global's initial value. With nothing
+    /// to initialise the entry is returned unchanged, so a program without
+    /// static state compiles exactly as it did.
+    fn wrap_entry_with_inits(&mut self, entry: FuncId) -> Result<FuncId, String> {
+        if self.static_inits.is_empty() {
+            return Ok(entry);
+        }
+        let ret = self.b.m.func(entry).ret;
+        let wrapper = self.b.declare_func("$init_then_entry", vec![], ret);
+        let inits = std::mem::take(&mut self.static_inits);
+        let mut fl = FnLower::new(self, wrapper, ret);
+        for (g, ty, init) in &inits {
+            let (v, _) = fl.expr(init, Some(*ty))?;
+            fl.push(Stmt::Assign {
+                place: Place::Global(*g),
+                value: v,
+            });
+        }
+        let call = Expr::Call(Box::new(Call::Direct {
+            func: entry,
+            args: Vec::new(),
+        }));
+        if ret == TyTable::VOID {
+            fl.push(Stmt::Expr(call));
+            fl.push(Stmt::Return(None));
+        } else {
+            fl.push(Stmt::Return(Some(call)));
+        }
+        let body = fl.finish();
+        self.b.set_body(wrapper, body);
+        Ok(wrapper)
+    }
+
     fn record_ty(&mut self, name: &str) -> TyId {
         let rid = self.type_ids[name];
         self.b.m.types.intern(TyKind::Record(rid))
@@ -1405,6 +1476,17 @@ impl Cx {
                     els: vec![],
                 });
             }
+        }
+
+        // A form's `Main`, if it has one, runs once the window and every
+        // component exist and before the first event — so it can set a
+        // property, wire a handler or load data the form shows. This is the
+        // point 1.x ran `sub main` at, and `kiln migrate` relies on it.
+        if let Some(main) = fl.cx.methods.get(&format!("{}.Main", f.name)).cloned() {
+            fl.push(Stmt::Expr(Expr::Call(Box::new(Call::Direct {
+                func: main.fid,
+                args: Vec::new(),
+            }))));
         }
 
         let rc = fl.new_local("$rc", TyTable::I32);
@@ -2635,6 +2717,62 @@ impl<'a> FnLower<'a> {
             if let Some((ty, value)) = self.cx.consts.get(&format!("{obj}.{member}")).cloned() {
                 return self.expr(&value, Some(ty));
             }
+            // `count.Text` — reading a component's property off the live window.
+            // Typed by the component's descriptor: `Left` is an int, `Enabled`
+            // a bool, `Text` a string — so `count.Left + 10` is arithmetic, not
+            // text pasted to a number.
+            if !self.scope.contains_key(obj.as_str()) && !self.cells.contains_key(obj.as_str()) {
+                if let Some((g, type_name)) = self.cx.components.get(obj).cloned() {
+                    let prop = snake_case(member);
+                    let pty = self.cx.registry.as_ref().and_then(|r| {
+                        r.component(&snake_case(&type_name))
+                            .and_then(|d| d.properties.iter().find(|p| p.name == prop))
+                            .map(|p| p.ty)
+                    });
+                    return Ok(match pty {
+                        Some(kiln_ir::Ty::Int) | Some(kiln_ir::Ty::Int64) => (
+                            ui_call(
+                                "kn_ui_get_int",
+                                vec![Expr::Global(g), Expr::Str(prop)],
+                                vec![TyTable::I64, TyTable::STR],
+                                TyTable::I32,
+                            ),
+                            TyTable::I32,
+                        ),
+                        Some(kiln_ir::Ty::Bool) => (
+                            Expr::Bin(
+                                BinOp::Ne,
+                                Box::new(ui_call(
+                                    "kn_ui_get_int",
+                                    vec![Expr::Global(g), Expr::Str(prop)],
+                                    vec![TyTable::I64, TyTable::STR],
+                                    TyTable::I32,
+                                )),
+                                Box::new(Expr::Int(0, TyTable::I32)),
+                                TyTable::I32,
+                            ),
+                            TyTable::BOOL,
+                        ),
+                        // Text, and anything the descriptor does not name: the
+                        // library answers with text either way.
+                        _ => (
+                            ui_call(
+                                "kn_ui_get",
+                                vec![Expr::Global(g), Expr::Str(prop)],
+                                vec![TyTable::I64, TyTable::STR],
+                                TyTable::STR,
+                            ),
+                            TyTable::STR,
+                        ),
+                    });
+                }
+            }
+            // `P.count` — a static field, when `P` is not a value in scope.
+            if !self.scope.contains_key(obj.as_str()) && !self.cells.contains_key(obj.as_str()) {
+                if let Some((g, ty)) = self.cx.form_state.get(&format!("{obj}.{member}")).copied() {
+                    return Ok((Expr::Global(g), ty));
+                }
+            }
         }
         // Field access on a record value, or `.Length` etc. (later).
         let (base, bty) = self.expr(recv, None)?;
@@ -3145,6 +3283,15 @@ impl<'a> FnLower<'a> {
                     return self.array_to_list(call, e);
                 }
                 return Ok((call, ret));
+            }
+        }
+        // A bare call to a standard-library command: `IntToText(n)` is
+        // `int_to_text(n)`. Core's commands have no owner to put in front of
+        // them — they are not `Text.` anything — so the free call is how they
+        // are written, and a user method of the same name still wins.
+        if this_arg.is_none() && !key.contains('.') && !self.cx.methods.contains_key(&key) {
+            if let Some(found) = self.bare_command(&key, args)? {
+                return Ok(found);
             }
         }
         let sig = self
@@ -5402,6 +5549,56 @@ impl<'a> FnLower<'a> {
         Ok(Expr::Local(arr))
     }
 
+    /// `Name(args)` as the command `name(args)`, when the registry has one
+    /// taking that many arguments.
+    fn bare_command(
+        &mut self,
+        name: &str,
+        args: &[ast::Expr],
+    ) -> Result<Option<(Expr, TyId)>, String> {
+        let bare = snake_case(name);
+        let Some(reg) = self.cx.registry.as_ref() else {
+            return Ok(None);
+        };
+        let Some(cmd) = reg.get(&bare) else {
+            return Ok(None);
+        };
+        let sig = cmd.sig.clone();
+        let symbol = cmd.symbol.clone();
+        if sig.params.len() != args.len() {
+            return Err(format!(
+                "`{name}` expects {} argument(s), got {}",
+                sig.params.len(),
+                args.len()
+            ));
+        }
+        let params: Vec<TyId> = sig.params.iter().map(|t| ir_ty(*t, &mut self.cx)).collect();
+        let tags: Vec<i32> = sig.params.iter().map(|t| t.sdt_tag()).collect();
+        let ret = match sig.ret {
+            Some(t) => ir_ty(t, &mut self.cx),
+            None => TyTable::VOID,
+        };
+        let mut kargs = Vec::new();
+        for (i, (a, pty)) in args.iter().zip(params.iter()).enumerate() {
+            kargs.push(self.command_arg(name, i + 1, a, *pty, tags[i])?);
+        }
+        let slots = params
+            .iter()
+            .zip(tags.iter())
+            .map(|(ty, tag)| SlotTy { tag: *tag, ty: *ty })
+            .collect();
+        let call = Expr::Call(Box::new(Call::Command {
+            symbol,
+            args: kargs,
+            arg_slots: slots,
+            ret,
+        }));
+        if let TyKind::Array(e) = *self.tt().kind(ret) {
+            return self.array_to_list(call, e).map(Some);
+        }
+        Ok(Some((call, ret)))
+    }
+
     /// Resolve `value.Member(...)` to a command whose first parameter is the
     /// receiver: `length(s)` is written `s.Length`, `db_exec(db, …)` is written
     /// `db.Exec(…)`. The receiver's type must match that first parameter, which
@@ -5716,6 +5913,15 @@ impl<'a> FnLower<'a> {
                 Err(format!("cannot assign to unknown `{name}`"))
             }
             ast::ExprKind::Member(recv, member) => {
+                if let ast::ExprKind::Ident(obj) = &recv.kind {
+                    if !self.scope.contains_key(obj.as_str()) && !self.cells.contains_key(obj.as_str()) {
+                        if let Some((g, _)) =
+                            self.cx.form_state.get(&format!("{obj}.{member}")).copied()
+                        {
+                            return Ok(Place::Global(g));
+                        }
+                    }
+                }
                 let (base, bty) = self.expr(recv, None)?;
                 if let TyKind::Record(rid) = *self.tt().kind(bty) {
                     let rec = self.cx.b.m.record(rid);
