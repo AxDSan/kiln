@@ -1,7 +1,10 @@
 // An app that changes at run time: clicking increments a counter.
 //
-// The count lives in a module variable — state that outlives any single event
-// handler — rather than being read back out of the UI.
+// The count lives in a field of the form (`int count` in the code half) — state
+// that outlives any single event handler — rather than being read back out of
+// the label's text.
+//
+//   kiln build examples/counter.kiln -o counter
 
 namespace Counter;
 
@@ -39,6 +42,8 @@ public partial form MainWindow
 {
     int count = 0;
 
+    // Each click updates the field, then writes the new state back to the
+    // controls by name: `countLabel.Text`, `addButton.Text`.
     void OnAdd()
     {
         count = count + 1;

@@ -1,13 +1,20 @@
-// A chat client: a form, a `tcpclient`, and nothing that blocks.
+// A chat client: a form, a `Tcpclient`, and nothing that blocks.
 //
-//   kiln run examples/tcpecho.kiln 7000     (in one terminal)
-//   kiln run examples/tcpchat.kiln          (in another)
+//   kiln build examples/tcpchat.kiln -o tcpchat
+//   ./tcpecho 7000     (in one terminal; see examples/tcpecho.kiln)
+//   ./tcpchat          (in another)
 //
-// Connect is non-blocking: `Connect` asks, and the answer arrives later as
-// `connect` or `error` while the window keeps painting. `receive` hands the
-// handler each line the server sent, delimiter stripped, and `send` puts a
-// line on the wire — the client speaks lines because `delimiter` is a
-// newline, which is the default.
+// Connecting is non-blocking: the Connect button sets `link.Active = true`,
+// which asks, and the answer arrives later as the `Connect` or `Error` event
+// while the window keeps painting. `Receive` hands its handler each line the
+// server sent, delimiter stripped, and `TcpclientSend` puts a line on the wire
+// — the client speaks lines because its `Delimiter` is a newline, which is the
+// default.
+//
+// The client is declared outside the form, like any component without a
+// rectangle, but its events are wired to methods of the form: the first
+// `partial form Win` is the designer's half (the window and its widgets), and
+// the second is the code half, where those handlers live.
 
 namespace Tcpchat;
 

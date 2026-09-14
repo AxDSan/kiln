@@ -1,5 +1,7 @@
 // Records: a name for a group of related values, and the way a subroutine
 // gives back more than one thing.
+//
+//   kiln build examples/records.kiln -o records
 
 namespace Records;
 
@@ -10,12 +12,15 @@ public record Person(string Name, int Age, Point Home);
 public static class Records
 {
     // Two values out of one call — the reason records exist at the language level
-    // rather than as a library. `point{...}` reads as a value rather than a call.
+    // rather than as a library. A positional record is declared in one line, and
+    // `new Point(x, y)` fills its fields in the order they were declared.
     public static Point Midpoint(Point a, Point b)
     {
         return new Point((a.X + b.X) / 2, (a.Y + b.Y) / 2);
     }
 
+    // A record's fields read as members, and one record can hold another:
+    // `p.Home.X` reaches through the `Point` inside the `Person`.
     public static string Describe(Person p)
     {
         let where = $"{p.Home.X},{p.Home.Y}";
@@ -37,7 +42,8 @@ public static class Records
         same.Age = 37;
         Console.WriteLine(Describe(ada));
         // A list of records is a list like any other: the element is the same
-        // pointer a name holds, so `people[i]` and `ada` can be the same person.
+        // reference a name holds, so `people[1]` and `ada` are the same person.
+        // `Add` puts Grace on the end of the list in place.
         List<Person> people = [ada];
         people.Add(new Person("Grace", 45, new Point(3, 4)));
         foreach (var p in people)

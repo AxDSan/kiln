@@ -1,18 +1,20 @@
 // A TCP echo server with no socket anywhere in sight.
 //
-//   kiln run examples/tcpecho.kiln 7000
+//   kiln build examples/tcpecho.kiln -o tcpecho
+//   ./tcpecho 7000
 //   nc localhost 7000        (then type lines; `quit` stops the server)
 //
-// The server is a component, the way `httpserver` is: properties, events, and
-// no rectangle, so it is declared at module level and needs no form. `main`
-// sets the port from the command line — a property value in the source must
-// be a literal — switches it on, and returns; the program stays alive because
-// an active server is a live event source.
+// The server is a component, the way `Httpserver` is: properties, events, and
+// no rectangle, so it is declared at the top of the file, outside any class,
+// and needs no form. Its block sets properties and wires each event to a static
+// method with `+=`. `Main` sets the port from the command line — a property
+// value in the block must be a literal — switches it on, and returns; the
+// program stays alive because an active server is a live event source.
 //
 // Every event names the client it is about, as a small int counted from 1 in
-// order of arrival and never reused. `receive` fires once per line with the
-// delimiter already stripped, and the commands take the server's `name`, the
-// same way `grid_cell` takes a grid's.
+// order of arrival and never reused. `Receive` fires once per line with the
+// delimiter already stripped, and the Tcpserver commands take the server's
+// `Name` as a string, the same way `GridCell` takes a grid's.
 
 namespace Tcpecho;
 
@@ -61,7 +63,7 @@ public static class Tcpecho
         }
     }
 
-    // A port already in use lands here. With no `error` handler wired the server
+    // A port already in use lands here. With no `Error` handler wired the server
     // would say so on stderr and stop the program instead.
     public static void OnError(string message)
     {

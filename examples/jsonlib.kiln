@@ -2,9 +2,14 @@
 //
 // A document is a handle; a place inside it is named by a dotted path —
 // "user.name", "items[2].id" — because a document's shape is not known until
-// it has been parsed, which is what tells one apart from a `record`.
+// it has been parsed, which is what tells one apart from a `record` whose
+// fields the compiler knows.
 //
-//   kiln run examples/jsonlib.kiln
+// `using Kiln.Json;` brings in the Json commands. A handle is a plain int, 0
+// when there is no document, and a command that fails says why through
+// LastErrorCode() and LastErrorText().
+//
+//   kiln build examples/jsonlib.kiln -o jsonlib
 
 namespace Jsonlib;
 
@@ -15,8 +20,9 @@ public static class Jsonlib
     public static void Main()
     {
         // --- reading ---------------------------------------------------------
-        // A raw literal keeps every brace a brace, so the JSON reads exactly as it
-        // would in a file — no interpolation holes to escape.
+        // An ordinary string (no `$` in front) keeps every brace a brace — only a
+        // `$"..."` string treats `{` as an interpolation hole. The quotes inside
+        // are escaped with `\"`.
         let src = "{\"user\":{\"name\":\"Ada\",\"age\":36,\"admin\":true},\"items\":[{\"id\":10},{\"id\":20},{\"id\":30}],\"ratio\":0.5}";
         let doc = JsonParse(src);
         if (doc == 0)
@@ -47,41 +53,52 @@ public static class Jsonlib
         {
             Console.WriteLine("no email");
         }
-        // The member names of an object, by position.
+        // The member names of an object, by position — counted from 1.
         foreach (var i in 1..JsonCount(doc, "user"))
         {
             Console.WriteLine("key: " + JsonKeyAt(doc, "user", i));
         }
-        // Every element of an array, the count-plus-accessor way.
+        // Every element of an array, the count-plus-accessor way, with
+        // `$"items[{k}].id"` interpolating k into the path. A path's `[k]` counts
+        // from 1, like every Kiln position — so this 0..count-1 range, written the
+        // way JSON counts, reads items[0] (no element: 0) and stops before the
+        // third. The total is 30, not 60; 1..count is the range that visits all.
         int total = 0;
         foreach (var k in 0..JsonCount(doc, "items") - 1)
         {
-            total = total + JsonGetInt(doc, $"items[{k}].id");
+            total += JsonGetInt(doc, $"items[{k}].id");
         }
         Console.WriteLine($"total = {total}");
         // --- asking for the wrong thing --------------------------------------
+        // A missing path, or a number read as text, answers "" and leaves a
+        // non-zero LastErrorCode() with the reason in LastErrorText().
         let missing = JsonGetText(doc, "user.nickname");
         Console.WriteLine($"missing -> code {LastErrorCode()}");
         Console.WriteLine(JsonGetText(doc, "user.age"));
         Console.WriteLine(LastErrorText());
         // --- building --------------------------------------------------------
-        let @out = JsonNewObject();
-        let ok0 = JsonSetText(@out, "name", "Kiln");
-        let ok1 = JsonSetInt(@out, "version.major", 0);
-        let ok2 = JsonSetInt(@out, "version.minor", 1);
-        let ok3 = JsonSetBool(@out, "open", true);
-        let ok4 = JsonSetDouble(@out, "score", 9.25);
-        let ok5 = JsonSetArray(@out, "tags");
-        let ok6 = JsonSetText(@out, "tags[0]", "rad");
-        let ok7 = JsonSetText(@out, "tags[1]", "native");
-        Console.WriteLine(JsonStringify(@out));
-        // Removing: false with code 0 is a genuine "it was not there".
-        let gone = JsonRemove(@out, "score");
-        Console.WriteLine(JsonStringify(@out));
-        let again = JsonRemove(@out, "score");
+        // Setting a path creates whatever objects it passes through. `built` is the
+        // new document's handle. Each setter
+        // answers whether it worked; this example names those answers and moves on.
+        // tags[0] is no position (they count from 1), so ok6 is false and "rad"
+        // never lands: tags[1] is the first element, and the output shows only it.
+        let built = JsonNewObject();
+        let ok0 = JsonSetText(built, "name", "Kiln");
+        let ok1 = JsonSetInt(built, "version.major", 0);
+        let ok2 = JsonSetInt(built, "version.minor", 1);
+        let ok3 = JsonSetBool(built, "open", true);
+        let ok4 = JsonSetDouble(built, "score", 9.25);
+        let ok5 = JsonSetArray(built, "tags");
+        let ok6 = JsonSetText(built, "tags[0]", "rad");
+        let ok7 = JsonSetText(built, "tags[1]", "native");
+        Console.WriteLine(JsonStringify(built));
+        // Removing: false with LastErrorCode() at 0 is a genuine "it was not there".
+        let gone = JsonRemove(built, "score");
+        Console.WriteLine(JsonStringify(built));
+        let again = JsonRemove(built, "score");
         Console.WriteLine($"second remove -> code {LastErrorCode()}");
         // --- round-tripping through a file -----------------------------------
-        let saved = JsonSave(@out, "/tmp/kiln_jsonlib.json");
+        let saved = JsonSave(built, "/tmp/kiln_jsonlib.json");
         let back = JsonParseFile("/tmp/kiln_jsonlib.json");
         Console.WriteLine(JsonGetText(back, "name"));
         Console.WriteLine(JsonGetInt(back, "version.minor"));

@@ -2,6 +2,10 @@
 //
 //   kiln build examples/hello.kiln -o hello
 //   ./hello
+//
+// Every program lives in a `namespace` and starts at `Main`, a static method
+// of a static class. `Console.WriteLine` prints any value — text, a number —
+// followed by a newline.
 
 namespace Hello;
 
@@ -9,10 +13,12 @@ public static class Hello
 {
     public static void Main()
     {
-        // A binding takes its type from its value, so an annotation only earns its
-        // place where the value cannot supply one.
+        // `let` declares a binding that never changes; `var` declares one that
+        // can. Either takes its type from its value, so a written type such as
+        // `string title` only earns its place where the value cannot supply one.
         let title = "Kiln — arithmetic demo";
         Console.WriteLine(title);
+
         // 6 * 7, and operator precedence: 2 + 3 * 4 == 14
         let answer = 6 * 7;
         Console.WriteLine(answer);

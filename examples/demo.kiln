@@ -1,7 +1,7 @@
 // A tour of the core commands: text, numbers, maths and dates, and calls used
 // as expressions — many of them written left-to-right with the method dot.
 //
-//   kiln run examples/demo.kiln
+//   kiln build examples/demo.kiln -o demo
 
 namespace Demo;
 
@@ -10,17 +10,17 @@ public static class Demo
     public static void Main()
     {
         // --- text ---
-        // `x.f(a)` is `f(x, a)`, so a chain reads in the order it happens.
+        // `x.F(a)` is `F(x, a)`, so a call reads in the order it happens.
         let greeting = "Hello, " + "Kiln";
-        Console.WriteLine(Uppercase(greeting));
-        Console.WriteLine(Length(greeting));
-        Console.WriteLine(Replace("a-b-c-d", "-", "/"));
-        Console.WriteLine(Trim("   padded   "));
-        Console.WriteLine(Reverse("stressed"));
+        Console.WriteLine(greeting.Uppercase());            // HELLO, KILN
+        Console.WriteLine(greeting.Length());               // 11
+        Console.WriteLine("a-b-c-d".Replace("-", "/"));     // a/b/c/d
+        Console.WriteLine("   padded   ".Trim());           // padded
+        Console.WriteLine("stressed".Reverse());            // desserts
         // --- integer math ---
-        Console.WriteLine(MaxInt(3, 9));
-        Console.WriteLine(PowInt(2, 10));
-        Console.WriteLine(17 % 5);
+        Console.WriteLine(MaxInt(3, 9));                    // 9
+        Console.WriteLine(PowInt(2, 10));                   // 1024
+        Console.WriteLine(17 % 5);                          // 2
         // --- floating point (no implicit conversion: convert explicitly) ---
         double two = IntToDouble(2);
         let root = Sqrt(two);
@@ -29,7 +29,7 @@ public static class Demo
         // --- conversions round-trip ---
         let n = TextToInt("42");
         Console.WriteLine($"n = {n}");
-        // --- datetime (year of the epoch, UTC) ---
-        Console.WriteLine(Year(IntToInt64(0)));
+        // --- datetime (the year of timestamp 0, the Unix epoch, in UTC) ---
+        Console.WriteLine(Year(IntToInt64(0)));             // 1970
     }
 }

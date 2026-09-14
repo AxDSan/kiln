@@ -1,10 +1,13 @@
 // What an event hands its handler.
 //
-// `tick` reports which tick this is, counting from 1. A handler may take that
-// number or ignore it, and both are ordinary subroutines — the compiler makes
-// the two agree, so neither one is written around the other. `counted` and
-// `plain` are the same kind of component wired to the same event; only their
+// A timer's `Tick` event reports which tick this is, counting from 1. A handler
+// may take that number as an `int` parameter or leave the parameter list empty,
+// and both are ordinary static methods — the compiler makes the two agree, so
+// neither one is written around the other. `counted` and `plain` are the same
+// kind of component, each subscribing a handler to `Tick` with `+=`; only their
 // handlers differ.
+//
+//   kiln build examples/eventparams.kiln -o eventparams
 
 namespace Eventparams;
 
@@ -22,6 +25,7 @@ Timer plain
 
 public static class Eventparams
 {
+    // How many times `OnPlain` has run; the third run ends the program.
     private int rounds = 0;
 
     public static void Main()
@@ -35,10 +39,10 @@ public static class Eventparams
         Console.WriteLine($"counted tick {n}");
     }
 
-    // Ignores it, and says so by not naming it.
+    // Ignores it, and says so by taking no parameter.
     public static void OnPlain()
     {
-        rounds = rounds + 1;
+        rounds += 1;
         Console.WriteLine("plain tick");
         if (rounds >= 3)
         {

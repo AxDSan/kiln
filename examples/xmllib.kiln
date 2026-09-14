@@ -5,7 +5,10 @@
 // program writes a table of that shape — as BYTES, because that is the whole
 // point — and then reads it the way a server reads the real thing.
 //
-//   kiln run examples/xmllib.kiln
+// `using` brings in four libraries: File to write and read the bytes, Xml to
+// walk the document, Text to split an attribute, Encoding to decode GBK.
+//
+//   kiln build examples/xmllib.kiln -o xmllib
 
 namespace Xmllib;
 
@@ -21,7 +24,7 @@ public static class Xmllib
         let path = "/tmp/kiln_xmllib.xml";
         // --- a table in the shape these files have ---------------------------
         // Built byte by byte: the declaration lies about the encoding on purpose, and
-        // 214/208 is 中 in GBK, which Rust-style source text cannot express.
+        // 206/228 is 武 in GBK, which a Kiln string — always UTF-8 — cannot hold.
         Bytes doc = BytesNew(0);
         doc = BytesConcat(doc, BytesFromText("<?xml version=\"1.0\" encoding=\"GB2312\"?>\n"));
         doc = BytesConcat(doc, BytesFromText("<!--\"weapon\", "));
@@ -49,6 +52,7 @@ public static class Xmllib
         let nchild = XmlCount(h, root);
         Console.WriteLine($"{rname}: {nchild} groups, starting on line {XmlLine(h, root)}");
         // By position, which is how a program walks groups it cannot name in advance.
+        // Children count from 1, so `1..nchild` (both ends included) visits each.
         foreach (var i in 1..nchild)
         {
             let group = XmlChild(h, root, i);
@@ -63,7 +67,8 @@ public static class Xmllib
         let satk = XmlAttr(h, sword, "Attack");
         Console.WriteLine($"found {sname} ID={sid} Attack={satk}");
         // Every row of the Swords group, whatever its element is called — which is
-        // the case here, since the client names each row its own template.
+        // the case here, since the client names each row its own template. An empty
+        // name matches any element, and a node of 0 means there are no more.
         let swords = XmlFirst(h, XmlChild(h, root, 1), "Swords");
         var row = XmlFirst(h, swords, "");
         var total = 0;
@@ -77,12 +82,13 @@ public static class Xmllib
             {
                 first = TextToInt(TextSplitAt(atk, ",", 1));
             }
-            total = total + first;
+            total += first;
             row = XmlSibling(h, row, "");
         }
         Console.WriteLine($"total first-tick attack: {total}");
         // An attribute that is not there answers "" without failing, and the
-        // predicate is what tells "absent" from "empty".
+        // predicate XmlHasAttr is what tells "absent" from "empty"; LastErrorCode()
+        // stays 0.
         let missing = XmlAttr(h, sword, "MaterialProyAdd");
         let has = XmlHasAttr(h, sword, "MaterialProyAdd");
         Console.WriteLine($"MaterialProyAdd '{missing}' present={has} error code {LastErrorCode()}");

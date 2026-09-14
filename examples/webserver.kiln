@@ -1,16 +1,18 @@
 // A web service in twenty lines, with no socket anywhere in sight.
 //
-//   kiln run examples/webserver.kiln
+//   kiln build examples/webserver.kiln -o webserver
+//   ./webserver
 //   curl localhost:8080/hello?name=Ada
 //   curl localhost:8080/quit
 //
 // The server is a component: it has properties and an event, exactly as a
-// button does, and what it lacks is a rectangle. `main` prints one line and
-// returns — the program stays alive because the server is a live event source,
-// the same way examples/loopdemo.kiln stays alive on a timer.
+// Button does, and what it lacks is a rectangle — so it is declared outside any
+// class, and `Request += OnRequest;` wires its event to a static method. `Main`
+// prints one line and returns — the program stays alive because the server is a
+// live event source, the same way examples/loopdemo.kiln stays alive on a timer.
 //
 // It listens on 127.0.0.1 because that is the default and this program never
-// says otherwise. Setting `bind = "0.0.0.0"` would put it on every interface of
+// says otherwise. Setting `Bind = "0.0.0.0";` would put it on every interface of
 // the machine, which is a decision, not a default.
 
 namespace Webserver;
@@ -25,17 +27,18 @@ Httpserver site
 
 public static class Webserver
 {
-    // The event handler takes no parameters — the compiler calls it with none.
-    // `net_request()` answers the request being dispatched right now, and passing
-    // it on is what makes the real work a subroutine with a parameter: a request
-    // parked in a global would serve the first caller and quietly hand the second
-    // caller the first one's data.
+    // The event handler takes no parameters — the server calls it with none.
+    // `NetRequest()` answers the request being dispatched right now, and passing
+    // it on is what makes the real work a method with a parameter: a request
+    // parked in a static field would serve the first caller and quietly hand the
+    // second caller the first one's data.
     public static void OnRequest()
     {
         Route(NetRequest());
     }
 
-    // One value tested against several routes: an `if` chain written once.
+    // One value tested against several routes, first match wins: an `if` /
+    // `else if` chain, with a final `else` for every path nobody routed.
     public static void Route(int req)
     {
         let path = NetReqPath(req);
@@ -68,7 +71,8 @@ public static class Webserver
         NetReqReplyAs(req, 200, "text/html; charset=utf-8", page);
     }
 
-    // `if C then A else B` chooses a value, and a `{hole}` fills in the rest.
+    // `C ? A : B` chooses a value, and an interpolated string `$"...{hole}..."`
+    // fills in the rest.
     public static void ReplyHello(int req)
     {
         let who = NetReqQuery(req, "name");

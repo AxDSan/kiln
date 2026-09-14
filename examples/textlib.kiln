@@ -1,6 +1,11 @@
 // The `text` support library: string work beyond core's.
 //
-//   kiln run examples/textlib.kiln
+// `using Kiln.Text;` brings in the Text commands. Positions in a string are
+// counted in characters, not bytes, and from 1. A command that can fail
+// answers with a plain value and records why in the error slot, which
+// LastErrorCode() and LastErrorText() read.
+//
+//   kiln build examples/textlib.kiln -o textlib
 
 namespace Textlib;
 
@@ -29,7 +34,7 @@ public static class Textlib
         }
         // --- positions, in characters ---
         // "héllo" is five characters but six bytes: an index measured in bytes would
-        // say 3 here, not 2.
+        // say 4 here, not 3; a missing piece answers 0.
         Console.WriteLine(Length("héllo"));
         Console.WriteLine(TextIndexOf("héllo", "llo"));
         Console.WriteLine(TextIndexOf("héllo", "z"));
@@ -53,6 +58,7 @@ public static class Textlib
         Console.WriteLine(TextFromCode(233));
         Console.WriteLine(TextFromCode(9731));
         // --- splitting: a count plus an indexed accessor ---
+        // TextSplitCount says how many fields there are and TextSplitAt fetches one.
         // A trailing separator makes a real (empty) final field.
         let parts = TextSplitCount("a,,b,", ",");
         Console.WriteLine(parts);
@@ -62,7 +68,8 @@ public static class Textlib
         Console.WriteLine(TextSplitAt("a,,b,", ",", 3));
         Console.WriteLine("[" + TextSplitAt("a,,b,", ",", 4) + "]");
         // --- failure reporting ---
-        // "" from a bad code point, with the reason left in the error slot.
+        // "" from a bad code point, with the reason left in the error slot for
+        // LastErrorCode() and LastErrorText() to read.
         let badCode = -1;
         let bad = TextFromCode(badCode);
         let code = LastErrorCode();
@@ -73,7 +80,7 @@ public static class Textlib
         let after = LastErrorCode();
         Console.WriteLine(good);
         Console.WriteLine(after);
-        // An out-of-range index is a failure, not an empty character.
+        // An out-of-range position is a failure, not an empty character.
         let missing = TextCharAt("hi", 9);
         Console.WriteLine(LastErrorCode());
     }

@@ -1,3 +1,9 @@
+// The everyday controls on one form: a label, an edit box, a checkbox, a group
+// box, a progress bar and a button. Clicking Go reads the edit box back —
+// `nameBox.Text` is whatever was typed, not the "Ada" the form started with.
+//
+//   kiln build examples/controls.kiln -o controls
+
 namespace Controls;
 
 using Kiln.Ui;

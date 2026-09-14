@@ -1,14 +1,15 @@
 // The visual palette: one window holding every control you can put on a form.
 //
-//   kiln run examples/gallery.kiln
+//   kiln build examples/gallery.kiln -o gallery
 //
-// Items are ONE text with a newline between entries. That is not shorthand for
-// a `text[]` — a property value is a literal, so a list has to arrive as one
-// value — and it is what a subroutine appends to as well:
+// `Items` is ONE string with a newline between entries. That is not shorthand
+// for a `List<string>` — a property value in the designer's half is a literal,
+// so a list has to arrive as one value — and it is what a method appends to as
+// well:
 //
-//   colours.items &= "\nPurple"
+//   colours.Items = colours.Items + "\nPurple";
 //
-// Positions count from 1, so `selected = 2` is the second entry and 0 is
+// Positions count from 1, so `Selected = 2` is the second entry and 0 is
 // "nothing chosen".
 
 namespace Gallery;

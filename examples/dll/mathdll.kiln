@@ -1,5 +1,9 @@
-// Calling a C library through `dll`. The library is `libmathdll.so`, built from
-// `mathdll.c` and sitting beside this program.
+// Calling a C library through `[Dll]`. The library is `libmathdll.so`, built
+// from `mathdll.c` and sitting beside this program.
+//
+// Each C function is a `static extern` method with no body: `[Dll("mathdll")]`
+// names the library (without its `lib` prefix or `.so` suffix) and `Entry`
+// names the exported symbol, so the method itself can have a Kiln name.
 
 namespace Dllmath;
 
@@ -30,17 +34,17 @@ public static class Dllmath
     {
         // A value in, a value out.
         Console.WriteLine(AddInts(40, 2));
-        // A C string out, copied into a managed text.
+        // A C string out, copied into a managed `string`.
         Console.WriteLine(Banner());
-        // A pointer the callee writes through: a 4-byte cell, set to 41, bumped to 42.
+        // A `Ptr` the callee writes through: a 4-byte cell, set to 41, bumped to 42.
         Ptr cell = MemAlloc(4);
         PtrWriteInt(cell, 0, 41);
         Bump(cell);
         Console.WriteLine(PtrReadInt(cell, 0));
         MemFree(cell);
-        // The exported symbol is `times_ten`; `as` lets the program call it `tentimes`.
+        // The exported symbol is `times_ten`; `Entry` lets the program call it `Tentimes`.
         Console.WriteLine(Tentimes(5));
-        // int64, double and bool all cross the boundary.
+        // `long`, `double` and `bool` all cross the boundary.
         PrintInt64(AddBignums(9000000000, 1));
         Console.WriteLine(Halve(7.0));
         if (IsPositive(3))

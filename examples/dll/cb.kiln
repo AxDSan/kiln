@@ -1,7 +1,10 @@
-// Passing a subroutine to C as a function pointer. The library is `libcb.so`,
-// built from `cb.c` and sitting beside this program. `apply` calls back into
-// `summer` for a value; `each` calls `announce` once per number for its side
+// Passing a method to C as a function pointer. The library is `libcb.so`,
+// built from `cb.c` and sitting beside this program. `Apply` calls back into
+// `Summer` for a value; `Each` calls `Announce` once per number for its side
 // effect — proof that C can drive Kiln code, not only the other way round.
+//
+// A `static` method converts to a C function pointer wherever a `Ptr` is
+// expected: assigned to a `Ptr` variable, or named directly as the argument.
 
 namespace Dllcb;
 
@@ -17,21 +20,22 @@ public static class Dllcb
     public static extern void Greet(Ptr fn);
 
     // A callback C invokes for a result: two ints in, their sum out. Its signature
-    // is C-representable, so `address of summer` is a pointer C can call directly.
+    // is C-representable, so `Summer` converts to a pointer C can call directly.
     public static int Summer(int a, int b)
     {
         return a + b;
     }
 
-    // A callback C invokes for effect: printed, nothing returned. `each` calls it
+    // A callback C invokes for effect: printed, nothing returned. `Each` calls it
     // with 1, 2, 3, so the program prints that sequence from inside C's loop.
     public static void Announce(int n)
     {
         Console.WriteLine(n);
     }
 
-    // A callback handed a C string. It arrives as a `text` the sub reads for the
-    // duration of the call, proving a text parameter crosses the boundary intact.
+    // A callback handed a C string. It arrives as a `string` the method reads for
+    // the duration of the call, proving a string parameter crosses the boundary
+    // intact.
     public static void Say(string t)
     {
         Console.WriteLine(t);
@@ -39,12 +43,12 @@ public static class Dllcb
 
     public static void Main()
     {
-        // C receives the address of `summer` and calls it with (40, 2).
+        // C receives the address of `Summer` and calls it with (40, 2).
         Ptr add = Summer;
         Console.WriteLine(Apply(add, 40, 2));
-        // C calls `announce` three times, from its own loop.
+        // C calls `Announce` three times, from its own loop.
         Each(Announce, 3);
-        // C hands `say` a string it owns; the sub reads it and prints "from C".
+        // C hands `Say` a string it owns; the method reads it and prints "from C".
         Greet(Say);
     }
 }

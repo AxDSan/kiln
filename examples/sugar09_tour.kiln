@@ -1,20 +1,26 @@
-// The 0.9.0 shorthands in one program: block and raw text, collection
-// literals, slicing, the dot call, `let` inference, the value `if`, `enum`,
-// `match`, `repeat`, `assert`, parameter defaults, named arguments, record
-// literals and updates, optionals with `otherwise` and `if some`, a list built
-// by a loop, `check`, and `defer`. Every one desugars to something the language
-// already had, so this transcript is exactly what the longhand would print.
+// A tour of the shorthands in one program: escaped text, collection literals,
+// `Slice`, method-style calls, `let` inference, the `?:` choice, named
+// constants, `else if` chains, a counting loop, a guard that stops the program,
+// parameter defaults, records, optionals with `??` and `!= null`, lambdas over
+// a list, and `defer`. Each one prints exactly what the longhand would.
+//
+//   kiln build examples/sugar09_tour.kiln -o sugar09_tour
 
 namespace Sugar09Tour;
 
+// A record is written positionally: its fields are its constructor's
+// parameters, and it compares by value.
 public record Point(int X, int Y, string Label);
 
 public static class Sugar09Tour
 {
+    // Named constants for a run of severities, counting from 1.
     public const int SeverityInfo = 1;
     public const int SeverityWarning = 2;
     public const int SeverityError = 3;
-    private string trail = "";
+
+    // Where `defer` proves itself: the trail records the order things happened in.
+    private static string trail = "";
 
     /// Add a word to the trail that the tour prints at the end.
     public static void Note(string what)
@@ -22,7 +28,7 @@ public static class Sugar09Tour
         trail = trail + what + " ";
     }
 
-    /// Name a severity. `match` tests one value against several, written once.
+    /// Name a severity: an `else if` chain tests one value against several.
     public static string Label(int s)
     {
         if (s == SeverityInfo)
@@ -40,22 +46,17 @@ public static class Sugar09Tour
     }
 
     /// Describe a connection. The last parameters carry defaults, so a call may
-    /// leave them out — and name the ones it gives.
+    /// leave them out and give only the ones it needs.
     public static string Connect(string host, int port = 80, int timeout = 5000)
     {
         return $"{host}:{port}, giving up after {timeout}ms";
     }
 
-    /// Look a name up. `check` returns early when the lookup failed, handing the
-    /// caller the same 0 the failing command would have.
+    /// Look a name up. `Get` answers an `int?`, and `??` says what a missing
+    /// name means: 0.
     public static int AgeOf(Dictionary<string, int> book, string who)
     {
-        int years = (book.Get(who) ?? 0);
-        if (LastErrorCode() != 0)
-        {
-            return 0;
-        }
-        return years;
+        return book.Get(who) ?? 0;
     }
 
     /// Open, work, and close — with the closing written beside the opening.
@@ -73,84 +74,84 @@ public static class Sugar09Tour
 
     public static void Main()
     {
-        // Three quotes open a block whose newlines are its own; holes still fire.
+        // `\n` in a string is a newline, and a `$` string's holes still fire.
         string who = "Kiln";
         string banner = $"{who} 0.9.0\nthe shorthands, in one program\n";
-        Console.WriteLine(Trim(banner));
-        // An `r` before the quote makes a raw literal: no escapes, no holes.
+        Console.WriteLine(banner.Trim());                   // two lines
+        // A backslash is written `\\`; braces in a string without `$` are just text.
         Console.WriteLine("C:\\logs\\{today}.txt");
-        // A list is written out, and `a..b` takes a run of it — both ends included.
+        // A list is written out in brackets, and `Slice(a, b)` takes positions
+        // a through b — both ends included, counting from 1.
         List<string> names = ["Ada", "Grace", "Alan", "Edsger"];
-        Console.WriteLine(Join(names.Slice(2, 3), ", "));
-        // `x.f(a)` is `f(x, a)`: the same call, read in the order it happens.
+        Console.WriteLine(Join(names.Slice(2, 3), ", "));   // Grace, Alan
+        // `x.F()` is `F(x)`: the same call, read in the order it happens.
         string messy = "  ada lovelace  ";
-        Console.WriteLine(Uppercase(Trim(messy)));
-        // `let` without a type takes it from the value; `if c then a else b` is the
-        // choice above written where a value goes.
+        Console.WriteLine(Uppercase(messy.Trim()));        // ADA LOVELACE
+        // `let` without a type takes it from the value; `c ? a : b` is a choice
+        // written where a value goes.
         let n = names.Count;
         if (!(n == 4))
         {
             AssertFailed("the tour lists four names");
         }
         string word = (n == 1 ? "name" : "names");
-        Console.WriteLine($"{n} {word}");
-        // An enum member is reached through the enum's name, and is an int.
-        Console.WriteLine(SeverityError);
-        Console.WriteLine(Label(SeverityWarning));
-        // `repeat N times` is the counting loop with its counter hidden.
-        foreach (var repeat1 in 1..3)
+        Console.WriteLine($"{n} {word}");                   // 4 names
+        // A constant is an int, and reads as one wherever it is used.
+        Console.WriteLine(SeverityError);                   // 3
+        Console.WriteLine(Label(SeverityWarning));          // warning
+        // A range loop whose counter the body never reads: do this three times.
+        foreach (var tick in 1..3)
         {
             Note("tick");
         }
-        Console.WriteLine(Attempt(1));
-        Console.WriteLine(Attempt(2));
-        // A default fills what the call leaves out; a named argument says which slot
-        // it is filling, whatever order it comes in.
+        Console.WriteLine(Attempt(1));                      // 10 — the defer still runs
+        Console.WriteLine(Attempt(2));                      // 20
+        // A default fills whatever the call leaves out at the end.
         Console.WriteLine(Connect("example.com"));
         Console.WriteLine(Connect("example.com", 8080));
         Console.WriteLine(Connect("localhost", 80, 250));
-        // A record can be written with braces, and copied with `...`.
+        // A record is made with `new` and read through its fields; a changed copy
+        // is a new record that takes what it keeps from the old one.
         let origin = new Point(0, 0, "origin");
         let moved = new Point(3, origin.Y, "moved");
         Console.WriteLine($"{origin.Label} at {origin.X},{origin.Y}");
         Console.WriteLine($"{moved.Label} at {moved.X},{moved.Y}");
-        // A dictionary lookup may find nothing, so its answer is a `T?` the checker
-        // will not let you read until you have said what a missing one means.
+        // A dictionary lookup may find nothing, so `Get` answers a `T?` the checker
+        // will not let you read as a `T` until you have said what a missing one means.
         Dictionary<string, int> ages = new Dictionary<string, int> { ["ada"] = 36, ["grace"] = 45 };
-        int? ada = (ages.Get("ada") ?? 0);
-        int? zed = (ages.Get("zed") ?? 0);
-        Console.WriteLine((ada ?? 0));
-        Console.WriteLine((zed ?? 0));
+        int? ada = ages.Get("ada");
+        int? zed = ages.Get("zed");
+        Console.WriteLine(ada ?? 0);                        // 36
+        Console.WriteLine(zed ?? 0);                        // 0 — nothing was there
+        // After `!= null`, the checker knows the value is there and lets you use it.
+        if (ada != null)
         {
-            let years = ada;
-            if (years != null)
-            {
-                Console.WriteLine($"ada is {years}");
-            }
-            else
-            {
-                Console.WriteLine("ada is not in the book");
-            }
+            Console.WriteLine($"ada is {ada}");
         }
-        // `none` is the optional that holds nothing until something fills it.
+        else
+        {
+            Console.WriteLine("ada is not in the book");
+        }
+        // `null` is the optional that holds nothing until something fills it.
         string? newest = null;
         foreach (var name in names)
         {
             newest = name;
         }
-        Console.WriteLine((newest ?? "(nobody)"));
-        // `check` inside `age_of` hands back the sentinel when the key is missing.
-        Console.WriteLine(AgeOf(ages, "grace"));
-        Console.WriteLine(AgeOf(ages, "zed"));
-        // A list built by a loop, written where the list is wanted.
+        Console.WriteLine(newest ?? "(nobody)");            // Edsger
+        // `AgeOf` hands back 0 when the key is missing.
+        Console.WriteLine(AgeOf(ages, "grace"));            // 45
+        Console.WriteLine(AgeOf(ages, "zed"));              // 0
+        // `Select` builds a new list by passing each element through a lambda.
         List<int> doubled = [1, 2, 3].Select(v => v * 2);
-        Console.WriteLine(Join(doubled.Select(d => IntToText(d)), ", "));
-        // The keys come out in the order they went in; the sort keeps the line
-        // stable whatever the filter picks — the filter is what it is showing.
-        List<string> grown = ages.Keys.Where(k => ((ages.Get(k) ?? 0)) >= 40);
+        Console.WriteLine(Join(doubled.Select(d => IntToText(d)), ", "));   // 2, 4, 6
+        // `Where` keeps the elements a lambda accepts. The keys come out in the
+        // order they went in; the sort keeps the line stable whatever the filter
+        // picks — the filter is what it is showing.
+        List<string> grown = ages.Keys.Where(k => (ages.Get(k) ?? 0) >= 40);
         grown.Sort();
-        Console.WriteLine(Join(grown, ", "));
+        Console.WriteLine(Join(grown, ", "));               // grace
         // And the trail, which is `defer` seen from outside.
-        Console.WriteLine(Trim(trail));
+        Console.WriteLine(trail.Trim());
     }
 }

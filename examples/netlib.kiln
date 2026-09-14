@@ -1,10 +1,15 @@
 // Networking: TCP, HTTP, and what a program sees when a url needs TLS.
 //
-//   kiln run examples/netlib.kiln
+//   kiln build examples/netlib.kiln -o netlib
 //
 // Only the https line needs the network, and only on a toolchain that vendored
 // mbedTLS; everything else is pure or dials a closed port on purpose, because
 // the failures a program must be able to detect are the point of the file.
+//
+// `using Kiln.Net;` brings the networking commands into scope. A command that
+// fails does not throw: it returns an empty value (0, "" or false) and records
+// why, which `LastErrorCode()` and `LastErrorText()` read back straight after
+// the call.
 
 namespace Netlib;
 
@@ -69,7 +74,7 @@ public static class Netlib
         // --- localhost always resolves, without touching the network ---
         Console.WriteLine(NetHostIp("127.0.0.1"));
         // --- the serving side, with nothing served ---
-        // net_request() answers only inside an httpserver `request` handler; asking
+        // NetRequest() answers only inside an Httpserver's `Request` handler; asking
         // for one anywhere else is a failure, not an empty answer, because a program
         // that got 0 back and carried on would be replying into nothing.
         Console.WriteLine(NetRequest());

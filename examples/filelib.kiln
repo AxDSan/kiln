@@ -1,9 +1,14 @@
 // Files, directories and paths — the `file` support library.
 //
-//   kiln run examples/filelib.kiln
+//   kiln build examples/filelib.kiln -o filelib
 //
 // Everything happens under a scratch directory the program creates and then
 // removes, so running it twice leaves nothing behind.
+//
+// `using Kiln.File;` brings the library's commands into scope — FileReadText,
+// DirCreate, PathJoin and the rest — as plain calls. A command that can fail
+// answers with an ordinary value and records why in the error slot, which
+// LastErrorCode() and LastErrorText() read.
 
 namespace Filelib;
 
@@ -11,7 +16,8 @@ using Kiln.File;
 
 public static class Filelib
 {
-    // Every binary check below reports through here, the same shape arrays.kiln uses.
+    // Every yes-or-no check below reports through this one method, the same
+    // shape arrays.kiln uses: a label to print and the bool that decides it.
     public static void Check(string what, bool ok)
     {
         if (ok)
@@ -28,6 +34,7 @@ public static class Filelib
     {
         let dir = "filelib-scratch";
         let note = dir + "/note.txt";
+        // `let` names a value that never changes; `var` below is one that does.
         // --- paths are pure text: they answer before anything exists ----------
         Console.WriteLine(PathName(note));
         Console.WriteLine(PathParent(note));
@@ -60,14 +67,15 @@ public static class Filelib
         while (!FileAtEnd(h))
         {
             let line = FileReadLine(h);
-            n = n + 1;
+            n += 1;
             Console.WriteLine($"{n}: {line}");
         }
         if (FileClose(h))
         {
             Console.WriteLine("closed");
         }
-        // A stale handle is a failure, not a crash.
+        // A stale handle is a failure, not a crash: FileClose answers false and
+        // LastErrorText() says why.
         if (!FileClose(h))
         {
             Console.WriteLine($"second close: {LastErrorText()}");
@@ -89,21 +97,24 @@ public static class Filelib
         {
             Console.WriteLine("moved");
         }
-        // --- failure is a sentinel plus the error slot -------------------------
+        // --- failure is an ordinary value plus a reason in the error slot ------
+        // Reading a missing file answers "" and leaves a non-zero LastErrorCode().
         let missing = FileReadText(PathJoin(dir, "nope.txt"));
         Console.WriteLine($"missing file -> [{missing}]");
         if (LastErrorCode() != 0)
         {
             Console.WriteLine(LastErrorText());
         }
-        // false with code 0 is a genuine "no", not a failure.
+        // false with LastErrorCode() at 0 is a genuine "no", not a failure.
         if (!FileExists(PathJoin(dir, "nope.txt")) && LastErrorCode() == 0)
         {
             Console.WriteLine("absent, and that is an answer not an error");
         }
         // --- bytes: the path that survives a NUL --------------------------------
         // A PNG is full of NUL bytes, and text stops at the first one.  This is that
-        // difference made visible: the same three bytes, read both ways.
+        // difference made visible: the same three bytes, read both ways. A `Bytes`
+        // is indexed by offset, counted from 0 — unlike a list or a string position,
+        // which counts from 1.
         let blob = PathJoin(dir, "blob.bin");
         Bytes raw = BytesNew(3);
         raw[0] = 65;
@@ -117,14 +128,15 @@ public static class Filelib
         Check("the NUL survived", back[1] == 0);
         Check("byte 3 survived", back[2] == 66);
         // The text path truncates at the NUL — one character, not three.  That is
-        // not a bug in file_read_text; it is what a C string is, and why the bytes
+        // not a bug in FileReadText; it is what a C string is, and why the bytes
         // commands exist beside it.
         Check("the text path stops at the NUL", Length(FileReadText(blob)) == 1);
         Check("file_append_bytes", FileAppendBytes(blob, raw));
         let both = FileReadBytes(blob);
         Check("appending doubled it", BytesCount(both) == 6);
         Check("the second copy is intact", both[3] == 65 && both[4] == 0 && both[5] == 66);
-        // Failure is an empty byte-set plus the error slot, the way "" is for text.
+        // Failure is an empty `Bytes` plus a reason in the error slot, the way "" is
+        // for text.
         let gone = FileReadBytes(PathJoin(dir, "no-such.bin"));
         Check("a missing file reads empty", BytesCount(gone) == 0);
         Check("and says why", LastErrorCode() != 0);

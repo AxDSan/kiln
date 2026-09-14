@@ -1,8 +1,11 @@
-// Running other programs: libs/process.
+// Running other programs: the `process` library, loaded with `using Kiln.Process;`.
 //
 // The distinction the library is built around is "could not start" (-1 or
 // handle 0, with an error code) versus "ran and failed" (its real exit status,
-// no error).
+// no error). The commands answer plain values and write the error slot, which
+// LastErrorCode() reads, only when something could not be done at all.
+//
+//   kiln build examples/processlib.kiln -o processlib
 
 namespace Processlib;
 
@@ -63,8 +66,11 @@ public static class Processlib
             }
         }
         // --- reading to the end: "" is ambiguous, so the predicate sits beside it ---
-        // A raw literal carries the backslashes through untouched, so printf is the
-        // one that turns `\n` into newlines.
+        // ProcessReadLine answers "" both for an empty line and at the end of the
+        // output, so ProcessAtEnd is asked right after each read to tell them apart.
+        // `\\n` in the string literal is a backslash then an n, so the shell command
+        // really reads `printf 'alpha\nbeta\n...'` — printf is the one that turns
+        // `\n` into newlines, and the blank third line shows "" is a real line.
         var lines = ProcessStart("printf 'alpha\\nbeta\\n\\ngamma\\n'");
         int count = 0;
         while (count < 10)
@@ -75,7 +81,7 @@ public static class Processlib
                 break;
             }
             Console.WriteLine($"line: [{line}]");
-            count = count + 1;
+            count += 1;
         }
         Console.WriteLine("end of output");
         if (ProcessClose(lines))

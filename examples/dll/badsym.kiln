@@ -1,4 +1,6 @@
 // Reaching for a symbol the library does not export is a named run-time error.
+// `libmathdll.so` has no `does_not_exist`, so the first call to `Nope` — the
+// moment the `[Dll]` binds — stops the program with a message naming it.
 
 namespace Dllbadsym;
 

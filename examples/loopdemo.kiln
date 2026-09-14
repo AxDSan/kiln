@@ -1,10 +1,13 @@
 // A console program that outlives `main`.
 //
-// `main` prints one line and returns — and the program keeps running, because
+// `Main` prints one line and returns — and the program keeps running, because
 // the timer is a live event source and the runtime's loop stays in it until
-// something calls `quit`. A timer has no rectangle, so it is declared here at
-// module level rather than inside a form; a program that waits for something
-// needs no window at all, which is the whole point.
+// something calls `Quit()`. A timer has no rectangle, so it is declared here at
+// the top of the file, beside the class, rather than inside a form; a
+// program that waits for something needs no window at all, which is the whole
+// point.
+//
+//   kiln build examples/loopdemo.kiln -o loopdemo
 
 namespace Loopdemo;
 
@@ -16,6 +19,7 @@ Timer ticker
 
 public static class Loopdemo
 {
+    // The number of ticks seen so far.
     private int ticks = 0;
 
     public static void Main()
@@ -23,9 +27,10 @@ public static class Loopdemo
         Console.WriteLine("main returned; the timer keeps the program alive");
     }
 
+    // Runs every 20 milliseconds: count the tick, and stop after the third.
     public static void OnTick()
     {
-        ticks = ticks + 1;
+        ticks += 1;
         Console.WriteLine($"tick {ticks}");
         if (ticks >= 3)
         {

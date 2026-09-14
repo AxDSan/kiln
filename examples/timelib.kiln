@@ -1,9 +1,10 @@
 // Dates and clocks: the `time` support library.
 //
-// Every command here works in UTC and speaks Unix seconds as int64 — the same
-// basis core's now() uses, so the two compose.
+// `using Kiln.Time;` brings in the Time* commands. Every one works in UTC and
+// speaks Unix seconds as int64 — the same basis core's Now() uses, so the two
+// compose.
 //
-//   kiln run examples/timelib.kiln
+//   kiln build examples/timelib.kiln -o timelib
 
 namespace Timelib;
 
@@ -52,9 +53,9 @@ public static class Timelib
         Console.WriteLine(TimeDaysInMonth(2024, 2));
         Console.WriteLine(TimeDaysInMonth(2023, 2));
         // --- failure reporting -------------------------------------------------
-        // A bad string returns -1 AND sets the error slot. That matters because -1
-        // is itself a real timestamp (1969-12-31T23:59:59Z), so the sentinel alone
-        // cannot be trusted: the code is what distinguishes them.
+        // A bad string returns -1 AND writes the error slot. That matters because
+        // -1 is itself a real timestamp (1969-12-31T23:59:59Z), so the returned
+        // value alone cannot be trusted: LastErrorCode() is what distinguishes them.
         let bad = TimeParseIso("21 July 1969");
         PrintInt64(bad);
         if (LastErrorCode() != 0)
@@ -70,7 +71,7 @@ public static class Timelib
         PrintInt64(lastSec);
         Console.WriteLine(LastErrorCode());
         // --- clocks ------------------------------------------------------------
-        // The wall clock agrees with core's now(): the same instant, finer grained.
+        // The wall clock agrees with core's Now(): the same instant, finer grained.
         let secs = TimeNowMs() / IntToInt64(1000);
         let drift = TimeDiffSeconds(secs, Now());
         if (IntToInt64(-1) <= drift && drift <= IntToInt64(0))
@@ -78,9 +79,9 @@ public static class Timelib
             Console.WriteLine("now_ms agrees with now()");
         }
         // The monotonic clock has an arbitrary origin: only differences mean
-        // anything. It never runs backwards.
+        // anything. It never runs backwards. The empty loop just spends some time.
         let t0 = TimeMonotonicMs();
-        foreach (var repeat1 in 1..200000)
+        foreach (var spin in 1..200000)
         {
         }
         if (TimeDiffSeconds(TimeMonotonicMs(), t0) >= IntToInt64(0))

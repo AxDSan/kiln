@@ -1,6 +1,6 @@
 // Pseudo-random numbers: dice, coins, chances and reproducible sequences.
 //
-//   kiln run examples/randomlib.kiln
+//   kiln build examples/randomlib.kiln -o randomlib
 //
 // The generator is NOT for anything security sensitive. It is fast, and a seed
 // reproduces the sequence exactly — which is the point here, and the reason it
@@ -15,16 +15,17 @@ public static class Randomlib
     public static void Main()
     {
         // A seed makes the run repeatable: these five rolls are the same every time,
-        // on every machine.
+        // on every machine. `1..5` is inclusive, so the loop runs five times; the
+        // loop variable is not needed, only the count.
         RandomSeed(1234);
-        foreach (var repeat1 in 1..5)
+        foreach (var roll in 1..5)
         {
             Console.WriteLine(RandomBetween(1, 6));
         }
         // Re-seeding with the same number starts the very same sequence over.
         RandomSeed(1234);
         Console.WriteLine($"first roll again: {RandomBetween(1, 6)}");
-        // random_int(n) picks one of n things: 0 .. n-1.
+        // RandomInt(n) picks one of n things: 0 .. n-1.
         RandomSeed(7);
         let pick = RandomInt(3);
         if (0 <= pick && pick <= 2)
@@ -55,14 +56,15 @@ public static class Randomlib
         {
             Console.WriteLine("0% did not happen");
         }
-        // Heads over a hundred flips: neither all heads nor all tails.
+        // Heads over a hundred flips: neither all heads nor all tails. `int heads`
+        // declares a local that can change; a `let` binding could not be counted up.
         RandomSeed(99);
         int heads = 0;
-        foreach (var repeat2 in 1..100)
+        foreach (var flip in 1..100)
         {
             if (RandomBool())
             {
-                heads = heads + 1;
+                heads += 1;
             }
         }
         if (20 < heads && heads < 80)
@@ -74,8 +76,9 @@ public static class Randomlib
         let id = RandomHex(8);
         Console.WriteLine(Length(id));
         Console.WriteLine($"#{RandomHex(6)}");
-        // The one real error: an empty range. The command returns 0 AND leaves a
-        // code behind, because 0 is also a perfectly good draw.
+        // The one real error: an empty range. RandomBetween returns 0 AND writes the
+        // error slot, because 0 is also a perfectly good draw — LastErrorCode() and
+        // LastErrorText() are what tell the failure apart.
         let bad = RandomBetween(10, 1);
         Console.WriteLine(bad);
         Console.WriteLine(LastErrorCode());

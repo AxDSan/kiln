@@ -2,9 +2,10 @@
 //
 // The form is 400x300. Resize the window and the OK button stays in the
 // bottom-right corner while the name box stretches with the width; the label
-// has the default anchors (left,top) and stays where it was drawn.
+// has the default anchors (left,top) and stays where it was drawn. An anchor is
+// set like any other property: `Anchors = "right,bottom";`.
 //
-//   kiln run examples/anchors.kiln
+//   kiln build examples/anchors.kiln -o anchors
 
 namespace Anchors;
 
@@ -48,6 +49,8 @@ public partial form Win
 
 public partial form Win
 {
+    // `okButton.Left` is read at the moment of the click, so after a resize it
+    // reports where the anchor has moved the button to.
     void OnOk()
     {
         Console.WriteLine($"ok at {okButton.Left}");

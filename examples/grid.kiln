@@ -4,16 +4,17 @@
 //
 // The grid never holds the people itself: it is bound by name to a datasource,
 // and shows whatever that holds. Fill the datasource once — in the form, from
-// `main`, from a handler — and every grid bound to it shows the rows. That is
-// the shape a `database` kit will hand its query results into.
+// `Main`, from a handler — and every grid bound to it shows the rows. That is
+// the shape a database library will hand its query results into.
 //
-// Rows are one text with a newline between rows and a tab between cells,
-// because a property value is a literal. The commands are the way around
-// building that text by hand: `datasource_add_row` takes a row, `grid_cell`
-// reads one cell back, and both count from 1 like every position here.
+// `Rows` is one string with a newline between rows and a tab between cells,
+// because a property value in a form is a literal. The functions are the way
+// around building that string by hand: `DatasourceAddRow` appends a row,
+// `GridCell` reads one cell back, and both count from 1 like every position in
+// Kiln.
 //
-// `select` and `activate` hand the handler the row. A handler may take it or
-// leave it out.
+// The grid's `Select` and `Activate` events pass the row to their handler as
+// an `int`. A handler may take that parameter or leave it out.
 
 namespace Grid;
 
@@ -92,7 +93,8 @@ public partial form Win
 
 public partial form Win
 {
-    // Rows added before the window opens are on screen from the first frame.
+    // `Main` runs before the window opens, so a row added here is on screen
+    // from the first frame.
     void Main()
     {
         DatasourceAddRow("people", "Dennis\tNew York\t70");

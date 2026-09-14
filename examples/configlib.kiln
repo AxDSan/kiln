@@ -1,12 +1,16 @@
 // Settings files — the `config` support library.
 //
-//   kiln run examples/configlib.kiln
+//   kiln build examples/configlib.kiln -o configlib
 //
 // INI is the format a person can open in a text editor and understand without
 // being taught anything first: a [section], then `key = value` lines, and `#`
 // for a comment. This program writes one, reads it back, and walks it.
 //
 // The scratch file lives in /tmp, so running this leaves the repository clean.
+//
+// `using Kiln.Config;` brings in the Config commands. A settings file is a
+// handle — a plain int, 0 when it could not be had — and a command that fails
+// says why through LastErrorCode() and LastErrorText().
 
 namespace Configlib;
 
@@ -18,7 +22,7 @@ public static class Configlib
     {
         let path = "/tmp/kiln-configlib.ini";
         // --- write a settings file --------------------------------------------
-        // config_create remembers the path; nothing touches the disk until save.
+        // ConfigCreate remembers the path; nothing touches the disk until ConfigSave.
         var h = ConfigCreate(path);
         if (h == 0)
         {
@@ -78,7 +82,7 @@ public static class Configlib
             Console.WriteLine("not maximized");
         }
         // A missing key is not a failure: the answer is the fallback you supplied,
-        // and last_error_code() stays 0. config_has is the predicate that tells
+        // and LastErrorCode() stays 0. ConfigHas is the predicate that tells
         // "not set" apart from "set to exactly that value".
         Console.WriteLine(ConfigGetInt(h, "window", "depth", 32));
         Console.WriteLine(LastErrorCode());
@@ -91,10 +95,12 @@ public static class Configlib
             Console.WriteLine("depth is not set");
         }
         Console.WriteLine("[" + ConfigGet(h, "window", "nothing_here") + "]");
-        // A missing FILE, on the other hand, is a failure: 0, and a reason.
+        // A missing FILE, on the other hand, is a failure: handle 0, and a reason in
+        // LastErrorText().
         Console.WriteLine(ConfigOpen("/tmp/kiln-configlib-absent.ini"));
         Console.WriteLine(LastErrorText());
-        // --- walk it: a count plus an indexed accessor -------------------------
+        // --- walk it: a count plus an accessor by position ---------------------
+        // Positions count from 1, so `1..count` (both ends included) visits each one.
         foreach (var s in 1..ConfigSectionCount(h))
         {
             let name = ConfigSectionAt(h, s);
@@ -115,7 +121,7 @@ public static class Configlib
             Console.WriteLine("removed editor.font");
         }
         // Removing something that was never there is a genuine "no", not a failure:
-        // false with error code 0.
+        // false with LastErrorCode() at 0.
         if (!ConfigRemove(h, "editor", "font"))
         {
             Console.WriteLine($"nothing to remove, code {LastErrorCode()}");

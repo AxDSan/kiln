@@ -1,47 +1,47 @@
-// The operators that used to be commands.
+// Arithmetic and text operators.
 //
-//   kiln run examples/operators.kiln
+//   kiln build examples/operators.kiln -o operators
+//   ./operators
 //
-// Three small gaps in the expression grammar, closed together. Each one was
-// reachable before by calling a command or writing a workaround; the point is
-// that a beginner should not have to know the workaround.
+//   -x        negation, of a literal or of any numeric expression
+//   a % b     remainder; its sign follows `a`, so -17 % 5 is -2
+//   a + b     on two strings, joining them into a new string
+//   $"…{x}…"  string interpolation: the same join, written as the text it makes
 //
-//   -x        negation. `let x: int = -5` used to be a parse error, and
-//             examples wrote `0 - 1` to mean minus one.
-//   a % b     remainder. `mod_int(a, b)` still exists and still works.
-//   a + b     on text, joining. `concat(concat("[", x), "]")` is now
-//             "[" + x + "]" — and, better still, the string interpolation
-//             "[{x}]" that this same release added on top of it.
-//
-// `+` on two texts is exactly the `concat` command — same runtime call, same
-// result — so nothing about how text is stored has changed.
+// For anything longer than one join, interpolation is the one to reach for:
+// the finished sentence is visible in the source.
 
 namespace Operators;
 
 public static class Operators
 {
-    // A negative literal is a literal: it may be as small as `int` goes.
     public static void Main()
     {
+        // A negative literal is a literal: it may be as small as `int` goes.
         let freezing = -40;
         Console.WriteLine(freezing);
         Console.WriteLine(-freezing);
-        // Negation applies to any numeric expression, not just literals.
+
+        // Negation applies to any numeric expression, not just literals, and to
+        // `double` as well as `int`.
         var owed = 250;
         Console.WriteLine(-owed);
         let below = -1.5;
         Console.WriteLine(-below);
+
         // Remainder, and the classic thing it is for.
         Console.WriteLine(17 % 5);
         Console.WriteLine(-17 % 5);
         Console.WriteLine(Parity(6));
         Console.WriteLine(Parity(7));
+
         // Joining text. Read this line, then read the version underneath it.
         let who = "Ada";
         Console.WriteLine("Hello, " + who + " — you are " + IntToText(36) + " today.");
         Console.WriteLine($"Hello, {who} — you are {IntToText(36)} today.");
     }
 
+    // Inside `$"…"`, `{n}` puts the number into the text.
     public static string Parity(int n)
     {
         if (n % 2 == 0)

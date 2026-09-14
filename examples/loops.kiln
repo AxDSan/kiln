@@ -1,23 +1,23 @@
 // Counting, and leaving a loop early.
 //
-//   kiln run examples/loops.kiln
+//   kiln build examples/loops.kiln -o loops
+//   ./loops
 //
-// `while` used to be the only loop, so every counted loop was hand-written
-// index bookkeeping and every search ran to the end with a sentinel variable.
+//   foreach (var i in 1..10)             counts up; `1..10` is inclusive at both
+//                                        ends, and `i` belongs to the loop
+//   for (var i = 10; i >= 1; i--)        counts any other way: a start, a
+//                                        condition checked before each turn,
+//                                        and a step taken after it
+//   break;                               leave the innermost loop now
+//   continue;                            go straight to the next turn of it
 //
-//   for i in 1..10        counts up; `i` is an `int` that belongs to the loop
-//   for i in 10..1 step -1   counts down; the step is a literal, so the
-//                            direction is decided when the program is compiled
-//   break                  leave the innermost loop now
-//   continue               go straight to the next turn of it
+// A `foreach` over a range reads its start and limit ONCE, before the first
+// turn, so its body cannot make the loop longer. A `for` checks its condition
+// every turn, which is the flexibility and the risk: prefer `foreach` when you
+// are simply counting.
 //
-// The start and limit are read ONCE, before the first turn. A loop cannot be
-// made longer by its own body, which is the bug that hand-written index
-// bookkeeping invites.
-//
-// Locals are function-scoped, here as everywhere in the language, so two loops
-// in one subroutine need two different variable names — hence `n`, `down`,
-// `hit` below rather than `i` three times.
+// A loop variable lives only inside its loop, and a local declared in a block
+// lives only inside that block.
 
 namespace Loops;
 
@@ -30,13 +30,15 @@ public static class Loops
         {
             Console.WriteLine(Fizzbuzz(n));
         }
+
         Console.WriteLine("-- counting down --");
-        for (var down = 5; down >= 1; down = down + -1)
+        for (var down = 5; down >= 1; down--)
         {
             Console.WriteLine(down);
         }
+
         // `continue` skips the rest of this turn; `break` ends the loop. Together
-        // they are how you say "the first one that fits" without a sentinel.
+        // they are how you say "the first one that fits" without a flag variable.
         Console.WriteLine("-- first multiple of 7 above 100 --");
         foreach (var hit in 101..200)
         {
@@ -47,13 +49,15 @@ public static class Loops
             Console.WriteLine(hit);
             break;
         }
-        // `break` and `continue` work in a `while` too.
+
+        // `break` and `continue` work in a `while` too. `while (true)` runs until
+        // a `break` leaves it.
         Console.WriteLine("-- three vowel-free words --");
         int found = 0;
         int i = 0;
         while (true)
         {
-            i = i + 1;
+            i++;
             if (i > 100)
             {
                 break;
@@ -64,12 +68,13 @@ public static class Loops
                 continue;
             }
             Console.WriteLine(word);
-            found = found + 1;
+            found++;
             if (found == 3)
             {
                 break;
             }
         }
+
         // Loops nest, and `break` leaves only the innermost one.
         Console.WriteLine("-- times table --");
         foreach (var row in 1..4)
@@ -87,6 +92,8 @@ public static class Loops
         }
     }
 
+    // Each `return` leaves the method at once, so the checks read top to bottom
+    // with no `else`.
     public static string Fizzbuzz(int n)
     {
         if (n % 15 == 0)
@@ -101,10 +108,10 @@ public static class Loops
         {
             return "Buzz";
         }
-        return IntToText(n);
+        return $"{n}";
     }
 
-    // Every third number names a word; the rest name nothing.
+    // Every third number names a word; the rest name nothing (the empty string).
     public static string Candidate(int i)
     {
         if (i % 3 != 0)

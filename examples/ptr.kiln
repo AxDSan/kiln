@@ -3,7 +3,7 @@
 //   kiln build examples/ptr.kiln -o ptr
 //   ./ptr
 //
-// A `ptr` holds a raw machine address. These are the operations that let an
+// A `Ptr` holds a raw machine address. These are the operations that let a
 // Kiln program build a buffer or a struct and hand it to a C API.
 
 namespace Ptr;
@@ -13,7 +13,8 @@ public static class Ptr
     public static void Main()
     {
         // Allocate 16 bytes, write an int at offset 0 and an int64 at offset 8,
-        // then read both back. Sizes and offsets are int64.
+        // then read both back. Sizes and offsets are int64. MemZero clears the block,
+        // since MemAlloc hands back whatever the memory held before.
         Ptr buf = MemAlloc(16);
         MemZero(buf, 16);
         PtrWriteInt(buf, 0, 42);
@@ -25,38 +26,39 @@ public static class Ptr
         Console.WriteLine(PtrReadByte(buf, 4));
         PtrWriteDouble(buf, 0, 3.5);
         Console.WriteLine(PtrReadDouble(buf, 0));
-        // ptr_of_text hands a C API the char* behind a text; ptr_read_text copies
-        // a C string back into a Kiln text.
+        // PtrOfText hands a C API the char* behind a string; PtrReadText copies a
+        // C string back into a Kiln string.
         string greeting = "hello, C";
         Ptr gp = PtrOfText(greeting);
         Console.WriteLine(PtrReadText(gp));
-        // ptr_read_text is the one read that is safe at null: it answers "".
+        // PtrReadText is the one read that is safe at null: it answers "".
         Console.WriteLine(PtrReadText(PtrNull()));
-        // A two-pointer chain: cell -> leaf, walked back with ptr_read_ptr.
+        // A two-pointer chain: cell -> leaf, walked back with PtrReadPtr.
         Ptr cell = MemAlloc(8);
         Ptr leaf = MemAlloc(8);
         PtrWriteInt(leaf, 0, 7);
         PtrWritePtr(cell, 0, leaf);
         Ptr walked = PtrReadPtr(cell, 0);
         Console.WriteLine(PtrReadInt(walked, 0));
-        // ptr_from_int / ptr_to_int round-trips an address through an int64.
+        // PtrFromInt / PtrToInt round-trips an address through an int64.
         Ptr again = PtrFromInt(PtrToInt(leaf));
         Console.WriteLine(PtrReadInt(again, 0));
-        // Two names for one address compare equal.
+        // Two variables holding one address compare equal with `==`.
         if (again == leaf)
         {
             Console.WriteLine("same");
         }
-        // The null pointer answers ptr_is_null.
+        // The null pointer answers true to PtrIsNull.
         if (PtrIsNull(PtrNull()))
         {
             Console.WriteLine("null-ok");
         }
-        // ptr_offset makes a pointer past the base; a write through it is visible
+        // PtrOffset makes a pointer past the base; a write through it is visible
         // at the matching offset from the base.
         PtrWriteInt(PtrOffset(buf, 8), 0, 123);
         Console.WriteLine(PtrReadInt(buf, 8));
-        // Copy a text's bytes (with its NUL) into a buffer the program owns.
+        // PtrWriteText copies a string's bytes (with its NUL) into a buffer the
+        // program owns. What MemAlloc allocated, MemFree must release.
         Ptr name = MemAlloc(32);
         PtrWriteText(name, 0, "Kiln");
         Console.WriteLine(PtrReadText(name));

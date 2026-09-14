@@ -1,9 +1,13 @@
 // A window with a label and a button, and a handler wired to its click.
 //
-// This is exactly the shape the visual designer reads and writes, so you can
-// open it in Studio, drag things around, and the file stays yours.
+// The form is split into two halves of one `partial form`. The first block is
+// the designer's half: the window's properties, then each control with its own
+// properties and the events it wires with `+=`. Studio reads and rewrites that
+// block, so you can open this file in Studio and drag things around. The second
+// block is your half — fields and methods — and Studio never touches it, so the
+// file stays yours.
 //
-//   kiln run examples/form.kiln
+//   kiln build examples/form.kiln -o form
 
 namespace HelloForm;
 
@@ -40,8 +44,9 @@ public partial form MainWindow
 
 public partial form MainWindow
 {
-    // The click handler is an ordinary subroutine — bound by function pointer, so
-    // its name never reaches the shipped binary (G8).
+    // The click handler is an ordinary method of the form, named by
+    // `Click += OnOkClick` above. It is bound directly, not looked up by name at
+    // run time, so the name never reaches the shipped binary.
     void OnOkClick()
     {
         Console.WriteLine("button clicked!");

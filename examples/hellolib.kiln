@@ -1,4 +1,10 @@
 // Uses a third-party support library (libs/hello) via the ABI.
+//
+//   kiln build examples/hellolib.kiln -o hellolib
+//   ./hellolib
+//
+// `using Kiln.Hello;` loads the library. Its commands — `Greet` here — are then
+// called by name, like a static method of your own class.
 
 namespace Hellolib;
 
@@ -9,6 +15,7 @@ public static class Hellolib
     public static void Main()
     {
         Console.WriteLine(Greet("Kiln"));
+        // Read inside out: greet, then shout.
         Console.WriteLine(Uppercase(Greet("world")));
     }
 }

@@ -1,15 +1,14 @@
-// Subroutines that take arguments and give something back.
+// Methods that take arguments and give something back.
 //
-//   kiln run examples/subs.kiln
+//   kiln build examples/subs.kiln -o subs
+//   ./subs
 //
-// A `sub` used to be only an entry point or an event handler: nothing in,
-// nothing out. Now it takes a parameter list in the same `name: type` shape a
-// `let` uses, and an optional return type after a colon — so a subroutine
-// declaration reads like the declarations already in the language.
+// A method is declared inside a class as `public static`, then its return type,
+// its name, and its parameters, each written type first: `int Add(int a, int b)`.
+// A method that gives nothing back returns `void`, as `Main` does.
 //
-// Calling one is calling anything else: `add(2, 3)` in an expression, or
-// `call greet("Ada")` as a statement. Commands and subroutines share one
-// namespace, so a subroutine may not take a library command's name.
+// Calling one is calling anything else: `Add(2, 3)` inside an expression, or
+// `Describe(4);` on its own as a statement.
 
 namespace Subs;
 
@@ -27,13 +26,14 @@ public static class Subs
         int result = 1;
         foreach (var i in 2..n)
         {
-            result = result * i;
+            result *= i;
         }
         return result;
     }
 
-    // Recursion works: a subroutine can call itself, and the compiler needs no
-    // forward declaration to let it. A one-line `if` states the base case.
+    // Recursion works: a method can call itself, and the compiler needs no
+    // forward declaration to let it — methods may appear in any order. An early
+    // `return` states the base case.
     public static int Fib(int n)
     {
         if (n < 2)
@@ -43,7 +43,7 @@ public static class Subs
         return Fib(n - 1) + Fib(n - 2);
     }
 
-    // A trailing parameter may carry a default, so `shout("ada")` fills in the `!`.
+    // A trailing parameter may carry a default, so `Shout("ada")` fills in the `!`.
     public static string Shout(string who, string mark = "!")
     {
         return Uppercase(who) + mark;
@@ -54,8 +54,8 @@ public static class Subs
         return n % 2 == 0;
     }
 
-    // No return type: a subroutine that does something rather than computes
-    // something. A bare `return` leaves it early.
+    // `void`: a method that does something rather than computes something. A bare
+    // `return;` leaves it early.
     public static void Describe(int n)
     {
         if (n < 0)
@@ -63,7 +63,8 @@ public static class Subs
             Console.WriteLine("negative");
             return;
         }
-        let kind = (IsEven(n) ? "even" : "odd");
+        // `cond ? a : b` picks one of two values.
+        let kind = IsEven(n) ? "even" : "odd";
         Console.WriteLine($"{n} is {kind}");
     }
 
@@ -77,7 +78,8 @@ public static class Subs
         Describe(-1);
         Describe(4);
         Describe(7);
-        // A subroutine call is an expression, so it composes like any other.
+
+        // A method call is an expression, so it composes like any other.
         let total = Add(Factorial(4), Fib(10));
         Console.WriteLine(total);
     }

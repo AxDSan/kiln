@@ -1,9 +1,11 @@
 // Records and dictionaries in the same program — the combination neither
 // feature can demonstrate on its own.
 //
-// A dictionary holds one type of value, and a record IS a type, so `person{}`
-// is a directory of people found by name. The two features were built
-// separately; this is the program that says they meet.
+//   kiln build examples/compose.kiln -o compose
+//
+// A dictionary holds one type of value, and a record IS a type, so
+// `Dictionary<string, Person>` is a directory of people found by name. The two
+// features were built separately; this is the program that says they meet.
 
 namespace Compose;
 
@@ -22,10 +24,13 @@ public static class Compose
         staff["ada"] = new Person("Ada", 36);
         staff["grace"] = new Person("Grace", 45);
         Console.WriteLine($"people: {staff.Count}");
-        // Read one back and pass it to a subroutine as a record, not as its parts.
+        // Read one back and pass it to a method as a record, not as its parts.
+        // `Get` answers a `Person?`; handing it straight to a method that wants a
+        // `Person` says "this key is certainly there", and the program stops with
+        // a message if it is not.
         Console.WriteLine(Describe(staff.Get("ada")));
         // Insertion order, so iterating a directory of records is reproducible.
-        // `for each` binds the key and its record value together.
+        // `foreach` deconstructs each entry into its key and its record.
         foreach (var (who, member) in staff)
         {
             Console.WriteLine($"  {Describe(member)}");
@@ -36,14 +41,18 @@ public static class Compose
         ada.Age = 37;
         let after = staff.Get("ada");
         Console.WriteLine($"after a birthday: {Describe(after)}");
-        // A key that is not there answers the sentinel for the value type. A record
-        // has no printable empty value, so the sentinel is no record at all — and
-        // that is caught rather than followed: reading a field of it fails the way an
-        // out-of-range index does, and says so, instead of crashing.
-        let nobody = staff.Get("nobody");
-        Console.WriteLine($"missing lookup said: {LastErrorText()}");
-        Console.WriteLine($"[{nobody.Name}]");
-        Console.WriteLine($"reading its field said: {LastErrorText()}");
+        // A key that is not there answers `null`: absence is a value, not a
+        // half-made record. Reaching through it with `.Name` would stop the
+        // program, so a lookup that may miss is tested with `!= null` / `== null`,
+        // or read with `?.`, which carries the `null` along instead of following
+        // it, and `??`, which supplies what to use in its place.
+        Person? nobody = staff.Get("nobody");
+        if (nobody == null)
+        {
+            Console.WriteLine("missing lookup said: null, so there is no record to read");
+        }
+        Console.WriteLine($"[{nobody?.Name ?? ""}]");
+        Console.WriteLine("reading its field through ?. gave the ?? fallback instead");
         if (staff.ContainsKey("nobody"))
         {
             Console.WriteLine("BUG: it was stored after all");
@@ -52,8 +61,9 @@ public static class Compose
         {
             Console.WriteLine("dict_has agrees there is no such person");
         }
-        // A list of records built from a dictionary, as a comprehension — three
-        // features at once.
+        // A list of records built from a dictionary: `Values` is every record in
+        // it, and `Where` keeps the ones its lambda says yes to — three features at
+        // once.
         List<Person> older = staff.Values.Where(p => p.Age >= 40);
         Console.WriteLine($"over forty: {older.Count}");
         foreach (var o in older)

@@ -1,5 +1,7 @@
 // Bitwise operators and hex/binary literals.
 //
+//   kiln build examples/bitwise.kiln -o bitwise
+//
 // A self-checking transcript: every line prints `ok` or `FAIL`, so running it
 // is the test. It covers the two halves that arrived together — writing a
 // constant as the bit pattern it is, and doing to bits what `+` does to
@@ -9,9 +11,13 @@ namespace Bitwise;
 
 public static class Bitwise
 {
-    public const int WsVisible = 268435456;
-    public const int WsPopup = 2147483648;
-    public const int WsBorder = 8388608;
+    // A flag word written the way its documentation writes it. `0x8000_0000` has
+    // the top bit of a 32-bit word set, so as an `int` it is the most negative
+    // `int`; where a `long` is wanted it is 2147483648. Both readings are the
+    // same 32 bits.
+    public const int WsVisible = 0x1000_0000;
+    public const int WsPopup = 0x8000_0000;
+    public const int WsBorder = 0x0080_0000;
 
     public static void Check(string what, int got, int want)
     {
@@ -40,42 +46,46 @@ public static class Bitwise
     public static void Main()
     {
         // --- literals ------------------------------------------------------------
-        Check("hex", 255, 255);
-        Check("hex lower", 255, 255);
-        Check("binary", 10, 10);
-        Check("underscores", 255, 255);
+        // `0x` is hex, `0b` is binary, and `_` separates digits anywhere without
+        // changing the value.
+        Check("hex", 0xFF, 255);
+        Check("hex lower", 0xff, 255);
+        Check("binary", 0b1010, 10);
+        Check("underscores", 0b1111_1111, 255);
         // A 32-bit pattern is an `int` holding exactly those bits.
-        Check("sign bit", 2147483648, -2147483648);
-        Check("all ones", 4294967295, -1);
-        Check("deadbeef", 3735928559, -559038737);
-        // ...and the same pattern is 2147483648 where an int64 is wanted.
-        long wide = 2147483648;
+        Check("sign bit", 0x80000000, -2147483648);
+        Check("all ones", 0xFFFF_FFFF, -1);
+        Check("deadbeef", 0xDEAD_BEEF, -559038737);
+        // ...and the same pattern is 2147483648 where a `long` is wanted.
+        long wide = 0x8000_0000;
         Check64("sign bit widens with zeros", wide, 2147483648);
-        // A pattern that needs more than 32 bits is an int64 on its own.
-        long big = 4294967296;
+        // A pattern that needs more than 32 bits is a `long` on its own.
+        long big = 0x1_0000_0000;
         Check64("wide literal", big, 4294967296);
-        long ones = 18446744073709551615;
+        long ones = 0xFFFF_FFFF_FFFF_FFFF;
         Check64("64 ones", ones, -1);
         // A leading `-` says the pattern was meant as a magnitude.
-        Check("negated hex", -16, -16);
+        Check("negated hex", -0x10, -16);
         // --- the operators -------------------------------------------------------
-        Check("band", 240 & 15, 0);
-        Check("band keeps", 243 & 15, 3);
-        Check("bor", 240 | 15, 255);
+        // `&` is and, `|` is or, `^` is exclusive or, `~` flips every bit, and
+        // `<<` / `>>` shift.
+        Check("band", 0xF0 & 0x0F, 0);
+        Check("band keeps", 0xF3 & 0x0F, 3);
+        Check("bor", 0xF0 | 0x0F, 255);
         Check("bxor", 5 ^ 1, 4);
         Check("bnot", ~0, -1);
         Check("bnot again", ~5, -6);
         Check("shl", 1 << 4, 16);
         Check("shr", 256 >> 4, 16);
-        // `shr` keeps the sign; `ushr` shifts zeros in.
+        // `>>` on an `int` keeps the sign; `>>>` shifts zeros in.
         Check("shr is arithmetic", -16 >> 2, -4);
         Check("ushr is logical", -16 >>> 2, 1073741820);
         int n = 3;
         Check("a computed count", 1 << n, 8);
         // --- precedence ----------------------------------------------------------
-        // A bitwise operator binds LOOSER than a comparison, so a flag test needs no
-        // parentheses. (This is the one place C's table is famously the wrong way
-        // round.)
+        // The table is C#'s: a comparison binds TIGHTER than `&`, so a flag test
+        // needs its parentheses. Leaving them out is not a silent bug — `x & F != 0`
+        // asks `if` to test a number, and that is a compile error.
         int style = WsVisible | WsPopup;
         if ((style & WsVisible) != 0)
         {
@@ -93,17 +103,18 @@ public static class Bitwise
         {
             Console.WriteLine("FAIL flag is clear");
         }
-        // Shifts bind tighter than `band`, and `+` tighter than a shift.
-        Check("shl before band", 1 << 4 & 255, 16);
+        // Shifts bind tighter than `&`, `+` tighter than a shift, and `&` tighter
+        // than `|`.
+        Check("shl before band", 1 << 4 & 0xFF, 16);
         Check("plus before shl", 1 << 2 + 2, 16);
         Check("band before bor", 1 | 6 & 4, 5);
         // --- what this was for ---------------------------------------------------
-        // LOWORD / HIWORD of a WPARAM, which is an int64. The mask is an int
+        // LOWORD / HIWORD of a WPARAM, which is a `long`. The mask is an `int`
         // literal, and a literal takes the width of what it meets.
         long wparam = 196610;
-        Check64("LOWORD", wparam & 65535, 2);
-        Check64("HIWORD", wparam >>> 16 & 65535, 3);
-        // Flags combined, then one taken away.
+        Check64("LOWORD", wparam & 0xFFFF, 2);
+        Check64("HIWORD", wparam >>> 16 & 0xFFFF, 3);
+        // Flags combined, then one taken away: `& ~flag` keeps every bit but that one.
         int flags = WsVisible | WsPopup | WsBorder;
         Check("flag cleared", flags & ~WsBorder, WsVisible | WsPopup);
     }

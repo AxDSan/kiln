@@ -1,4 +1,7 @@
-// Control flow: `match`, `for` over a range, comparisons and logical operators.
+// Control flow: `if`/`else if`, `foreach` over a range, comparisons and logical operators.
+//
+//   kiln build examples/fizzbuzz.kiln -o fizzbuzz
+//   ./fizzbuzz
 
 namespace Fizzbuzz;
 
@@ -6,19 +9,21 @@ public static class Fizzbuzz
 {
     public static void Main()
     {
-        // One value tested against several: `match` is the if-chain, written the way
-        // it reads. `n % 15` is 0 only on a multiple of both 3 and 5.
+        // `1..20` is inclusive at both ends. One value tested against several is
+        // an `else if` chain, with `||` for "any of these". `n % 15` is 0 only on
+        // a multiple of both 3 and 5; it is worked out once, in `rest`.
         foreach (var n in 1..20)
         {
-            if (n % 15 == 0)
+            let rest = n % 15;
+            if (rest == 0)
             {
                 Console.WriteLine("FizzBuzz");
             }
-            else if (n % 15 == 3 || n % 15 == 6 || n % 15 == 9 || n % 15 == 12)
+            else if (rest == 3 || rest == 6 || rest == 9 || rest == 12)
             {
                 Console.WriteLine("Fizz");
             }
-            else if (n % 15 == 5 || n % 15 == 10)
+            else if (rest == 5 || rest == 10)
             {
                 Console.WriteLine("Buzz");
             }
@@ -27,8 +32,9 @@ public static class Fizzbuzz
                 Console.WriteLine(n);
             }
         }
-        // Short-circuit `and`: the right side is not evaluated when n is 0, so the
-        // division is safe.
+
+        // Short-circuit `&&`: the right side is not evaluated when `zero` is 0,
+        // so the division is safe.
         let zero = 0;
         if (zero != 0 && 100 % zero == 0)
         {
@@ -38,7 +44,8 @@ public static class Fizzbuzz
         {
             Console.WriteLine("short-circuit ok");
         }
-        // Text equality compares content, not pointers; `+` joins, the same as concat.
+
+        // `==` on strings compares content, not references; `+` joins two strings.
         if ("fizz" + "buzz" == "fizzbuzz")
         {
             Console.WriteLine("text equality ok");

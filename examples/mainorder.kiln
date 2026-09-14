@@ -1,7 +1,16 @@
+// When `Main` runs in a form program.
+//
+// The form's widgets are built before `Main` is called, so `Main` can already
+// reach `greeting` by name: it replaces the text the designer gave it, reads the
+// new text back, and the window opens showing "set from main".
+//
+//   kiln build examples/mainorder.kiln -o mainorder
+
 namespace Mainorder;
 
 using Kiln.Ui;
 
+// The designer's half of the form: the window and the label it holds.
 public partial form Win
 {
     Title = "order";
@@ -12,6 +21,7 @@ public partial form Win
     }
 }
 
+// Your half of the same `partial form`: the code that runs against it.
 public partial form Win
 {
     void Main()

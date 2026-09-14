@@ -1,6 +1,10 @@
 // The `system` library: the environment the program runs in.
 //
-//   kiln run examples/systemlib.kiln
+//   kiln build examples/systemlib.kiln -o systemlib
+//
+// Most of these commands report failure through the error slot: the call
+// answers a plain value, and LastErrorCode() (0 means success) and
+// LastErrorText() say whether that value can be trusted.
 
 namespace Systemlib;
 
@@ -36,7 +40,7 @@ public static class Systemlib
             Console.WriteLine("KILN_DEMO = " + EnvGet("KILN_DEMO"));
         }
         // A variable set to nothing and a variable that is absent both read as "".
-        // env_has is what tells them apart.
+        // EnvHas is what tells them apart.
         if (EnvSet("KILN_EMPTY", ""))
         {
             Console.WriteLine("set to empty");
@@ -66,7 +70,8 @@ public static class Systemlib
         {
             Console.WriteLine($"rejected: {LastErrorText()}");
         }
-        // The block is a count plus an indexed accessor; PATH is in it.
+        // The block is a count plus an indexed accessor, counted from 1; PATH is in
+        // it.
         if (EnvCount() > 0)
         {
             let first = EnvNameAt(1);
@@ -80,16 +85,16 @@ public static class Systemlib
         {
             Console.WriteLine("env index out of range rejected");
         }
+        // --- this process ---
         if (SysProcessId() > 0)
         {
-            // --- this process ---
             Console.WriteLine("pid: ok");
         }
+        // SysArg(1) is the first REAL argument — the program name is not one of
+        // them, and lives in SysProgramPath(). So a program run with no arguments
+        // reports 0, which is what anyone would guess.
         if (SysArgCount() == 0)
         {
-            // sys_arg(1) is the first REAL argument — the program name is not one of
-            // them, and lives in sys_program_path().  So a program run with no arguments
-            // reports 0, which is what anyone would guess.
             Console.WriteLine("no arguments: ok");
         }
         let pastEnd = SysArg(9999);
@@ -114,6 +119,8 @@ public static class Systemlib
         {
             Console.WriteLine($"suspicious wait: {waited}");
         }
+        // SysQuit ends the process on the spot with that exit status; nothing after
+        // it runs.
         Console.WriteLine("done");
         SysQuit(0);
         Console.WriteLine("unreachable");

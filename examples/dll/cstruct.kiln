@@ -1,19 +1,36 @@
+// C structs from Kiln. The library is `libgeo.so`, built from `geo.c` and
+// sitting beside this program.
+//
+// A `[CLayout]` record is a flat struct with the same bytes a C `struct` has,
+// so an `extern` method is handed a pointer to a real struct instead of a
+// hand-packed buffer. `new` gives a zeroed one, and `T.Size` is its size in
+// bytes, padding included.
+
 namespace Cstruct;
 
 [CLayout]
 public record Point(int X, int Y);
 
+// Padding worth checking: a byte, an int, a byte, a long — the compiler
+// inserts 3 bytes after `A` and 7 after `C`, exactly as C does.
 [CLayout]
 public record Mixed(byte A, int B, byte C, long D);
 
+// A `bool` field is a C `int`: a C API writes truth as any non-zero value, and
+// reading it back must normalise to `true`.
 [CLayout]
 public record Flags(bool Shown);
 
+// A `string` field is a `char *`: written borrowed, read as a copied-out string.
 [CLayout]
 public record Named(string Label);
 
 public static class Cstruct
 {
+    // `move_point` takes `Point*`; declaring the parameter as the record passes
+    // the pointer automatically. The three reference functions report clang's
+    // own sizeof and offsets for `Mixed`, to hold Kiln's layout to the C
+    // compiler's.
     [Dll("geo", Entry = "move_point")]
     public static extern void MovePoint(Point p, int dx, int dy);
 
@@ -34,23 +51,24 @@ public static class Cstruct
         Point p = new Point();
         p.X = 3;
         p.Y = 4;
-        MovePoint(p, 10, 20);
-        Console.WriteLine(p.X);
-        Console.WriteLine(p.Y);
-        PrintInt64(Point.Size);
-        PrintInt64(Mixed.Size);
-        PrintInt64(RefSizeof());
+        MovePoint(p, 10, 20);          // C mutates the struct through the pointer
+        Console.WriteLine(p.X);        // 13
+        Console.WriteLine(p.Y);        // 24
+        PrintInt64(Point.Size);        // 8
+        PrintInt64(Mixed.Size);        // 24, with padding
+        PrintInt64(RefSizeof());       // clang's sizeof(Mixed) — the same 24
         Mixed m = new Mixed();
-        m.A = 200;
-        Console.WriteLine(m.A);
+        m.A = 200;                     // a byte reads back unsigned
+        Console.WriteLine(m.A);        // 200
         // Prove Kiln's field offsets match clang's: write through the pointer at
         // the offset C reports, then read the field Kiln placed — a wrong offset
-        // would read different bytes.
+        // would read different bytes. A `[CLayout]` record converts to a `Ptr`
+        // to its first byte.
         Ptr mp = m;
         PtrWriteInt(mp, RefOffB(), 99);
-        Console.WriteLine(m.B);
+        Console.WriteLine(m.B);        // 99: field `B` sits where clang put it
         PtrWriteInt64(mp, RefOffD(), 7000000000);
-        PrintInt64(m.D);
+        PrintInt64(m.D);               // 7000000000: field `D` at offset 16
         // A bool field written by C as 7 reads back as `true`, not as a raw 7 that an
         // equality test would miss.
         Flags flags = new Flags();
@@ -63,9 +81,9 @@ public static class Cstruct
         {
             Console.WriteLine("flag-BUG");
         }
-        // A text field: stored borrowed, read as a copied-out managed text.
+        // A string field: stored borrowed, read as a copied-out managed string.
         Named named = new Named();
         named.Label = "hi";
-        Console.WriteLine(named.Label);
+        Console.WriteLine(named.Label); // hi
     }
 }

@@ -1,13 +1,15 @@
 // One command, several controls.
 //
 // The caption, the shortcut, whether it can be invoked at all, and the code
-// behind it live in the `action` — not in any of the buttons. Both buttons
+// behind it live in the `Action` — not in any of the buttons. Both buttons
 // offer the same command, so disabling it greys both and renaming it renames
 // both, and neither button knows the other exists.
 //
-// A control names the action it offers rather than pointing at it: a component
-// identifier deliberately never reaches the built binary, so the action's
-// `name` is what ties them together.
+// A button names the action it offers (`Action = "save"`) rather than
+// pointing at `saveAction`: a component identifier deliberately never reaches
+// the built binary, so the action's `Name` is what ties them together. Code
+// can still use the identifier — `OnLock` changes `saveAction.Text` and
+// `saveAction.Enabled`, and both buttons follow.
 
 namespace Actions;
 

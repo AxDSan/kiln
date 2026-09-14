@@ -1,6 +1,6 @@
-// Arrays and byte-sets: the types that hold more than one value.
+// Lists and bytes: the types that hold more than one value.
 //
-//   kiln run examples/arrays.kiln
+//   kiln build examples/arrays.kiln -o arrays
 //
 // The lines here are checks: each prints `ok` or `FAIL`, so running the file is
 // the test.
@@ -9,9 +9,11 @@ namespace Arrays;
 
 public static class Arrays
 {
+    // State that outlives one call lives in a field. A `List<string>` is the
+    // thing that can hold more than one of them.
     private List<string> log = [];
 
-    // `check` is how every line below reports; a message would otherwise have to be
+    // `Check` is how every line below reports; a message would otherwise have to be
     // repeated in both branches.
     public static void Check(string what, bool ok)
     {
@@ -25,25 +27,25 @@ public static class Arrays
         }
     }
 
-    // An array crosses a call boundary as one pointer, so passing and returning one
-    // costs no more than passing a number.
+    // A list crosses a call boundary as one reference, so passing and returning
+    // one costs no more than passing a number.
     public static List<int> Squares(int n)
     {
-        List<int> @out = [];
+        List<int> result = [];
         foreach (var i in 1..n)
         {
-            @out.Add(i * i);
+            result.Add(i * i);
         }
-        return @out;
+        return result;
     }
 
-    // `for each` walks the elements, so the running total never spells an index.
+    // `foreach` walks the elements, so the running total never spells an index.
     public static int Total(List<int> xs)
     {
         int sum = 0;
         foreach (var x in xs)
         {
-            sum = sum + x;
+            sum += x;
         }
         return sum;
     }
@@ -55,7 +57,7 @@ public static class Arrays
         // an empty list can get one.
         //
         // Positions count from 1: `numbers[1]` is the first element, and
-        // `numbers[count(numbers)]` is the last.
+        // `numbers[numbers.Count]` is the last.
         List<int> numbers = [3, 1, 2];
         List<string> nothing = [];
         Check("count", numbers.Count == 3);
@@ -65,13 +67,12 @@ public static class Arrays
         numbers[2] = 8;
         Check("assign to an element", numbers[2] == 8);
         // --- growing and shrinking -------------------------------------------
-        // `append` hands back a NEW array rather than growing this one in place, so
-        // any other name still holding the old one keeps working. That is why the
-        // result has to be assigned back.
+        // `Add` grows the list in place, so every name holding this list sees the
+        // new element — there is nothing to assign back.
         numbers.Add(5);
         Check("append", numbers.Count == 4);
-        // `remove` shortens in place — shrinking never has to move anything — so it
-        // is a statement and not a value.
+        // `RemoveAt` takes a position, so `RemoveAt(1)` drops the first element
+        // and the rest move up one.
         numbers.RemoveAt(1);
         Check("remove", numbers.Count == 3);
         // --- searching and ordering ------------------------------------------
@@ -81,6 +82,7 @@ public static class Arrays
         // Absent is 0, not -1: nothing sits at 0, so it can mean "not there" without
         // a magic number that reads like a position.
         Check("index_of when absent", numbers.IndexOf(999) == 0);
+        // `Sort` orders the list in place.
         numbers.Sort();
         Check("sort", Join(numbers, ",") == "2,5,8");
         // --- text in, list out, text again ------------------------------------
@@ -88,30 +90,42 @@ public static class Arrays
         Check("split", fields.Count == 3);
         Check("split keeps order", fields[3] == "gamma");
         Check("join", Join(fields, " ") == "alpha beta gamma");
-        // A whole program's worth of work that had nowhere to live before: read
-        // lines, keep some, put them back together — one comprehension.
+        // Read lines, keep some, put them back together: `Where` takes a lambda
+        // that says which elements stay, and answers a new list of them.
         List<string> kept = fields.Where(f => !TextEq(f, "beta"));
         Check("filtering into a list", Join(kept, ",") == "alpha,gamma");
-        // --- an index that is out of range ------------------------------------
-        // It fails loudly through the error slot rather than reading whatever
-        // happens to sit after the array.
-        int missing = numbers[99];
-        Check("out of range reports an error", LastErrorCode() != 0);
-        Check("out of range yields the sentinel", missing == 0);
+        // --- a position that is out of range ----------------------------------
+        // Reading past the end never reads whatever happens to sit after the list:
+        // `numbers[99]` would stop the program with a message naming the position.
+        // A program that is not sure a position exists asks `Count` first, and
+        // picks its own fallback when the answer is no.
+        int wanted = 99;
+        Check("a position past the end is not there", wanted > numbers.Count);
+        int missing = 0;
+        if (wanted <= numbers.Count)
+        {
+            missing = numbers[wanted];
+        }
+        Check("a guarded read takes the fallback", missing == 0);
         // --- bytes -------------------------------------------------------------
         // Text is UTF-8, so its bytes are its encoding: "hé" is two characters and
         // three bytes, which is exactly the distinction a program handling a file
         // needs to make.
+        //
+        // Bytes are the one place offsets count from 0: `raw[0]` is the first byte,
+        // the way a file format or a C structure numbers them.
         Bytes raw = BytesFromText("hé");
         Check("bytes_count", BytesCount(raw) == 3);
         Check("length counts characters", Length("hé") == 2);
         Check("a byte reads as a number", raw[0] == 104);
         Check("round trip", TextEq(TextFromBytes(raw), "hé"));
-        // --- across subroutines, and at module level -------------------------
+        // --- across methods, and in a field ----------------------------------
         Check("a subroutine returns an array", Join(Squares(4), ",") == "1,4,9,16");
         Check("a subroutine takes an array", Total(Squares(4)) == 30);
         log.Add("done");
         Check("a module-level array", log.Count == 1);
+        // `BytesNew` makes a buffer of that many zero bytes, and each offset can be
+        // written like a list element.
         Bytes blob = BytesNew(2);
         blob[0] = 79;
         blob[1] = 75;
