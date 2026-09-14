@@ -118,6 +118,11 @@ clang and checks stdout):
   designer block **through the tree**, not as text — so comments, the code half
   and everything else survive. This is what Studio calls: the CLI has always
   been the only reader of a project file, and is now the only writer too
+- **Documentation**: `docs-site/src/kiln-2.md` is the language guide and
+  `moving-to-kiln-2.md` the migration guide. Every ```k2 block in the book is
+  built by the same `kiln k2` a reader would type, from two gates, and the
+  migration guide's worked example is checked against what `kiln migrate`
+  actually prints — so the page cannot teach a conversion nobody will get
 - **`kiln migrate`**: a 1.x program becomes K2 source — module → namespace and
   a static class, `sub` → method, records, consts, `use` → `using`, naming to
   PascalCase/camelCase, `if`-arms nested, concat chains rebuilt as `$"…"`

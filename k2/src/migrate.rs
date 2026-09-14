@@ -63,6 +63,13 @@ fn pascal(s: &str) -> String {
 
 /// `character_id` → `characterId`. Locals and parameters take this.
 fn camel(s: &str) -> String {
+    // A 1.x name written in SCREAMING_CASE is a constant by convention, and a
+    // constant is PascalCase in K2. Lower-casing the first letter alone would
+    // give `tIMES` — which names nothing, and disagrees with the `Times` the
+    // declaration was given, so the migrated program would not compile.
+    if s.chars().any(|c| c.is_alphabetic()) && !s.chars().any(|c| c.is_lowercase()) {
+        return const_name(s);
+    }
     let p = pascal(s);
     let mut cs = p.chars();
     match cs.next() {

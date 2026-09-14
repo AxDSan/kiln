@@ -1763,3 +1763,26 @@ public partial form MainWindow
         "unhelpful error: {err}"
     );
 }
+
+#[test]
+fn a_migrated_constant_keeps_one_name() {
+    // A 1.x constant is SCREAMING_CASE and a K2 one is PascalCase. The
+    // declaration took the right name and every use took `camel`, which turned
+    // `TIMES` into `tIMES` — so the migrated program named something that did
+    // not exist, and did not compile. The two must agree.
+    let src = "module m\n\
+               const TIMES = 3\n\
+               sub main\n\
+               \x20 var i: int = 0\n\
+               \x20 while i < TIMES\n\
+               \x20   call print_int(i)\n\
+               \x20   i = i + 1\n\
+               \x20 end\n\
+               end\n";
+    let out = kiln_k2::migrate(src).expect("migrates");
+    assert!(out.contains("Times = 3"), "{out}");
+    assert!(out.contains("i < Times"), "the use site disagrees:\n{out}");
+    assert!(!out.contains("tIMES"), "{out}");
+    // And the whole point: what comes out compiles.
+    kiln_k2::compile(&out).expect("a migrated program compiles");
+}
