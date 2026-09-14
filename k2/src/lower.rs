@@ -657,6 +657,7 @@ fn describe_slot(tag: i32) -> String {
         10 => "bytes".into(),
         13 => "a record".into(),
         14 => "a pointer".into(),
+        255 => "anything".into(),
         _ => format!("slot type {tag}"),
     }
 }
@@ -3125,7 +3126,50 @@ impl<'a> FnLower<'a> {
             };
         }
         // A dictionary exposes its size.
-        if self.cx.as_dict(bty).is_some() {
+        if let Some((_, kty, vty)) = self.cx.as_dict(bty) {
+            // `.Keys` / `.Values` — a new list, in insertion order.
+            if member == "Keys" || member == "Values" {
+                let (field, elem) = if member == "Keys" { (DICT_KEYS, kty) } else { (DICT_VALUES, vty) };
+                let holder = self.new_local("$dictview", bty);
+                self.push(Stmt::Let { local: holder, value: base });
+                let lrid = self.cx.list_record(elem);
+                let lty = self.cx.b.m.types.intern(TyKind::Record(lrid));
+                let data_ty = self.cx.b.m.record(lrid).fields[LIST_DATA].ty;
+                let out = self.new_local("$view", lty);
+                self.push(Stmt::Let {
+                    local: out,
+                    value: Expr::MakeRecord(
+                        lrid,
+                        vec![Expr::Int(0, TyTable::I32), Expr::Int(0, TyTable::I32), Expr::Null(data_ty)],
+                    ),
+                });
+                let i = self.new_local("$vi", TyTable::I32);
+                self.push(Stmt::Let { local: i, value: Expr::Int(0, TyTable::I32) });
+                let item = Expr::Index(
+                    Box::new(Expr::Field(Box::new(Expr::Local(holder)), field)),
+                    Box::new(Expr::Local(i)),
+                );
+                self.blocks.push(Vec::new());
+                self.list_add(out, lty, item);
+                let add = self.blocks.pop().unwrap();
+                let mut body = vec![Stmt::If {
+                    cond: Expr::Not(Box::new(Expr::Bin(
+                        BinOp::Lt,
+                        Box::new(Expr::Local(i)),
+                        Box::new(Expr::Field(Box::new(Expr::Local(holder)), DICT_LEN)),
+                        TyTable::I32,
+                    ))),
+                    then: vec![Stmt::Break],
+                    els: vec![],
+                }];
+                body.extend(add);
+                body.push(Stmt::Assign {
+                    place: Place::Local(i),
+                    value: Expr::Bin(BinOp::Add, Box::new(Expr::Local(i)), Box::new(Expr::Int(1, TyTable::I32)), TyTable::I32),
+                });
+                self.push(Stmt::Loop { body });
+                return Ok((Expr::Local(out), lty));
+            }
             return match member {
                 "Count" => Ok((Expr::Field(Box::new(base), DICT_LEN), TyTable::I32)),
                 other => Err(format!(
@@ -3142,6 +3186,16 @@ impl<'a> FnLower<'a> {
         }
         // An optional exposes presence and value explicitly.
         if let TyKind::Optional(inner) = *self.tt().kind(bty) {
+            // `found.Name` on a `Person?` reads the field of the person it
+            // holds, and stops the program if it holds none.
+            if let TyKind::Record(rid) = *self.tt().kind(inner) {
+                let idx = self.cx.b.m.record(rid).fields.iter().position(|f| f.name == member);
+                if let Some(idx) = idx {
+                    let fty = self.cx.b.m.record(rid).fields[idx].ty;
+                    let v = self.present_or_stop(base, bty, member)?;
+                    return Ok((Expr::Field(Box::new(v), idx), fty));
+                }
+            }
             return match member {
                 "HasValue" => Ok((Expr::OptionalHasValue(Box::new(base)), TyTable::BOOL)),
                 "Value" => Ok((Expr::OptionalGet(Box::new(base)), inner)),
@@ -6036,7 +6090,14 @@ impl<'a> FnLower<'a> {
                 Some(a) => {
                     let (v, vty) = self.expr(a, Some(*pty))?;
                     self.check_fits(vty, *pty, &format!("argument {} of `{name}`", i + 1))?;
-                    v
+                    // A `T?` handed where a `T` is wanted is its value — and a
+                    // stop, not a null the callee trips over, when it has none.
+                    match *self.tt().kind(vty) {
+                        TyKind::Optional(inner) if inner == *pty => {
+                            self.present_or_stop(v, vty, &format!("argument {} of {name}", i + 1))?
+                        }
+                        _ => v,
+                    }
                 }
                 None => {
                     let d = sig.defaults.get(i).cloned().flatten().expect("checked above");
@@ -6100,6 +6161,40 @@ impl<'a> FnLower<'a> {
             self.describe_ty(to),
             self.describe_ty(from)
         ))
+    }
+
+    /// The value inside a `T?`, or a stop with a message naming what was being
+    /// reached through it — the same shape an out-of-range index takes.
+    fn present_or_stop(&mut self, v: Expr, oty: TyId, member: &str) -> Result<Expr, String> {
+        let held = self.new_local("$present", oty);
+        self.push(Stmt::Let { local: held, value: v });
+        let report = Expr::Call(Box::new(Call::Dll {
+            library: "c".into(),
+            symbol: "dprintf".into(),
+            conv: CallConv::Cdecl,
+            args: vec![
+                Expr::Int(2, TyTable::I32),
+                Expr::Str(format!("kiln: `.{member}` was read through a value that is not there\n")),
+            ],
+            arg_tys: vec![TyTable::I32, TyTable::STR],
+            ret: TyTable::I32,
+            varargs: true,
+        }));
+        let stop = Expr::Call(Box::new(Call::Dll {
+            library: "c".into(),
+            symbol: "exit".into(),
+            conv: CallConv::Cdecl,
+            args: vec![Expr::Int(1, TyTable::I32)],
+            arg_tys: vec![TyTable::I32],
+            ret: TyTable::VOID,
+            varargs: false,
+        }));
+        self.push(Stmt::If {
+            cond: Expr::Not(Box::new(Expr::OptionalHasValue(Box::new(Expr::Local(held))))),
+            then: vec![Stmt::Expr(report), Stmt::Expr(stop)],
+            els: vec![],
+        });
+        Ok(Expr::OptionalGet(Box::new(Expr::Local(held))))
     }
 
     /// A condition: something that is true or false, and nothing else.
@@ -6364,9 +6459,13 @@ impl<'a> FnLower<'a> {
         // marshalling layer pays; the alternative is making the caller write
         // the loop, or refusing something perfectly reasonable.
         const ARRAY: i32 = 0x100;
+        const ANY_ELEM: i32 = 255;
         if tag & ARRAY != 0 {
             if let Some((_, elem)) = self.cx.as_list(actual) {
-                if self.cx.b.m.types.sdt_tag(elem) == tag & !ARRAY {
+                // A command declared over "a list of anything" (`join`, `count`)
+                // takes a list of any element type.
+                let want = tag & !ARRAY;
+                if want == ANY_ELEM || self.cx.b.m.types.sdt_tag(elem) == want {
                     return self.list_to_array(v, actual, elem);
                 }
             }
@@ -7088,7 +7187,13 @@ impl<'a> FnLower<'a> {
                         }
                     }
                 }
-                let (base, bty) = self.expr(recv, None)?;
+                let (mut base, mut bty) = self.expr(recv, None)?;
+                // A field of a `T?` is a field of the value it holds; a missing
+                // one stops the program rather than writing through null.
+                if let TyKind::Optional(inner) = *self.tt().kind(bty) {
+                    base = self.present_or_stop(base, bty, member)?;
+                    bty = inner;
+                }
                 if let TyKind::Record(rid) = *self.tt().kind(bty) {
                     let rec = self.cx.b.m.record(rid);
                     if let Some(idx) = rec.fields.iter().position(|f| f.name == *member) {

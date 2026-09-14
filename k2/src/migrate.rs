@@ -35,6 +35,14 @@ pub fn migrate_with(src: &str, registry: Option<&ir::Registry>) -> Result<String
                 _ => None,
             })
             .collect();
+        t.consts = m
+            .items
+            .iter()
+            .filter_map(|it| match it {
+                ir::Item::Const(c) => Some(c.name.clone()),
+                _ => None,
+            })
+            .collect();
     });
     Ok(print::program(&module(&m)))
 }
@@ -46,6 +54,9 @@ struct Types {
     reg: ir::Registry,
     globals: std::collections::HashMap<String, ir::Ty>,
     vars: std::collections::HashMap<String, ir::Ty>,
+    /// Names declared as constants — including an enum's members, which 1.x
+    /// declares as constants too — so a use is spelled as the declaration is.
+    consts: std::collections::HashSet<String>,
 }
 
 thread_local! {
@@ -53,6 +64,7 @@ thread_local! {
         reg: ir::Registry::core(),
         globals: Default::default(),
         vars: Default::default(),
+        consts: Default::default(),
     });
 }
 
@@ -877,6 +889,9 @@ fn call(cmd: &str, args: &[ir::Expr]) -> Expr {
         ("dict_has", [d, k]) => return member(d, "ContainsKey", std::slice::from_ref(k)),
         ("dict_remove", [d, k]) => return member(d, "Remove", std::slice::from_ref(k)),
         ("contains", [xs, x]) => return member(xs, "Contains", std::slice::from_ref(x)),
+        // `remove(xs, i)` removes by position in place; a command would work on
+        // a copy of the list and leave this one as it was.
+        ("remove", [xs, i]) => return member(xs, "RemoveAt", std::slice::from_ref(i)),
         _ => {}
     }
     let (owner, name) = command(cmd);
@@ -908,6 +923,63 @@ fn flatten_concat(x: &ir::Expr, out: &mut Vec<InterpSeg>) {
 fn expr(x: &ir::Expr) -> Expr {
     use ir::Expr as E;
     match x {
+        // `x in xs` / `k in d` / `sub in text`, by what the haystack is.
+        E::In { needle, haystack, negated } => {
+            let test = match type_of(haystack) {
+                Some(ir::Ty::Dict(_)) | Some(ir::Ty::AnyDict) => e(ExprKind::Call(
+                    Box::new(e(ExprKind::Member(Box::new(expr(haystack)), "ContainsKey".into()))),
+                    vec![expr(needle)],
+                )),
+                Some(ir::Ty::Text) => e(ExprKind::Binary(
+                    BinOp::Ne,
+                    Box::new(e(ExprKind::Call(
+                        Box::new(ident("Find")),
+                        vec![expr(haystack), expr(needle)],
+                    ))),
+                    Box::new(e(ExprKind::Int(0))),
+                )),
+                _ => e(ExprKind::Call(
+                    Box::new(e(ExprKind::Member(Box::new(expr(haystack)), "Contains".into()))),
+                    vec![expr(needle)],
+                )),
+            };
+            if *negated {
+                e(ExprKind::Unary(UnOp::Not, Box::new(test)))
+            } else {
+                test
+            }
+        }
+        // `[body for each x in xs if cond]` — `Where` then `Select`, over a list.
+        // Over a dictionary its values; binding the key as well is left for a
+        // person, since Kiln 2 has no pair type to select from.
+        E::Comprehension { body, elem, value, index, coll, cond, .. } if index.is_none() => {
+            let var = camel(value.as_deref().unwrap_or(elem));
+            let bound = value.as_deref().unwrap_or(elem);
+            let mut src = expr(coll);
+            if value.is_some() {
+                src = e(ExprKind::Member(Box::new(src), "Values".into()));
+            }
+            let lambda = |b: Expr| {
+                e(ExprKind::Lambda(Lambda {
+                    params: vec![(var.clone(), None)],
+                    body: LambdaBody::Expr(Box::new(b)),
+                }))
+            };
+            if let Some(c) = cond {
+                src = e(ExprKind::Call(
+                    Box::new(e(ExprKind::Member(Box::new(src), "Where".into()))),
+                    vec![lambda(expr(c))],
+                ));
+            }
+            let is_identity = matches!(body.as_ref(), ir::Expr::Var(n) if n == bound);
+            if !is_identity {
+                src = e(ExprKind::Call(
+                    Box::new(e(ExprKind::Member(Box::new(src), "Select".into()))),
+                    vec![lambda(expr(body))],
+                ));
+            }
+            src
+        }
         // `"aa" * 3` repeats text in 1.x; Kiln 2 has no such operator, and
         // core's `repeat` is what it always meant.
         E::Bin(ir::BinOp::Mul, a, b) if type_of(a) == Some(ir::Ty::Text) => e(ExprKind::Call(
@@ -939,6 +1011,7 @@ fn expr(x: &ir::Expr) -> Expr {
         // would corrupt it.
         E::TextLit(s) => lit_str(s),
         E::NoneLit => e(ExprKind::Null),
+        E::Var(n) if TYPES.with(|t| t.borrow().consts.contains(n)) => ident(&const_name(n)),
         E::Var(n) => ident(&camel(n)),
         E::Call { cmd, args } => call(cmd, args),
         E::Bin(op, a, b) => {
