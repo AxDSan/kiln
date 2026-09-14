@@ -35,6 +35,31 @@ pub fn migrate_with(src: &str, registry: Option<&ir::Registry>) -> Result<String
                 _ => None,
             })
             .collect();
+        t.subs = m
+            .items
+            .iter()
+            .filter_map(|it| match it {
+                ir::Item::Sub(sb) => Some((
+                    sb.name.clone(),
+                    sb.params
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (n, _))| (n.clone(), sb.defaults.get(i).cloned().flatten()))
+                        .collect(),
+                )),
+                _ => None,
+            })
+            .collect();
+        t.records = m
+            .items
+            .iter()
+            .filter_map(|it| match it {
+                ir::Item::UserType(r) => {
+                    Some((r.name.clone(), r.fields.iter().map(|(n, _)| n.clone()).collect()))
+                }
+                _ => None,
+            })
+            .collect();
         t.consts = m
             .items
             .iter()
@@ -57,6 +82,11 @@ struct Types {
     /// Names declared as constants — including an enum's members, which 1.x
     /// declares as constants too — so a use is spelled as the declaration is.
     consts: std::collections::HashSet<String>,
+    /// Each record's field names, in order — what a `with` update rebuilds.
+    records: std::collections::HashMap<String, Vec<String>>,
+    /// Each subroutine's parameters and defaults, so a call with named
+    /// arguments can be put in order.
+    subs: std::collections::HashMap<String, Vec<(String, Option<ir::Expr>)>>,
 }
 
 thread_local! {
@@ -65,6 +95,8 @@ thread_local! {
         globals: Default::default(),
         vars: Default::default(),
         consts: Default::default(),
+        records: Default::default(),
+        subs: Default::default(),
     });
 }
 
@@ -81,6 +113,37 @@ fn type_of(x: &ir::Expr) -> Option<ir::Ty> {
         vars.extend(t.vars.iter().map(|(k, v)| (k.clone(), *v)));
         ir::sema::type_of_expr(x, &vars, &t.reg).ok()
     })
+}
+
+/// Replace every use of the name `from` in `x` with `to`.
+fn subst_ident(x: &mut Expr, from: &str, to: &Expr) {
+    match &mut x.kind {
+        ExprKind::Ident(n) if n == from => *x = to.clone(),
+        ExprKind::Binary(_, a, b) | ExprKind::NullCoalesce(a, b) | ExprKind::Index(a, b) => {
+            subst_ident(a, from, to);
+            subst_ident(b, from, to);
+        }
+        ExprKind::Unary(_, a) | ExprKind::Member(a, _) | ExprKind::Cast(_, a) => subst_ident(a, from, to),
+        ExprKind::Call(c, args) => {
+            subst_ident(c, from, to);
+            for a in args {
+                subst_ident(a, from, to);
+            }
+        }
+        ExprKind::Ternary(c, a, b) => {
+            subst_ident(c, from, to);
+            subst_ident(a, from, to);
+            subst_ident(b, from, to);
+        }
+        ExprKind::Interp(segs) => {
+            for sg in segs {
+                if let InterpSeg::Expr(e) = sg {
+                    subst_ident(e, from, to);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 /// `{"a": 1}` as `new Dictionary<string, int> { ["a"] = 1 }`.
@@ -892,6 +955,9 @@ fn call(cmd: &str, args: &[ir::Expr]) -> Expr {
         // `remove(xs, i)` removes by position in place; a command would work on
         // a copy of the list and leave this one as it was.
         ("remove", [xs, i]) => return member(xs, "RemoveAt", std::slice::from_ref(i)),
+        ("index_of", [xs, x]) => return member(xs, "IndexOf", std::slice::from_ref(x)),
+        // `sort(xs)` sorts this list; a command would sort a copy.
+        ("sort", [xs]) => return member(xs, "Sort", &[]),
         _ => {}
     }
     let (owner, name) = command(cmd);
@@ -923,6 +989,65 @@ fn flatten_concat(x: &ir::Expr, out: &mut Vec<InterpSeg>) {
 fn expr(x: &ir::Expr) -> Expr {
     use ir::Expr as E;
     match x {
+        // `connect(timeout: 250, host: "x")` — 1.x's named arguments arrive
+        // shaped like a record literal. Kiln 2 calls are positional, so the
+        // arguments are put in the subroutine's own order, with defaults for
+        // the ones left out.
+        E::RecordLit { name, fields }
+            if TYPES.with(|t| t.borrow().subs.contains_key(name))
+                && !TYPES.with(|t| t.borrow().records.contains_key(name)) =>
+        {
+            let params = TYPES.with(|t| t.borrow().subs[name].clone());
+            let last_given = params
+                .iter()
+                .rposition(|(p, _)| fields.iter().any(|(f, _)| f == p))
+                .map(|i| i + 1)
+                .unwrap_or(0);
+            let args = params[..last_given]
+                .iter()
+                .map(|(p, default)| match fields.iter().find(|(f, _)| f == p) {
+                    Some((_, v)) => expr(v),
+                    None => default.as_ref().map(expr).unwrap_or_else(|| e(ExprKind::Int(0))),
+                })
+                .collect();
+            e(ExprKind::Call(Box::new(ident(&pascal(name))), args))
+        }
+        // `xs[2..3]` on a list is `xs.Slice(2, 3)`; on text, `Substr`.
+        E::Slice { base, from, to } => {
+            let lo = from.as_deref().map(expr).unwrap_or_else(|| e(ExprKind::Int(1)));
+            if type_of(base) == Some(ir::Ty::Text) {
+                let count = match to.as_deref() {
+                    Some(t) => e(ExprKind::Binary(
+                        BinOp::Add,
+                        Box::new(e(ExprKind::Binary(BinOp::Sub, Box::new(expr(t)), Box::new(lo.clone())))),
+                        Box::new(e(ExprKind::Int(1))),
+                    )),
+                    None => e(ExprKind::Call(Box::new(ident("Length")), vec![expr(base)])),
+                };
+                return e(ExprKind::Call(Box::new(ident("Substr")), vec![expr(base), lo, count]));
+            }
+            let hi = to
+                .as_deref()
+                .map(expr)
+                .unwrap_or_else(|| e(ExprKind::Member(Box::new(expr(base)), "Count".into())));
+            e(ExprKind::Call(
+                Box::new(e(ExprKind::Member(Box::new(expr(base)), "Slice".into()))),
+                vec![lo, hi],
+            ))
+        }
+        // `origin with x: 3` rebuilds the record: the changed fields from the
+        // update, the rest from the original.
+        E::RecordUpdate { name, base, fields } if TYPES.with(|t| t.borrow().records.contains_key(name)) => {
+            let names = TYPES.with(|t| t.borrow().records[name].clone());
+            let args = names
+                .iter()
+                .map(|f| match fields.iter().find(|(n, _)| n == f) {
+                    Some((_, v)) => expr(v),
+                    None => e(ExprKind::Member(Box::new(expr(base)), pascal(f))),
+                })
+                .collect();
+            e(ExprKind::New(TypeRef::Named(pascal(name)), args, Vec::new()))
+        }
         // `x in xs` / `k in d` / `sub in text`, by what the haystack is.
         E::In { needle, haystack, negated } => {
             let test = match type_of(haystack) {
@@ -953,12 +1078,62 @@ fn expr(x: &ir::Expr) -> Expr {
         // Over a dictionary its values; binding the key as well is left for a
         // person, since Kiln 2 has no pair type to select from.
         E::Comprehension { body, elem, value, index, coll, cond, .. } if index.is_none() => {
-            let var = camel(value.as_deref().unwrap_or(elem));
-            let bound = value.as_deref().unwrap_or(elem);
-            let mut src = expr(coll);
-            if value.is_some() {
-                src = e(ExprKind::Member(Box::new(src), "Values".into()));
+            // Over a dictionary, walk its keys; a use of the value becomes a
+            // lookup by that key. Over a list, walk the list.
+            // A comprehension that never uses the key walks the values directly.
+            let uses = |x: &ir::Expr, name: &str| format!("{x:?}").contains(&format!("Var({name:?})"));
+            let key_used = value.is_some()
+                && (uses(body, elem) || cond.as_deref().is_some_and(|c| uses(c, elem)));
+            if let (Some(v), false) = (value, key_used) {
+                let var = camel(v);
+                let lambda = |b: Expr| {
+                    e(ExprKind::Lambda(Lambda {
+                        params: vec![(var.clone(), None)],
+                        body: LambdaBody::Expr(Box::new(b)),
+                    }))
+                };
+                let mut src = e(ExprKind::Member(Box::new(expr(coll)), "Values".into()));
+                if let Some(c) = cond {
+                    src = e(ExprKind::Call(
+                        Box::new(e(ExprKind::Member(Box::new(src), "Where".into()))),
+                        vec![lambda(expr(c))],
+                    ));
+                }
+                if !matches!(body.as_ref(), ir::Expr::Var(n) if n == v) {
+                    src = e(ExprKind::Call(
+                        Box::new(e(ExprKind::Member(Box::new(src), "Select".into()))),
+                        vec![lambda(expr(body))],
+                    ));
+                }
+                return src;
             }
+            let over_dict = value.is_some();
+            let var = camel(elem);
+            let base = expr(coll);
+            let mut src = if over_dict {
+                e(ExprKind::Member(Box::new(base.clone()), "Keys".into()))
+            } else {
+                base.clone()
+            };
+            let convert = |x: &ir::Expr| {
+                let mut out = expr(x);
+                if let Some(v) = value {
+                    let lookup = e(ExprKind::Call(
+                        Box::new(e(ExprKind::Member(Box::new(base.clone()), "Get".into()))),
+                        vec![ident(&var)],
+                    ));
+                    let lookup = match type_of(coll) {
+                        Some(ir::Ty::Dict(el)) => match el.ty() {
+                            ir::Ty::Text => e(ExprKind::NullCoalesce(Box::new(lookup), Box::new(e(ExprKind::Str(String::new()))))),
+                            ir::Ty::Int | ir::Ty::Int64 | ir::Ty::Int16 => e(ExprKind::NullCoalesce(Box::new(lookup), Box::new(e(ExprKind::Int(0))))),
+                            _ => lookup,
+                        },
+                        _ => lookup,
+                    };
+                    subst_ident(&mut out, &camel(v), &lookup);
+                }
+                out
+            };
             let lambda = |b: Expr| {
                 e(ExprKind::Lambda(Lambda {
                     params: vec![(var.clone(), None)],
@@ -968,14 +1143,14 @@ fn expr(x: &ir::Expr) -> Expr {
             if let Some(c) = cond {
                 src = e(ExprKind::Call(
                     Box::new(e(ExprKind::Member(Box::new(src), "Where".into()))),
-                    vec![lambda(expr(c))],
+                    vec![lambda(convert(c))],
                 ));
             }
-            let is_identity = matches!(body.as_ref(), ir::Expr::Var(n) if n == bound);
+            let is_identity = matches!(body.as_ref(), ir::Expr::Var(n) if n == elem);
             if !is_identity {
                 src = e(ExprKind::Call(
                     Box::new(e(ExprKind::Member(Box::new(src), "Select".into()))),
-                    vec![lambda(expr(body))],
+                    vec![lambda(convert(body))],
                 ));
             }
             src
@@ -1011,6 +1186,8 @@ fn expr(x: &ir::Expr) -> Expr {
         // would corrupt it.
         E::TextLit(s) => lit_str(s),
         E::NoneLit => e(ExprKind::Null),
+        // 1.x's `none` reaches here as a name when it is an initialiser.
+        E::Var(n) if n == "none" => e(ExprKind::Null),
         E::Var(n) if TYPES.with(|t| t.borrow().consts.contains(n)) => ident(&const_name(n)),
         E::Var(n) => ident(&camel(n)),
         E::Call { cmd, args } => call(cmd, args),

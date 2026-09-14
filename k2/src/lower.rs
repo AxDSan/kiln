@@ -3553,6 +3553,147 @@ impl<'a> FnLower<'a> {
                     return Ok((Expr::Local(removed), TyTable::BOOL));
                 }
             }
+            // `xs.Sort()` — in place, ascending; text by content. An insertion
+            // sort: stable, and a list a program sorts is rarely large.
+            if name == "Sort" && args.is_empty() {
+                let (lv, lty) = self.expr_raw(recv, None)?;
+                if let Some((_, elem)) = self.cx.as_list(lty) {
+                    let holder = self.new_local("$list", lty);
+                    self.push(Stmt::Let { local: holder, value: lv });
+                    let data = || Expr::Field(Box::new(Expr::Local(holder)), LIST_DATA);
+                    let len = || Expr::Field(Box::new(Expr::Local(holder)), LIST_LEN);
+                    let i = self.new_local("$si", TyTable::I32);
+                    let j = self.new_local("$sj", TyTable::I32);
+                    let key = self.new_local("$skey", elem);
+                    let one = |e: Expr, op: BinOp| Expr::Bin(op, Box::new(e), Box::new(Expr::Int(1, TyTable::I32)), TyTable::I32);
+                    let at = |loc: LocalId| Expr::Index(Box::new(data()), Box::new(Expr::Local(loc)));
+                    // greater(data[j], key)
+                    let greater = if elem == TyTable::STR {
+                        Expr::Bin(
+                            BinOp::Gt,
+                            Box::new(Expr::Call(Box::new(Call::Dll {
+                                library: "c".into(),
+                                symbol: "strcmp".into(),
+                                conv: CallConv::Cdecl,
+                                args: vec![at(j), Expr::Local(key)],
+                                arg_tys: vec![TyTable::STR, TyTable::STR],
+                                ret: TyTable::I32,
+                                varargs: false,
+                            }))),
+                            Box::new(Expr::Int(0, TyTable::I32)),
+                            TyTable::I32,
+                        )
+                    } else {
+                        Expr::Bin(BinOp::Gt, Box::new(at(j)), Box::new(Expr::Local(key)), elem)
+                    };
+                    self.push(Stmt::Let { local: i, value: Expr::Int(1, TyTable::I32) });
+                    let inner = vec![
+                        Stmt::If {
+                            cond: Expr::Bin(BinOp::Lt, Box::new(Expr::Local(j)), Box::new(Expr::Int(0, TyTable::I32)), TyTable::I32),
+                            then: vec![Stmt::Break],
+                            els: vec![],
+                        },
+                        Stmt::If {
+                            cond: Expr::Not(Box::new(greater)),
+                            then: vec![Stmt::Break],
+                            els: vec![],
+                        },
+                        Stmt::Assign {
+                            place: Place::Index(Box::new(data()), Box::new(one(Expr::Local(j), BinOp::Add))),
+                            value: at(j),
+                        },
+                        Stmt::Assign { place: Place::Local(j), value: one(Expr::Local(j), BinOp::Sub) },
+                    ];
+                    let outer = vec![
+                        Stmt::If {
+                            cond: Expr::Not(Box::new(Expr::Bin(BinOp::Lt, Box::new(Expr::Local(i)), Box::new(len()), TyTable::I32))),
+                            then: vec![Stmt::Break],
+                            els: vec![],
+                        },
+                        Stmt::Assign { place: Place::Local(key), value: at(i) },
+                        Stmt::Assign { place: Place::Local(j), value: one(Expr::Local(i), BinOp::Sub) },
+                        Stmt::Loop { body: inner },
+                        Stmt::Assign {
+                            place: Place::Index(Box::new(data()), Box::new(one(Expr::Local(j), BinOp::Add))),
+                            value: Expr::Local(key),
+                        },
+                        Stmt::Assign { place: Place::Local(i), value: one(Expr::Local(i), BinOp::Add) },
+                    ];
+                    self.push(Stmt::Loop { body: outer });
+                    return Ok((Expr::Int(0, TyTable::VOID), TyTable::VOID));
+                }
+            }
+            // `xs.IndexOf(x)` — the position of the first `x`, from 1; 0 when
+            // it is not there, as every position in Kiln counts.
+            if name == "IndexOf" {
+                let (lv, lty) = self.expr_raw(recv, None)?;
+                if let Some((_, elem)) = self.cx.as_list(lty) {
+                    if args.len() != 1 {
+                        return Err("List.IndexOf takes the item to look for".into());
+                    }
+                    let holder = self.new_local("$list", lty);
+                    self.push(Stmt::Let { local: holder, value: lv });
+                    let (x, _) = self.expr(&args[0], Some(elem))?;
+                    let at = self.list_find(holder, elem, x)?;
+                    return Ok((
+                        Expr::Bin(BinOp::Add, Box::new(Expr::Local(at)), Box::new(Expr::Int(1, TyTable::I32)), TyTable::I32),
+                        TyTable::I32,
+                    ));
+                }
+            }
+            // `xs.Slice(from, to)` — positions `from` to `to`, both included, as a
+            // new list. Clamped rather than refused, as 1.x's slice is: asking
+            // for more than is there gives what is there.
+            if name == "Slice" {
+                let (lv, lty) = self.expr_raw(recv, None)?;
+                if let Some((lrid, elem)) = self.cx.as_list(lty) {
+                    if args.len() != 2 {
+                        return Err("List.Slice takes a first and a last position".into());
+                    }
+                    let holder = self.new_local("$list", lty);
+                    self.push(Stmt::Let { local: holder, value: lv });
+                    let (from, _) = self.expr(&args[0], Some(TyTable::I32))?;
+                    let (to, _) = self.expr(&args[1], Some(TyTable::I32))?;
+                    let lo = self.new_local("$lo", TyTable::I32);
+                    let hi = self.new_local("$hi", TyTable::I32);
+                    self.push(Stmt::Let { local: lo, value: from });
+                    self.push(Stmt::Let { local: hi, value: to });
+                    let len = || Expr::Field(Box::new(Expr::Local(holder)), LIST_LEN);
+                    let clamp = |loc: LocalId, cmp: BinOp, bound: Expr| Stmt::If {
+                        cond: Expr::Bin(cmp, Box::new(Expr::Local(loc)), Box::new(bound.clone()), TyTable::I32),
+                        then: vec![Stmt::Assign { place: Place::Local(loc), value: bound }],
+                        els: vec![],
+                    };
+                    self.push(clamp(lo, BinOp::Lt, Expr::Int(1, TyTable::I32)));
+                    self.push(clamp(hi, BinOp::Gt, len()));
+                    let data_ty = self.cx.b.m.record(lrid).fields[LIST_DATA].ty;
+                    let out = self.new_local("$slice", lty);
+                    self.push(Stmt::Let {
+                        local: out,
+                        value: Expr::MakeRecord(lrid, vec![Expr::Int(0, TyTable::I32), Expr::Int(0, TyTable::I32), Expr::Null(data_ty)]),
+                    });
+                    let item = Expr::Index(
+                        Box::new(Expr::Field(Box::new(Expr::Local(holder)), LIST_DATA)),
+                        Box::new(Expr::Bin(BinOp::Sub, Box::new(Expr::Local(lo)), Box::new(Expr::Int(1, TyTable::I32)), TyTable::I32)),
+                    );
+                    self.blocks.push(Vec::new());
+                    self.list_add(out, lty, item);
+                    let add = self.blocks.pop().unwrap();
+                    let _ = elem;
+                    let mut body = vec![Stmt::If {
+                        cond: Expr::Bin(BinOp::Gt, Box::new(Expr::Local(lo)), Box::new(Expr::Local(hi)), TyTable::I32),
+                        then: vec![Stmt::Break],
+                        els: vec![],
+                    }];
+                    body.extend(add);
+                    body.push(Stmt::Assign {
+                        place: Place::Local(lo),
+                        value: Expr::Bin(BinOp::Add, Box::new(Expr::Local(lo)), Box::new(Expr::Int(1, TyTable::I32)), TyTable::I32),
+                    });
+                    self.push(Stmt::Loop { body });
+                    return Ok((Expr::Local(out), lty));
+                }
+            }
             // `xs.Contains(x)` on a list: a scan, since a list has no index.
             if name == "Contains" {
                 let (lv, lty) = self.expr_raw(recv, None)?;
@@ -6220,7 +6361,10 @@ impl<'a> FnLower<'a> {
             TyKind::Bool => "true or false".into(),
             TyKind::F32 | TyKind::F64 => "a decimal number".into(),
             TyKind::Void => "nothing".into(),
-            TyKind::Record(_) if self.cx.as_list(ty).is_some() => "a list".into(),
+            TyKind::Record(_) if self.cx.as_list(ty).is_some() => {
+                let (_, e) = self.cx.as_list(ty).unwrap();
+                format!("a list of {}", self.describe_ty(e))
+            }
             TyKind::Record(_) if self.cx.as_dict(ty).is_some() => "a dictionary".into(),
             TyKind::Record(_) if self.cx.as_set(ty).is_some() => "a set".into(),
             TyKind::Record(_) if self.cx.as_result(ty).is_some() => "a Result".into(),
