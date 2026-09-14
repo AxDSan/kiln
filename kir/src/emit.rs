@@ -20,6 +20,7 @@ pub fn emit(m: &Module) -> String {
         strings: Vec::new(),
         externs: BTreeSet::new(),
         needs_gc: false,
+        extra_globals: Vec::new(),
         debug: m
             .source
             .as_deref()
@@ -39,6 +40,8 @@ struct Emit<'a> {
     strings: Vec<String>,
     externs: BTreeSet<String>,
     needs_gc: bool,
+    /// Globals the emitter itself needs — a lazily resolved function's cache.
+    extra_globals: Vec<String>,
     /// Present when the module names the file it came from.
     debug: Option<crate::debug::Debug>,
 }
@@ -88,7 +91,10 @@ impl Emit<'_> {
             )
             .unwrap();
         }
-        if !self.m.globals.is_empty() {
+        for g in &self.extra_globals {
+            writeln!(out, "{g}").unwrap();
+        }
+        if !self.m.globals.is_empty() || !self.extra_globals.is_empty() {
             out.push('\n');
         }
 
@@ -1133,6 +1139,59 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                     argv.push(format!("{} {}", self.tt().llvm(*pt), v.op));
                 }
                 self.emit_call(&fnp, &argv, ret, "")
+            }
+            Call::Dll {
+                library,
+                symbol,
+                conv,
+                args,
+                arg_tys,
+                ret,
+                varargs,
+            } if !*varargs && self.e.m.foreign_libraries.contains(library) => {
+                // A library the program is not linked against: resolved at the
+                // first call and cached, so a program whose library is missing
+                // still starts and says which symbol it could not find when it
+                // gets there — 1.x's `dll`, exactly.
+                let argv: Vec<String> = args
+                    .iter()
+                    .zip(arg_tys)
+                    .map(|(a, t)| {
+                        let v = self.expr(a);
+                        format!("{} {}", self.tt().llvm(*t), v.op)
+                    })
+                    .collect();
+                let n = self.e.extra_globals.len();
+                let cache = format!("@dll.cache.{n}");
+                self.e.extra_globals.push(format!("{cache} = internal global ptr null"));
+                self.e
+                    .externs
+                    .insert("declare ptr @kn_dll_get(ptr, ptr, ptr)".into());
+                let lib = self.e.intern_str(library);
+                let sym = self.e.intern_str(symbol);
+                let fp = self.fresh();
+                writeln!(
+                    self.body,
+                    "  {fp} = call ptr @kn_dll_get(ptr {cache}, ptr @.str{lib}, ptr @.str{sym})"
+                )
+                .unwrap();
+                let cc = match conv {
+                    CallConv::Stdcall if self.e.m.target.windows && self.e.m.target.ptr_bits == 32 => {
+                        "x86_stdcallcc "
+                    }
+                    _ => "",
+                };
+                // A `char*` the library still owns is copied into a runtime
+                // string, and NULL becomes "".
+                if *ret == TyTable::STR {
+                    self.e.externs.insert("declare ptr @kn_dll_text(ptr)".into());
+                    let raw = self.fresh();
+                    writeln!(self.body, "  {raw} = call {cc}ptr {fp}({})", argv.join(", ")).unwrap();
+                    let out = self.fresh();
+                    writeln!(self.body, "  {out} = call ptr @kn_dll_text(ptr {raw})").unwrap();
+                    return Some(V { op: out, ty: TyTable::STR });
+                }
+                self.emit_call(&fp, &argv, *ret, cc)
             }
             Call::Dll {
                 library: _,

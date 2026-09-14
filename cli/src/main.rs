@@ -783,7 +783,7 @@ fn build_k2(
     // A command lives in the runtime, and some are reached without a `using`:
     // `s.Length` is core's `length`. Link the runtime whenever one is called,
     // rather than making the reader know which members are commands.
-    let use_runtime = use_runtime || module.calls_commands();
+    let use_runtime = use_runtime || module.calls_commands() || !module.foreign_libraries.is_empty();
     let ll = kiln_kir::emit::emit(&module);
     if emit_ir {
         print!("{ll}");

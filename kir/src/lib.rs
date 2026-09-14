@@ -331,6 +331,11 @@ pub struct Module {
     /// Where allocations come from. A record, a string and a collection all
     /// allocate; with the runtime linked they should be collectable.
     pub allocator: Allocator,
+    /// Libraries a program names through `[Dll]` that are not linked into it:
+    /// a call into one is resolved at its first call, by `kn_dll_get`, as 1.x
+    /// resolves a `dll`. Anything not listed — libc, the runtime — is a
+    /// symbol the link already provides.
+    pub foreign_libraries: std::collections::BTreeSet<String>,
 }
 
 impl Module {
@@ -346,6 +351,7 @@ impl Module {
             kind,
             source: None,
             allocator: Allocator::Libc,
+            foreign_libraries: Default::default(),
         }
     }
 

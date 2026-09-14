@@ -558,8 +558,10 @@ fn dll(d: &ir::DllDecl) -> Method {
         attrs: vec![Attribute {
             name: "Dll".into(),
             args: vec![lit_str(&d.library)],
-            named: match &d.symbol {
-                Some(s) => vec![("Entry".into(), lit_str(s))],
+            // The C symbol is the original name unless it was renamed; the
+            // method takes Kiln 2's casing, so the entry has to be said.
+            named: match d.symbol.clone().or_else(|| (pascal(&d.name) != d.name).then(|| d.name.clone())) {
+                Some(s) => vec![("Entry".into(), lit_str(&s))],
                 None => Vec::new(),
             },
         }],
@@ -1308,7 +1310,10 @@ fn expr(x: &ir::Expr) -> Expr {
             }),
             pairs,
         ),
-        E::SizeOf(_) | E::AddressOf(_) | E::ZeroInit => {
+        // `address of summer` — in Kiln 2 the method itself, where a pointer is
+        // wanted, is its address.
+        E::AddressOf(sub) => ident(&pascal(sub)),
+        E::SizeOf(_) | E::ZeroInit => {
             lit_str("TODO(migrate): interop expression")
         }
         other => {

@@ -611,6 +611,11 @@ fn register_dll(cx: &mut Cx, owner: &str, m: &ast::Method) -> Result<(), String>
         params,
         ret,
     };
+    // `runtime` and libc are linked into every program; any other library a
+    // `[Dll]` names is found and bound when it is first called.
+    if !matches!(sig.library.as_str(), "runtime" | "c" | "libc") {
+        cx.b.m.foreign_libraries.insert(sig.library.clone());
+    }
     cx.dlls.insert(format!("{owner}.{}", m.name), sig.clone());
     cx.dlls.entry(m.name.clone()).or_insert(sig);
     Ok(())
@@ -2691,6 +2696,27 @@ impl<'a> FnLower<'a> {
                     return Ok((Expr::MakeOptional(inner, None), ty));
                 }
                 Ok((Expr::Null(ty), ty))
+            }
+            // A method named where a pointer is wanted is its address — a
+            // callback handed to C. Only a static method: an instance method
+            // has a `this` no C caller would supply.
+            ast::ExprKind::Ident(name)
+                if hint == Some(TyTable::PTR)
+                    && !self.scope.contains_key(name.as_str())
+                    && !self.cells.contains_key(name.as_str()) =>
+            {
+                let found = self
+                    .cx
+                    .methods
+                    .iter()
+                    .find(|(k, sig)| {
+                        !sig.this && (k.as_str() == name || k.ends_with(&format!(".{name}")))
+                    })
+                    .map(|(_, sig)| sig.fid);
+                match found {
+                    Some(fid) => Ok((Expr::FuncPtr(fid), TyTable::PTR)),
+                    None => self.ident(name, e.span),
+                }
             }
             ast::ExprKind::Ident(name) => self.ident(name, e.span),
             ast::ExprKind::Member(recv, member) => self.member(recv, member),
@@ -6277,8 +6303,12 @@ impl<'a> FnLower<'a> {
             (_, TyKind::Optional(inner)) => *inner == from || self.fits(from, *inner),
             (TyKind::Optional(inner), _) => self.fits(*inner, to),
             // `null`, and the untyped pointer an extern answers with.
-            (TyKind::Ptr, TyKind::Str | TyKind::Record(_) | TyKind::Bytes | TyKind::Array(_))
-            | (TyKind::Str | TyKind::Record(_) | TyKind::Bytes | TyKind::Array(_), TyKind::Ptr) => true,
+            // An untyped pointer — `null`, or what an extern answers with — may
+            // become a typed one. The other way round is not a conversion: text
+            // where a pointer is wanted is usually a mistake, and a record or a
+            // buffer has its own way across (`Bytes`, `[CLayout]`).
+            (TyKind::Ptr, TyKind::Str | TyKind::Record(_) | TyKind::Bytes | TyKind::Array(_)) => true,
+            (TyKind::Record(_) | TyKind::Bytes, TyKind::Ptr) => true,
             // A value becomes a `Result<T>` by being its success.
             (_, TyKind::Record(rid)) if self.cx.b.m.record(*rid).name.starts_with("$Result") => true,
             // An interface value is built from any implementation.
