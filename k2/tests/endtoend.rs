@@ -1733,3 +1733,33 @@ public partial form MainWindow
     .unwrap();
     assert!(with_params.contains("void Grid1Select(int a1)"), "{with_params}");
 }
+
+#[test]
+fn wiring_an_event_in_code_says_where_it_belongs() {
+    // A handler is wired in the designer's block. Written in code it used to
+    // be refused as "compound assignment to a component property", which is
+    // true of the syntax and says nothing about the mistake.
+    let src = r#"
+namespace Wiring;
+
+public partial form MainWindow
+{
+    Title = "x";
+    Button go { Text = "Go"; }
+}
+
+public partial form MainWindow
+{
+    void Setup()
+    {
+        go.Click += OnGo;
+    }
+    void OnGo() { }
+}
+"#;
+    let err = kiln_k2::compile(src).err().expect("this should not compile");
+    assert!(
+        err.contains("designer block") && err.contains("Click +="),
+        "unhelpful error: {err}"
+    );
+}

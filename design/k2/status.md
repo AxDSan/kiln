@@ -222,7 +222,12 @@ clang and checks stdout):
 2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
 3. constraints beyond interfaces (`where T : class`, `new()`) are parsed and ignored
 4. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
-5. ABI v5 proper: a handler that captures a *local*; Studio itself calling `kiln edit` (the command exists; the C++ side still splices 1.x text)
+5. ABI v5: **not reachable, rather than not exercised.** A handler is wired in
+   the form's designer block, where there are no locals to capture; wiring one
+   in code is refused, and now says where it belongs. So the plan's Phase 6
+   ABI work — an env pointer on a handler, handler lists, a rooted registry —
+   has no program that needs it. It is the right change the day events can be
+   wired at run time, and speculative until then
 6. Studio's code pane highlights K2 from its own line tokenizer rather than from the language server's semantic tokens — the shapes are right, but the toolchain is not the one deciding them
 
 ## Milestone: the RAD half runs

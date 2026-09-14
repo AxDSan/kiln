@@ -1576,6 +1576,15 @@ impl<'a> FnLower<'a> {
                     if let ast::ExprKind::Ident(id) = &recv.kind {
                         if let Some(g) = self.cx.components.get(id).map(|(g, _)| *g) {
                             if *op != ast::AssignOp::Eq {
+                                // `go.Click += OnGo` outside the form block is
+                                // the one that gets written by mistake, and it
+                                // is not a compound assignment at all.
+                                if *op == ast::AssignOp::Add {
+                                    return Err(format!(
+                                        "an event is wired in the form's designer block, not in \
+                                         code: write `{prop} += …` inside `{id} {{ … }}`"
+                                    ));
+                                }
                                 return Err(
                                     "compound assignment to a component property is not supported"
                                         .into(),
