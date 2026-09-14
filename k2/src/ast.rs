@@ -310,6 +310,8 @@ pub enum ExprKind {
     Cast(TypeRef, Box<Expr>),
     /// `new T(args)` / `new T { field = v, ... }`
     New(TypeRef, Vec<Expr>, Vec<(String, Expr)>),
+    /// `new Dictionary<K, V> { ["a"] = 1, ["b"] = 2 }` — C#'s index initialiser.
+    DictInit(TypeRef, Vec<(Expr, Expr)>),
     /// `cond ? a : b`
     Ternary(Box<Expr>, Box<Expr>, Box<Expr>),
     /// `e ?? fallback`

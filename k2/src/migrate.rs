@@ -71,6 +71,14 @@ fn type_of(x: &ir::Expr) -> Option<ir::Ty> {
     })
 }
 
+/// `{"a": 1}` as `new Dictionary<string, int> { ["a"] = 1 }`.
+fn dict_init(t: TypeRef, pairs: &[(ir::Expr, ir::Expr)]) -> Expr {
+    e(ExprKind::DictInit(
+        t,
+        pairs.iter().map(|(k, v)| (expr(k), expr(v))).collect(),
+    ))
+}
+
 /// An index into a byte-set counts from 0 in Kiln 2 and from 1 in 1.x; into
 /// anything else, from 1 in both.
 fn position(base_is_bytes: bool, index: &ir::Expr) -> Expr {
@@ -567,11 +575,15 @@ fn stmt(s: &ir::Stmt) -> Stmt {
             mutable,
         } => {
             note_var(name, *t);
+            let value = match value {
+                ir::Expr::DictLit(pairs) => dict_init(ty(*t), pairs),
+                other => expr(other),
+            };
             mk(StmtKind::Local {
                 name: camel(name),
                 ty: Some(ty(*t)),
                 mutable: *mutable,
-                value: expr(value),
+                value,
             })
         }
         S::LetInfer {
@@ -844,7 +856,24 @@ fn call(cmd: &str, args: &[ir::Expr]) -> Expr {
         ("count" | "dict_count", [xs]) => {
             return e(ExprKind::Member(Box::new(expr(xs)), "Count".into()));
         }
-        ("dict_get", [d, k]) => return member(d, "Get", std::slice::from_ref(k)),
+        // 1.x's `dict_get` answers the value type's zero for a missing key.
+        ("dict_get", [d, k]) => {
+            let got = member(d, "Get", std::slice::from_ref(k));
+            let zero = match type_of(d) {
+                Some(ir::Ty::Dict(el)) => match el.ty() {
+                    ir::Ty::Text => Some(ExprKind::Str(String::new())),
+                    ir::Ty::Double | ir::Ty::Float => Some(ExprKind::Float(0.0, false)),
+                    ir::Ty::Bool => Some(ExprKind::Bool(false)),
+                    ir::Ty::Int | ir::Ty::Int64 | ir::Ty::Int16 => Some(ExprKind::Int(0)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            return match zero {
+                Some(z) => e(ExprKind::NullCoalesce(Box::new(got), Box::new(e(z)))),
+                None => got,
+            };
+        }
         ("dict_has", [d, k]) => return member(d, "ContainsKey", std::slice::from_ref(k)),
         ("dict_remove", [d, k]) => return member(d, "Remove", std::slice::from_ref(k)),
         ("contains", [xs, x]) => return member(xs, "Contains", std::slice::from_ref(x)),
@@ -879,6 +908,12 @@ fn flatten_concat(x: &ir::Expr, out: &mut Vec<InterpSeg>) {
 fn expr(x: &ir::Expr) -> Expr {
     use ir::Expr as E;
     match x {
+        // `"aa" * 3` repeats text in 1.x; Kiln 2 has no such operator, and
+        // core's `repeat` is what it always meant.
+        E::Bin(ir::BinOp::Mul, a, b) if type_of(a) == Some(ir::Ty::Text) => e(ExprKind::Call(
+            Box::new(ident("Repeat")),
+            vec![expr(a), expr(b)],
+        )),
         // `0 <= pick <= 2` — Kiln 2 has no chained comparison, so it is the
         // conjunction. `mid` appears twice; 1.x evaluated it once, which only
         // differs when it has a side effect, and then it is marked.
@@ -950,6 +985,28 @@ fn expr(x: &ir::Expr) -> Expr {
         E::Not(a) => e(ExprKind::Unary(UnOp::Not, Box::new(expr(a)))),
         E::BitNot(a) => e(ExprKind::Unary(UnOp::BitNot, Box::new(expr(a)))),
         E::Neg(a) => e(ExprKind::Unary(UnOp::Neg, Box::new(expr(a)))),
+        // `d["k"]` reads as the value type's zero when the key is missing, in
+        // 1.x. Kiln 2 has no reading indexer on a dictionary — there is nothing
+        // to throw — so it is `d.Get("k") ?? zero`, which is what it meant.
+        E::Index { base, index } if matches!(type_of(base), Some(ir::Ty::Dict(_))) => {
+            let Some(ir::Ty::Dict(el)) = type_of(base) else { unreachable!() };
+            let got = e(ExprKind::Call(
+                Box::new(e(ExprKind::Member(Box::new(expr(base)), "Get".into()))),
+                vec![expr(index)],
+            ));
+            let zero = match el.ty() {
+                ir::Ty::Text => Some(ExprKind::Str(String::new())),
+                ir::Ty::Double | ir::Ty::Float => Some(ExprKind::Float(0.0, false)),
+                ir::Ty::Bool => Some(ExprKind::Bool(false)),
+                ir::Ty::Int | ir::Ty::Int64 | ir::Ty::Int16 => Some(ExprKind::Int(0)),
+                // A record has no zero to write; the reader gets the `T?`.
+                _ => None,
+            };
+            match zero {
+                Some(z) => e(ExprKind::NullCoalesce(Box::new(got), Box::new(e(z)))),
+                None => got,
+            }
+        }
         E::Index { base, index } => e(ExprKind::Index(
             Box::new(expr(base)),
             Box::new(position(type_of(base) == Some(ir::Ty::Bytes), index)),
@@ -992,6 +1049,15 @@ fn expr(x: &ir::Expr) -> Expr {
             Vec::new(),
         )),
         E::Labeled { value, .. } => expr(value),
+        E::DictLit(pairs) => dict_init(
+            type_of(x).map(ty).unwrap_or_else(|| {
+                TypeRef::Generic(
+                    "Dictionary".into(),
+                    vec![TypeRef::Named("string".into()), TypeRef::Named("string".into())],
+                )
+            }),
+            pairs,
+        ),
         E::SizeOf(_) | E::AddressOf(_) | E::ZeroInit => {
             lit_str("TODO(migrate): interop expression")
         }

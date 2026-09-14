@@ -1530,6 +1530,27 @@ impl Parser {
             args = self.call_args()?;
         }
         let mut inits = Vec::new();
+        // `{ [key] = value, … }` — a dictionary's entries, written in place.
+        if self.peek() == &Tok::LBrace && self.peek_at(1) == &Tok::LBracket {
+            self.bump();
+            let mut entries = Vec::new();
+            while self.peek() != &Tok::RBrace {
+                self.expect(&Tok::LBracket)?;
+                let k = self.expr()?;
+                self.expect(&Tok::RBracket)?;
+                self.expect(&Tok::Eq)?;
+                let v = self.expr()?;
+                entries.push((k, v));
+                if !self.eat(&Tok::Comma) {
+                    break;
+                }
+            }
+            self.expect(&Tok::RBrace)?;
+            return Ok(Expr {
+                kind: ExprKind::DictInit(ty, entries),
+                span,
+            });
+        }
         if self.peek() == &Tok::LBrace {
             self.bump();
             while self.peek() != &Tok::RBrace {

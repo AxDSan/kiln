@@ -584,6 +584,17 @@ pub fn expr(e: &Expr) -> String {
             )
         }
         ExprKind::Cast(t, x) => format!("({}){}", ty(t), expr(x)),
+        ExprKind::DictInit(t, entries) => {
+            let parts: Vec<String> = entries
+                .iter()
+                .map(|(k, v)| format!("[{}] = {}", expr(k), expr(v)))
+                .collect();
+            if parts.is_empty() {
+                format!("new {}()", ty(t))
+            } else {
+                format!("new {} {{ {} }}", ty(t), parts.join(", "))
+            }
+        }
         ExprKind::New(t, args, inits) => {
             let mut s = format!("new {}", ty(t));
             if !args.is_empty() || inits.is_empty() {

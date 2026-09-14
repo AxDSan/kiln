@@ -2027,3 +2027,22 @@ fn a_condition_must_be_true_or_false_and_a_statement_must_do_something() {
     let err = kiln_k2::compile(bare).err().expect("a bare value does nothing");
     assert!(err.contains("does nothing"), "{err}");
 }
+
+#[test]
+fn a_dictionary_is_initialised_in_place_and_formats_back() {
+    // C#'s index initialiser — the only way to write a dictionary's entries
+    // where it is made. It prints back in the same spelling, so formatting a
+    // file that uses one does not lose it.
+    let src = r#"
+namespace DictInit;
+var ages = new Dictionary<string, int> { ["Ada"] = 36, ["Alan"] = 41 };
+var empty = new Dictionary<string, string>();
+foreach (var (who, age) in ages)
+    Console.WriteLine($"{who} {age}");
+Console.WriteLine($"{empty.Count}");
+"#;
+    assert_eq!(run_k2(src), "Ada 36\nAlan 41\n0\n");
+    let formatted = kiln_k2::format(src).unwrap();
+    assert!(formatted.contains(r#"new Dictionary<string, int> { ["Ada"] = 36, ["Alan"] = 41 }"#), "{formatted}");
+    assert_eq!(run_k2(&formatted), "Ada 36\nAlan 41\n0\n");
+}

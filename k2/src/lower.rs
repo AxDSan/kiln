@@ -616,6 +616,25 @@ fn register_dll(cx: &mut Cx, owner: &str, m: &ast::Method) -> Result<(), String>
     Ok(())
 }
 
+/// An operator as it is written, for an error.
+fn ast_op_text(op: ast::BinOp) -> &'static str {
+    use ast::BinOp as B;
+    match op {
+        B::Add => "+",
+        B::Sub => "-",
+        B::Mul => "*",
+        B::Div => "/",
+        B::Rem => "%",
+        B::BitAnd => "&",
+        B::BitOr => "|",
+        B::BitXor => "^",
+        B::Shl => "<<",
+        B::Shr => ">>",
+        B::UShr => ">>>",
+        _ => "this operator",
+    }
+}
+
 /// The runtime byte-set's header: `int32 dims; int32 len`.
 const BIN_HEADER: i32 = 8;
 
@@ -1780,6 +1799,9 @@ impl<'a> FnLower<'a> {
                     None => None,
                 };
                 let (val, vty) = self.expr(value, hint)?;
+                if let Some(h) = hint {
+                    self.check_fits(vty, h, &format!("`{name}`"))?;
+                }
                 let lty = hint.unwrap_or(vty);
                 self.declare_var(name, lty, val)?;
             }
@@ -1840,41 +1862,7 @@ impl<'a> FnLower<'a> {
                             local: holder,
                             value: dv,
                         });
-                        let (kv, _) = self.expr(key, Some(kty))?;
-                        let khold = self.new_local("$setkey", kty);
-                        self.push(Stmt::Let {
-                            local: khold,
-                            value: kv,
-                        });
-                        let (vv, _) = self.expr(value, Some(vty))?;
-                        let vhold = self.new_local("$setval", vty);
-                        self.push(Stmt::Let {
-                            local: vhold,
-                            value: vv,
-                        });
-                        let found = self.dict_find(holder, dty, Expr::Local(khold))?;
-                        self.blocks.push(Vec::new());
-                        self.dict_append(holder, dty, Expr::Local(khold), Expr::Local(vhold));
-                        let append = self.blocks.pop().unwrap();
-                        self.push(Stmt::If {
-                            cond: Expr::Bin(
-                                BinOp::Ge,
-                                Box::new(Expr::Local(found)),
-                                Box::new(Expr::Int(0, TyTable::I32)),
-                                TyTable::I32,
-                            ),
-                            then: vec![Stmt::Assign {
-                                place: Place::Index(
-                                    Box::new(Expr::Field(
-                                        Box::new(Expr::Local(holder)),
-                                        DICT_VALUES,
-                                    )),
-                                    Box::new(Expr::Local(found)),
-                                ),
-                                value: Expr::Local(vhold),
-                            }],
-                            els: append,
-                        });
+                        self.dict_set(holder, dty, key, value)?;
                         return Ok(());
                     }
                 }
@@ -1886,7 +1874,8 @@ impl<'a> FnLower<'a> {
                     Some(t) => t,
                     None => self.place_ty(target)?,
                 };
-                let (rhs, _) = self.expr(value, Some(pty))?;
+                let (rhs, rty) = self.expr(value, Some(pty))?;
+                self.check_fits(rty, pty, "this assignment")?;
                 let value = if *op == ast::AssignOp::Eq {
                     rhs
                 } else {
@@ -1932,6 +1921,8 @@ impl<'a> FnLower<'a> {
                 }
                 Some(e) => {
                     let (val, vty) = self.expr(e, Some(self.ret))?;
+                    let want = self.ret;
+                    self.check_fits(vty, want, "`return`")?;
                     // `return x;` from a Result-returning method is `Ok(x)`
                     // unless the value already is a Result.
                     let val = match self.cx.as_result(self.ret) {
@@ -2389,6 +2380,35 @@ impl<'a> FnLower<'a> {
                 ("%s", Expr::Local(t), TyTable::STR)
             }
             TyKind::Str => ("%s", v, TyTable::STR),
+            // A `T?` interpolates as its value, or as nothing when it has none —
+            // as C# prints a null. It fell through to the integer case and
+            // panicked the emitter on anything that was not an int.
+            TyKind::Optional(inner) => {
+                let inner = *inner;
+                let held = self.new_local("$opt", ty);
+                self.push(Stmt::Let { local: held, value: v });
+                let t = self.new_local("$opttext", TyTable::STR);
+                self.push(Stmt::Let {
+                    local: t,
+                    value: Expr::Str(String::new()),
+                });
+                self.blocks.push(Vec::new());
+                let (text, _) = self.build_string(vec![(
+                    String::new(),
+                    Some((Expr::OptionalGet(Box::new(Expr::Local(held))), inner)),
+                )]);
+                let mut then = self.blocks.pop().unwrap();
+                then.push(Stmt::Assign {
+                    place: Place::Local(t),
+                    value: text,
+                });
+                self.push(Stmt::If {
+                    cond: Expr::OptionalHasValue(Box::new(Expr::Local(held))),
+                    then,
+                    els: vec![],
+                });
+                ("%s", Expr::Local(t), TyTable::STR)
+            }
             TyKind::F32 => (
                 "%g",
                 Expr::Cast {
@@ -2806,6 +2826,21 @@ impl<'a> FnLower<'a> {
                 ))
             }
             ast::ExprKind::New(t, args, inits) => self.new_record(t, args, inits),
+            ast::ExprKind::DictInit(t, entries) => {
+                let (d, dty) = self.new_record(t, &[], &[])?;
+                if self.cx.as_dict(dty).is_none() {
+                    return Err("`{ [key] = value }` initialises a Dictionary".into());
+                }
+                let holder = self.new_local("$dictinit", dty);
+                self.push(Stmt::Let {
+                    local: holder,
+                    value: d,
+                });
+                for (k, v) in entries {
+                    self.dict_set(holder, dty, k, v)?;
+                }
+                Ok((Expr::Local(holder), dty))
+            }
             ast::ExprKind::Ternary(c, a, b) => self.ternary(c, a, b, hint),
             ast::ExprKind::NullCoalesce(a, b) => {
                 let (v, vty) = self.expr_raw(a, None)?;
@@ -2829,7 +2864,8 @@ impl<'a> FnLower<'a> {
                         value: v,
                     });
                     let out = self.new_local("$value", inner);
-                    let (fb, _) = self.expr(b, Some(inner))?;
+                    let (fb, fbty) = self.expr(b, Some(inner))?;
+                    self.check_fits(fbty, inner, "the fallback after `??`")?;
                     self.push(Stmt::If {
                         cond: Expr::OptionalHasValue(Box::new(Expr::Local(held))),
                         then: vec![Stmt::Assign {
@@ -2853,7 +2889,8 @@ impl<'a> FnLower<'a> {
                     value: v,
                 });
                 let out = self.new_local("$value", val_ty);
-                let (fb, _) = self.expr(b, Some(val_ty))?;
+                let (fb, fbty) = self.expr(b, Some(val_ty))?;
+                self.check_fits(fbty, val_ty, "the fallback after `??`")?;
                 self.push(Stmt::If {
                     cond: Expr::Field(Box::new(Expr::Local(held)), RESULT_OK),
                     then: vec![Stmt::Assign {
@@ -4966,6 +5003,54 @@ impl<'a> FnLower<'a> {
         Ok(removed)
     }
 
+    /// `d[key] = value`: update the entry in place, or append it when the key
+    /// is new. Shared by assignment and by `new Dictionary<K, V> { [k] = v }`.
+    fn dict_set(
+        &mut self,
+        holder: LocalId,
+        dty: TyId,
+        key: &ast::Expr,
+        value: &ast::Expr,
+    ) -> Result<(), String> {
+        let (_, kty, vty) = self.cx.as_dict(dty).expect("a dictionary");
+        let (kv, _) = self.expr(key, Some(kty))?;
+        let khold = self.new_local("$setkey", kty);
+        self.push(Stmt::Let {
+            local: khold,
+            value: kv,
+        });
+        let (vv, _) = self.expr(value, Some(vty))?;
+        let vhold = self.new_local("$setval", vty);
+        self.push(Stmt::Let {
+            local: vhold,
+            value: vv,
+        });
+        let found = self.dict_find(holder, dty, Expr::Local(khold))?;
+        self.blocks.push(Vec::new());
+        self.dict_append(holder, dty, Expr::Local(khold), Expr::Local(vhold));
+        let append = self.blocks.pop().unwrap();
+        self.push(Stmt::If {
+            cond: Expr::Bin(
+                BinOp::Ge,
+                Box::new(Expr::Local(found)),
+                Box::new(Expr::Int(0, TyTable::I32)),
+                TyTable::I32,
+            ),
+            then: vec![Stmt::Assign {
+                place: Place::Index(
+                    Box::new(Expr::Field(
+                        Box::new(Expr::Local(holder)),
+                        DICT_VALUES,
+                    )),
+                    Box::new(Expr::Local(found)),
+                ),
+                value: Expr::Local(vhold),
+            }],
+            els: append,
+        });
+        Ok(())
+    }
+
     /// Remove `key` from a dictionary in place.
     ///
     /// The later entries shift down to close the gap, keeping insertion order,
@@ -5948,7 +6033,11 @@ impl<'a> FnLower<'a> {
         let mut out = Vec::new();
         for (i, pty) in sig.params.iter().enumerate() {
             let v = match args.get(i) {
-                Some(a) => self.expr(a, Some(*pty))?.0,
+                Some(a) => {
+                    let (v, vty) = self.expr(a, Some(*pty))?;
+                    self.check_fits(vty, *pty, &format!("argument {} of `{name}`", i + 1))?;
+                    v
+                }
                 None => {
                     let d = sig.defaults.get(i).cloned().flatten().expect("checked above");
                     self.expr(&d, Some(*pty))?.0
@@ -5957,6 +6046,60 @@ impl<'a> FnLower<'a> {
             out.push(v);
         }
         Ok(out)
+    }
+
+    /// Does a value of type `from` fit where `to` is wanted?
+    ///
+    /// Deliberately a check of *kind*, not of every width: a number fits a
+    /// number, a `T` fits a `T?`, `null` fits anything that can be absent.
+    /// What it refuses is a value of another kind entirely — text where a
+    /// dictionary belongs, a record where a number does — which used to reach
+    /// the emitter and either panicked it or produced LLVM clang rejected.
+    fn fits(&self, from: TyId, to: TyId) -> bool {
+        if from == to {
+            return true;
+        }
+        let numeric = |t: TyId| {
+            matches!(
+                self.tt().kind(t),
+                TyKind::I8 | TyKind::I16 | TyKind::I32 | TyKind::I64
+                    | TyKind::U8 | TyKind::U16 | TyKind::U32 | TyKind::U64
+                    | TyKind::Nint | TyKind::Nuint | TyKind::F32 | TyKind::F64
+                    | TyKind::Char | TyKind::Bool
+            )
+        };
+        if numeric(from) && numeric(to) {
+            return true;
+        }
+        match (self.tt().kind(from), self.tt().kind(to)) {
+            (_, TyKind::Optional(inner)) => *inner == from || self.fits(from, *inner),
+            (TyKind::Optional(inner), _) => self.fits(*inner, to),
+            // `null`, and the untyped pointer an extern answers with.
+            (TyKind::Ptr, TyKind::Str | TyKind::Record(_) | TyKind::Bytes | TyKind::Array(_))
+            | (TyKind::Str | TyKind::Record(_) | TyKind::Bytes | TyKind::Array(_), TyKind::Ptr) => true,
+            // A value becomes a `Result<T>` by being its success.
+            (_, TyKind::Record(rid)) if self.cx.b.m.record(*rid).name.starts_with("$Result") => true,
+            // An interface value is built from any implementation.
+            (TyKind::Record(_), TyKind::Record(rid))
+                if self.cx.iface_records.values().any(|r| r == rid) =>
+            {
+                true
+            }
+            (TyKind::Func { .. }, TyKind::Func { .. }) => true,
+            _ => false,
+        }
+    }
+
+    /// `fits`, as an error naming what was wanted and what was given.
+    fn check_fits(&self, from: TyId, to: TyId, what: &str) -> Result<(), String> {
+        if self.fits(from, to) {
+            return Ok(());
+        }
+        Err(format!(
+            "{what} wants {}, but this is {}",
+            self.describe_ty(to),
+            self.describe_ty(from)
+        ))
     }
 
     /// A condition: something that is true or false, and nothing else.
@@ -5983,6 +6126,9 @@ impl<'a> FnLower<'a> {
             TyKind::F32 | TyKind::F64 => "a decimal number".into(),
             TyKind::Void => "nothing".into(),
             TyKind::Record(_) if self.cx.as_list(ty).is_some() => "a list".into(),
+            TyKind::Record(_) if self.cx.as_dict(ty).is_some() => "a dictionary".into(),
+            TyKind::Record(_) if self.cx.as_set(ty).is_some() => "a set".into(),
+            TyKind::Record(_) if self.cx.as_result(ty).is_some() => "a Result".into(),
             TyKind::Record(rid) => format!("a `{}`", self.cx.b.m.record(*rid).name),
             TyKind::Optional(_) => "an optional value — test it with `!= null`".into(),
             k if matches!(k, TyKind::I8 | TyKind::I16 | TyKind::I32 | TyKind::I64 | TyKind::U8 | TyKind::U16 | TyKind::U32 | TyKind::U64 | TyKind::Nint | TyKind::Nuint) => "a whole number".into(),
@@ -6876,6 +7022,32 @@ impl<'a> FnLower<'a> {
             ));
         }
         let operand_ty = if aty != TyTable::BOOL { aty } else { bty };
+        // Arithmetic and bit operations are on numbers. Text in one was
+        // emitted as a multiply of a pointer — invalid LLVM, rejected by clang
+        // with nothing to say which line did it.
+        if !is_cmp {
+            for (t, side) in [(aty, "left"), (bty, "right")] {
+                let numeric = matches!(
+                    self.tt().kind(t),
+                    TyKind::I8 | TyKind::I16 | TyKind::I32 | TyKind::I64
+                        | TyKind::U8 | TyKind::U16 | TyKind::U32 | TyKind::U64
+                        | TyKind::Nint | TyKind::Nuint | TyKind::F32 | TyKind::F64
+                        | TyKind::Char | TyKind::Bool
+                );
+                if !numeric {
+                    return Err(format!(
+                        "`{}` works on numbers, but its {side} side is {}{}",
+                        ast_op_text(op),
+                        self.describe_ty(t),
+                        if t == TyTable::STR && op == ast::BinOp::Mul {
+                            " — repeat text with `Repeat(text, count)`"
+                        } else {
+                            ""
+                        }
+                    ));
+                }
+            }
+        }
         let out = Expr::Bin(kop, Box::new(av), Box::new(bv), operand_ty);
         let rty = if is_cmp { TyTable::BOOL } else { operand_ty };
         Ok((out, rty))
@@ -7040,6 +7212,12 @@ fn captured_names(
 fn collect_lambdas_expr(e: &ast::Expr, out: &mut Vec<ast::Lambda>) {
     use ast::ExprKind as E;
     match &e.kind {
+        E::DictInit(_, entries) => {
+            for (k, v) in entries {
+                collect_lambdas_expr(k, out);
+                collect_lambdas_expr(v, out);
+            }
+        }
         E::Collection(items) => {
             for i in items {
                 collect_lambdas_expr(i, out);
@@ -7177,6 +7355,12 @@ fn collect_idents_lambda(l: &ast::Lambda, out: &mut Vec<String>) {
 fn collect_idents_expr(e: &ast::Expr, out: &mut Vec<String>) {
     use ast::ExprKind as E;
     match &e.kind {
+        E::DictInit(_, entries) => {
+            for (k, v) in entries {
+                collect_idents_expr(k, out);
+                collect_idents_expr(v, out);
+            }
+        }
         E::Collection(items) => {
             for i in items {
                 collect_idents_expr(i, out);
