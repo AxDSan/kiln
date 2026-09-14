@@ -118,8 +118,26 @@ fn vis(v: Vis) -> &'static str {
     }
 }
 
+fn component(o: &mut Out, c: &ComponentDecl) {
+    o.leading(&c.leading);
+    o.open(&format!("{} {}", c.type_name, c.id));
+    for (n, v) in &c.properties {
+        o.line(&format!("{n} = {};", expr(v)));
+    }
+    for (e, h) in &c.handlers {
+        match h {
+            HandlerRef::Method(m) => o.line(&format!("{e} += {m};")),
+            HandlerRef::Lambda(l) => {
+                o.line(&format!("{e} += {};", lambda(l)));
+            }
+        }
+    }
+    o.close();
+}
+
 fn item(o: &mut Out, it: &Item) {
     match it {
+        Item::Component(c) => component(o, c),
         Item::Enum(e) => {
             o.leading(&e.leading);
             o.doc(&e.doc);
@@ -166,20 +184,7 @@ fn item(o: &mut Out, it: &Item) {
                 if i > 0 {
                     o.blank();
                 }
-                o.leading(&c.leading);
-                o.open(&format!("{} {}", c.type_name, c.id));
-                for (n, v) in &c.properties {
-                    o.line(&format!("{n} = {};", expr(v)));
-                }
-                for (e, h) in &c.handlers {
-                    match h {
-                        HandlerRef::Method(m) => o.line(&format!("{e} += {m};")),
-                        HandlerRef::Lambda(l) => {
-                            o.line(&format!("{e} += {};", lambda(l)));
-                        }
-                    }
-                }
-                o.close();
+                component(o, c);
             }
             for fl in &f.fields {
                 field(o, fl);
@@ -338,7 +343,10 @@ fn method(o: &mut Out, m: &Method) {
 
 fn params(ps: &[Param]) -> String {
     ps.iter()
-        .map(|p| format!("{} {}", ty(&p.ty), name(&p.name)))
+        .map(|p| match &p.default {
+            Some(d) => format!("{} {} = {}", ty(&p.ty), name(&p.name), expr(d)),
+            None => format!("{} {}", ty(&p.ty), name(&p.name)),
+        })
         .collect::<Vec<_>>()
         .join(", ")
 }

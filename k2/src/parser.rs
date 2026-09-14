@@ -118,6 +118,9 @@ impl Parser {
                 }
                 Tok::LBracket => items.push(self.item()?),
                 _ if self.starts_type_decl() => items.push(self.item()?),
+                _ if self.starts_component_decl() => {
+                    items.push(Item::Component(self.component_decl()?))
+                }
                 _ => top_level.push(self.stmt()?),
             }
         }
@@ -165,6 +168,54 @@ impl Parser {
             alias: None,
             span,
         })
+    }
+
+    /// `Type id { Prop = value; Event += Handler; }` — a component, in a form
+    /// or, for one with no rectangle, at namespace level.
+    fn component_decl(&mut self) -> Result<ComponentDecl, ParseError> {
+        let cspan = self.span();
+        let cleading = self.leading();
+        let type_name = self.ident()?;
+        let id = self.ident()?;
+        self.expect(&Tok::LBrace)?;
+        let mut cprops = Vec::new();
+        let mut handlers = Vec::new();
+        while self.peek() != &Tok::RBrace {
+            let n = self.ident()?;
+            if self.eat(&Tok::PlusEq) {
+                // a method by name, or a lambda written here
+                if let Some(l) = self.try_lambda()? {
+                    match l.kind {
+                        ExprKind::Lambda(lam) => handlers.push((n, HandlerRef::Lambda(lam))),
+                        _ => unreachable!(),
+                    }
+                } else {
+                    handlers.push((n, HandlerRef::Method(self.ident()?)));
+                }
+            } else {
+                self.expect(&Tok::Eq)?;
+                cprops.push((n, self.expr()?));
+            }
+            self.expect(&Tok::Semi)?;
+        }
+        self.expect(&Tok::RBrace)?;
+        Ok(ComponentDecl {
+            leading: cleading,
+            type_name,
+            id,
+            properties: cprops,
+            handlers,
+            span: cspan,
+        })
+    }
+
+    /// A component declared at namespace level: `Timer ticker { … }`. Told
+    /// apart from a top-level statement by its shape — two names and a brace,
+    /// which no statement begins with.
+    fn starts_component_decl(&self) -> bool {
+        matches!(self.peek(), Tok::Ident(_))
+            && matches!(self.peek_at(1), Tok::Ident(_))
+            && self.peek_at(2) == &Tok::LBrace
     }
 
     fn starts_type_decl(&self) -> bool {
@@ -248,42 +299,7 @@ impl Parser {
                         && matches!(self.peek_at(1), Tok::Ident(_))
                         && self.peek_at(2) == &Tok::LBrace
                     {
-                        let cspan = self.span();
-                        let cleading = self.leading();
-                        let type_name = self.ident()?;
-                        let id = self.ident()?;
-                        self.expect(&Tok::LBrace)?;
-                        let mut cprops = Vec::new();
-                        let mut handlers = Vec::new();
-                        while self.peek() != &Tok::RBrace {
-                            let n = self.ident()?;
-                            if self.eat(&Tok::PlusEq) {
-                                // a method by name, or a lambda written here
-                                if let Some(l) = self.try_lambda()? {
-                                    match l.kind {
-                                        ExprKind::Lambda(lam) => {
-                                            handlers.push((n, HandlerRef::Lambda(lam)))
-                                        }
-                                        _ => unreachable!(),
-                                    }
-                                } else {
-                                    handlers.push((n, HandlerRef::Method(self.ident()?)));
-                                }
-                            } else {
-                                self.expect(&Tok::Eq)?;
-                                cprops.push((n, self.expr()?));
-                            }
-                            self.expect(&Tok::Semi)?;
-                        }
-                        self.expect(&Tok::RBrace)?;
-                        components.push(ComponentDecl {
-                            leading: cleading,
-                            type_name,
-                            id,
-                            properties: cprops,
-                            handlers,
-                            span: cspan,
-                        });
+                        components.push(self.component_decl()?);
                         continue;
                     }
                     self.member(&name, &mut fields, &mut consts, &mut methods)?;
@@ -717,11 +733,20 @@ impl Parser {
             let _ = self.eat_kw(Kw::Ref) || self.eat_kw(Kw::Out);
             let ty = self.type_ref()?;
             let name = self.ident()?;
-            // default values parsed and ignored for now
-            if self.eat(&Tok::Eq) {
-                self.expr()?;
-            }
-            out.push(Param { name, ty, span });
+            // A default is kept, and used by a call that leaves the argument
+            // out. It used to be parsed and thrown away, so such a call passed
+            // nothing where a value was expected and the callee read garbage.
+            let default = if self.eat(&Tok::Eq) {
+                Some(self.expr()?)
+            } else {
+                None
+            };
+            out.push(Param {
+                name,
+                ty,
+                default,
+                span,
+            });
             if !self.eat(&Tok::Comma) {
                 break;
             }

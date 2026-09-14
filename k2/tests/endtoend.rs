@@ -1966,3 +1966,64 @@ Console.WriteLine($"{xs.Count} {xs[1]} {xs[2]} {xs[3]}");
         "Ada -> 36\nGrace -> 45\nLinus -> 29\n7/true\n3 10 30 40\n"
     );
 }
+
+#[test]
+fn text_compares_by_content_and_and_really_short_circuits() {
+    // `==` on two strings compared the pointers, so a built string never
+    // equalled a literal — `"fizz" + "buzz" == "fizzbuzz"` was false. And the
+    // right side of `&&` was only half short-circuited: its value waited for
+    // the `if`, but the statements it needed ran first — so the bounds check in
+    // `ready && xs[9] > 0` stopped the program though `ready` was false.
+    let src = r#"
+namespace EqSc;
+Console.WriteLine($"{"fizz" + "buzz" == "fizzbuzz"} {"a" != "b"} {"abc" < "abd"} {"b" < "a"}");
+var xs = new List<int>();
+var ready = false;
+if (ready && xs[9] > 0)
+    Console.WriteLine("no");
+var done = true;
+if (done || xs[9] > 0)
+    Console.WriteLine("or held too");
+"#;
+    assert_eq!(run_k2(src), "true true true false\nor held too\n");
+}
+
+#[test]
+fn a_default_argument_is_used_and_a_wrong_count_is_refused() {
+    // The default was parsed and thrown away, and arguments were paired with
+    // parameters by `zip` — so `Shout("ada")` passed nothing where `mark`
+    // belonged and the program segfaulted reading it.
+    let src = r#"
+namespace Defaults;
+public static class P
+{
+    static string Shout(string who, string mark = "!") => $"{who}{mark}";
+    public static void Main()
+    {
+        Console.WriteLine(Shout("ada"));
+        Console.WriteLine(Shout("ada", "?"));
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "ada!\nada?\n");
+
+    let short = src.replace("Shout(\"ada\")", "Shout()");
+    let err = kiln_k2::compile(&short).err().expect("too few arguments");
+    assert!(err.contains("`Shout` takes 1 to 2 argument(s)"), "{err}");
+    let long = src.replace("Shout(\"ada\", \"?\")", "Shout(\"a\", \"b\", \"c\")");
+    let err = kiln_k2::compile(&long).err().expect("too many arguments");
+    assert!(err.contains("but this call passes 3"), "{err}");
+}
+
+#[test]
+fn a_condition_must_be_true_or_false_and_a_statement_must_do_something() {
+    // A string used as a condition was emitted as a branch on a pointer, which
+    // clang rejected far from the cause; a bare value as a statement was
+    // silently dropped. Both are errors a reader can act on.
+    let cond = "namespace C1;\nif (\"yes\")\n    Console.WriteLine(\"x\");\n";
+    let err = kiln_k2::compile(cond).err().expect("a string is not a condition");
+    assert!(err.contains("a condition must be true or false, but this is text"), "{err}");
+    let bare = "namespace C2;\n\"nothing\";\n";
+    let err = kiln_k2::compile(bare).err().expect("a bare value does nothing");
+    assert!(err.contains("does nothing"), "{err}");
+}

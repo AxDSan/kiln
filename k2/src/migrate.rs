@@ -171,11 +171,10 @@ fn module(m: &ir::Module) -> Program {
             }),
             ir::Item::Sub(s) => methods.push(sub(s)),
             ir::Item::Dll(d) => methods.push(dll(d)),
-            ir::Item::Form(_) | ir::Item::Component(_) => {
-                leading.push(todo_note(
-                    "this module declared a form; rewrite it as a `form` block (spec §11)",
-                ));
-            }
+            // A component with no rectangle sits at namespace level, beside
+            // the class whose methods handle its events.
+            ir::Item::Component(c) => items.push(Item::Component(component_decl(c))),
+            ir::Item::Form(_) => {}
             ir::Item::UserType(_) => {}
         }
     }
@@ -211,6 +210,26 @@ fn module(m: &ir::Module) -> Program {
             .collect(),
         items,
         top_level: Vec::new(),
+    }
+}
+
+/// A 1.x component as Kiln 2 writes one.
+fn component_decl(c: &ir::Component) -> ComponentDecl {
+    ComponentDecl {
+        type_name: pascal(&c.type_name),
+        leading: Vec::new(),
+        id: camel(&c.id),
+        properties: c
+            .properties
+            .iter()
+            .map(|(n, v)| (pascal(n), expr(v)))
+            .collect(),
+        handlers: c
+            .handlers
+            .iter()
+            .map(|(ev, h)| (pascal(ev), HandlerRef::Method(pascal(h))))
+            .collect(),
+        span: sp(),
     }
 }
 
@@ -276,10 +295,7 @@ fn form_module(
                 methods.push(method);
             }
             ir::Item::Dll(d) => methods.push(dll(d)),
-            ir::Item::Component(c) => leading.push(todo_note(&format!(
-                "`{} {}` has no rectangle; Kiln 2 does not declare non-visual components yet",
-                c.type_name, c.id
-            ))),
+            ir::Item::Component(c) => items.push(Item::Component(component_decl(c))),
             ir::Item::Form(_) | ir::Item::UserType(_) => {}
         }
     }
@@ -409,6 +425,7 @@ fn dll(d: &ir::DllDecl) -> Method {
             .map(|(n, t)| Param {
                 name: camel(n),
                 ty: ty(*t),
+                default: None,
                 span: sp(),
             })
             .collect(),
@@ -437,9 +454,13 @@ fn sub(s: &ir::Sub) -> Method {
         params: s
             .params
             .iter()
-            .map(|(n, t)| Param {
+            .enumerate()
+            .map(|(i, (n, t))| Param {
                 name: camel(n),
                 ty: ty(*t),
+                // 1.x's default values carry over, so a call that leaves one
+                // out still means what it meant.
+                default: s.defaults.get(i).cloned().flatten().map(|d| expr(&d)),
                 span: sp(),
             })
             .collect(),
@@ -552,13 +573,37 @@ fn stmt(s: &ir::Stmt) -> Stmt {
                 body: body.iter().map(stmt).collect(),
             });
             if *step == 1 {
-                s
-            } else {
-                note(
-                    s,
-                    &format!("this loop stepped by {step}; rewrite it as a `for`"),
-                )
+                return s;
             }
+            // Any other step is a counted `for`: the comparison follows the
+            // step's sign, as 1.x chose it at compile time. Leaving the range
+            // here would silently run a count-down loop zero times.
+            let name = camel(var);
+            let cmp = if *step > 0 { BinOp::Le } else { BinOp::Ge };
+            let _ = s;
+            mk(StmtKind::For {
+                init: Box::new(Some(mk(StmtKind::Local {
+                    name: name.clone(),
+                    ty: None,
+                    mutable: true,
+                    value: expr(start),
+                }))),
+                cond: Some(e(ExprKind::Binary(
+                    cmp,
+                    Box::new(ident(&name)),
+                    Box::new(expr(limit)),
+                ))),
+                step: Box::new(Some(mk(StmtKind::Assign {
+                    target: ident(&name),
+                    op: AssignOp::Eq,
+                    value: e(ExprKind::Binary(
+                        BinOp::Add,
+                        Box::new(ident(&name)),
+                        Box::new(e(ExprKind::Int(*step as i128))),
+                    )),
+                }))),
+                body: body.iter().map(stmt).collect(),
+            })
         }
         S::ForEach {
             elem, value, coll, body, ..
@@ -594,14 +639,71 @@ fn stmt(s: &ir::Stmt) -> Stmt {
             value: expr(value),
         }),
         S::Defer(inner) => mk(StmtKind::Defer(Box::new(stmt(inner)))),
-        S::Match { .. } => note(
-            mk(StmtKind::Expr(lit_str("match"))),
-            "a `match` statement becomes a `switch` expression or an if-chain (spec §7)",
-        ),
-        S::IfSome { .. } => note(
-            mk(StmtKind::Expr(lit_str("if some"))),
-            "`if some` becomes `if (x != null)`, which narrows `x` (spec §4.3)",
-        ),
+        // `match` becomes an if-chain on the value. Each arm's values are
+        // alternatives; `else` is the last branch.
+        S::Match {
+            scrutinee,
+            arms,
+            otherwise,
+        } => {
+            let subject = expr(scrutinee);
+            let mut chain: Vec<Stmt> = otherwise
+                .as_ref()
+                .map(|b| b.iter().map(stmt).collect())
+                .unwrap_or_default();
+            for (values, body) in arms.iter().rev() {
+                let mut cond: Option<Expr> = None;
+                for v in values {
+                    let one = e(ExprKind::Binary(
+                        BinOp::Eq,
+                        Box::new(subject.clone()),
+                        Box::new(expr(v)),
+                    ));
+                    cond = Some(match cond {
+                        None => one,
+                        Some(c) => e(ExprKind::Binary(BinOp::Or, Box::new(c), Box::new(one))),
+                    });
+                }
+                let Some(cond) = cond else { continue };
+                chain = vec![mk(StmtKind::If {
+                    cond,
+                    then: body.iter().map(stmt).collect(),
+                    els: chain,
+                })];
+            }
+            match chain.len() {
+                1 => chain.pop().unwrap(),
+                _ => mk(StmtKind::Block(chain)),
+            }
+        }
+        // `if some x = opt` is a presence test that binds the value.
+        S::IfSome {
+            value,
+            bind,
+            body,
+            otherwise,
+        } => {
+            let name = camel(bind);
+            let decl = mk(StmtKind::Local {
+                name: name.clone(),
+                ty: None,
+                mutable: false,
+                value: expr(value),
+            });
+            let test = mk(StmtKind::If {
+                cond: e(ExprKind::Binary(
+                    BinOp::Ne,
+                    Box::new(ident(&name)),
+                    Box::new(e(ExprKind::Null)),
+                )),
+                then: body.iter().map(stmt).collect(),
+                els: otherwise
+                    .as_ref()
+                    .map(|b| b.iter().map(stmt).collect())
+                    .unwrap_or_default(),
+            });
+            mk(StmtKind::Block(vec![decl, test]))
+        }
         S::CallThrough { .. } => note(
             mk(StmtKind::Expr(lit_str("call through"))),
             "an indirect call becomes a `Func<...>` value (spec §4.2)",
@@ -693,6 +795,22 @@ fn flatten_concat(x: &ir::Expr, out: &mut Vec<InterpSeg>) {
 fn expr(x: &ir::Expr) -> Expr {
     use ir::Expr as E;
     match x {
+        // `0 <= pick <= 2` — Kiln 2 has no chained comparison, so it is the
+        // conjunction. `mid` appears twice; 1.x evaluated it once, which only
+        // differs when it has a side effect, and then it is marked.
+        E::Chain { lo, lo_op, mid, hi_op, hi } => {
+            let cmp = |op: &ir::CmpOp| match op {
+                ir::CmpOp::Lt => BinOp::Lt,
+                ir::CmpOp::Le => BinOp::Le,
+                ir::CmpOp::Gt => BinOp::Gt,
+                ir::CmpOp::Ge => BinOp::Ge,
+                ir::CmpOp::Eq => BinOp::Eq,
+                ir::CmpOp::Ne => BinOp::Ne,
+            };
+            let left = e(ExprKind::Binary(cmp(lo_op), Box::new(expr(lo)), Box::new(expr(mid))));
+            let right = e(ExprKind::Binary(cmp(hi_op), Box::new(expr(mid)), Box::new(expr(hi))));
+            e(ExprKind::Binary(BinOp::And, Box::new(left), Box::new(right)))
+        }
         E::IntLit(v) => e(ExprKind::Int(*v as i128)),
         E::BitsLit(v) => e(ExprKind::Int(*v as i128)),
         E::DoubleLit(v) => e(ExprKind::Float(*v, false)),

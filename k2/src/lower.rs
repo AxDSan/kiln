@@ -82,6 +82,7 @@ pub fn lower_full(
             ast::Item::Form(f) => {
                 type_names.insert(f.name.clone());
             }
+            ast::Item::Component(_) => {}
         }
     }
     for item in &p.items {
@@ -153,6 +154,8 @@ pub fn lower_full(
         tables: HashMap::new(),
         form_state: HashMap::new(),
         static_inits: Vec::new(),
+        nonvisual: HashMap::new(),
+        namespace_components: Vec::new(),
         components: HashMap::new(),
         generic_types: HashMap::new(),
         type_mono: HashMap::new(),
@@ -331,6 +334,23 @@ pub fn lower_full(
         }
     }
 
+    // Components declared at namespace level have no rectangle: a timer, a
+    // server. Each is a global holding the handle its library hands back.
+    for item in &p.items {
+        if let ast::Item::Component(c) = item {
+            let lib = cx.nonvisual_library(&c.type_name).ok_or_else(|| {
+                format!(
+                    "`{}` is not a component without a rectangle; a visual one belongs in a form",
+                    c.type_name
+                )
+            })?;
+            let g = cx.b.add_global(&format!("$component__{}", c.id), TyTable::I64, false);
+            cx.components.insert(c.id.clone(), (g, c.type_name.clone()));
+            cx.nonvisual.insert(c.id.clone(), lib);
+            cx.namespace_components.push(c.clone());
+        }
+    }
+
     // Pass 3: declare all methods (symbol + signature) before lowering bodies.
     for item in &p.items {
         if let ast::Item::Type(td) = item {
@@ -381,6 +401,7 @@ pub fn lower_full(
                     fid,
                     this: this.is_some(),
                     params: owned.iter().map(|(_, t)| *t).collect(),
+                    defaults: m.params.iter().map(|p| p.default.clone()).collect(),
                     ret,
                 };
                 cx.methods
@@ -446,6 +467,9 @@ pub fn lower_full(
             let g =
                 cx.b.add_global(&format!("{}__{}", f.name, c.id), TyTable::I64, false);
             cx.components.insert(c.id.clone(), (g, c.type_name.clone()));
+            if let Some(lib) = cx.nonvisual_library(&c.type_name) {
+                cx.nonvisual.insert(c.id.clone(), lib);
+            }
         }
         for fld in &f.fields {
             let ty = cx.resolve(&fld.ty)?;
@@ -485,6 +509,7 @@ pub fn lower_full(
                 fid,
                 this: false,
                 params: owned.iter().map(|(_, t)| *t).collect(),
+                defaults: m.params.iter().map(|p| p.default.clone()).collect(),
                 ret,
             };
             cx.methods
@@ -498,7 +523,8 @@ pub fn lower_full(
         let build =
             cx.b.declare_func(&format!("{}_Build", f.name), vec![], TyTable::I32);
         cx.lower_form(build, f)?;
-        let entry = cx.wrap_entry_with_inits(build)?;
+        // The form built its components itself; the wrapper only sets globals.
+        let entry = cx.wrap_entry(build, true)?;
         cx.b.set_entry(entry);
         cx.drain_pending()?;
         return Ok(cx.b.build());
@@ -535,6 +561,8 @@ struct Sig {
     fid: FuncId,
     this: bool,
     params: Vec<TyId>,
+    /// Each parameter's default value, parallel to `params`.
+    defaults: Vec<Option<ast::Expr>>,
     ret: TyId,
 }
 
@@ -710,6 +738,11 @@ struct Cx {
     /// Globals with an initial value — static fields and form fields — set by
     /// a wrapper around the entry point before it runs.
     static_inits: Vec<(GlobalId, TyId, ast::Expr)>,
+    /// Components with no rectangle, by id: the library whose own entry
+    /// points create and address them (`core` for a timer, `net` for a server).
+    nonvisual: HashMap<String, String>,
+    /// Namespace-level non-visual components, built before the entry point.
+    namespace_components: Vec<ast::ComponentDecl>,
     /// Component id → (global holding its runtime handle, component type).
     components: HashMap<String, (GlobalId, String)>,
     /// Generic type declarations, awaiting type arguments.
@@ -735,10 +768,25 @@ impl Cx {
     /// to initialise the entry is returned unchanged, so a program without
     /// static state compiles exactly as it did.
     fn wrap_entry_with_inits(&mut self, entry: FuncId) -> Result<FuncId, String> {
-        if self.static_inits.is_empty() {
+        self.wrap_entry(entry, false)
+    }
+
+    /// The entry point wrapped with what has to happen around it: globals'
+    /// initial values first; and for a console program with components, those
+    /// components built before `Main` and the runtime's loop run after it —
+    /// which is what keeps a program with a live timer or server running once
+    /// `Main` returns, exactly as 1.x does.
+    fn wrap_entry(&mut self, entry: FuncId, is_form: bool) -> Result<FuncId, String> {
+        let components = if is_form {
+            Vec::new()
+        } else {
+            std::mem::take(&mut self.namespace_components)
+        };
+        if self.static_inits.is_empty() && components.is_empty() {
             return Ok(entry);
         }
-        let ret = self.b.m.func(entry).ret;
+        let entry_ret = self.b.m.func(entry).ret;
+        let ret = if components.is_empty() { entry_ret } else { TyTable::I32 };
         let wrapper = self.b.declare_func("$init_then_entry", vec![], ret);
         let inits = std::mem::take(&mut self.static_inits);
         let mut fl = FnLower::new(self, wrapper, ret);
@@ -749,11 +797,26 @@ impl Cx {
                 value: v,
             });
         }
+        for c in &components {
+            fl.build_nonvisual(c, None)?;
+        }
         let call = Expr::Call(Box::new(Call::Direct {
             func: entry,
             args: Vec::new(),
         }));
-        if ret == TyTable::VOID {
+        if !components.is_empty() {
+            fl.push(Stmt::Expr(call));
+            let run = Expr::Call(Box::new(Call::Dll {
+                library: "runtime".into(),
+                symbol: "kn_loop_run".into(),
+                conv: CallConv::Cdecl,
+                args: Vec::new(),
+                arg_tys: Vec::new(),
+                ret: TyTable::I32,
+                varargs: false,
+            }));
+            fl.push(Stmt::Return(Some(run)));
+        } else if ret == TyTable::VOID {
             fl.push(Stmt::Expr(call));
             fl.push(Stmt::Return(None));
         } else {
@@ -762,6 +825,16 @@ impl Cx {
         let body = fl.finish();
         self.b.set_body(wrapper, body);
         Ok(wrapper)
+    }
+
+    /// The library that owns a component type with no rectangle, or `None`
+    /// for a visual one (or one the registry does not know).
+    fn nonvisual_library(&self, type_name: &str) -> Option<String> {
+        let d = self.registry.as_ref()?.component(&snake_case(type_name))?;
+        match d.kind {
+            kiln_ir::registry::ComponentKind::NonVisual => Some(d.library.clone()),
+            kiln_ir::registry::ComponentKind::Visual => None,
+        }
     }
 
     fn record_ty(&mut self, name: &str) -> TyId {
@@ -994,6 +1067,7 @@ impl Cx {
                     fid,
                     this,
                     params: owned.iter().map(|(_, t)| *t).collect(),
+                    defaults: m.params.iter().map(|p| p.default.clone()).collect(),
                     ret,
                 };
                 self.methods
@@ -1352,6 +1426,9 @@ impl Cx {
         }
 
         for c in &f.components {
+            if fl.cx.nonvisual.contains_key(&c.id) {
+                continue;
+            }
             let (g, _) = fl.cx.components[&c.id];
             let handle = ui_call(
                 "kn_ui_create",
@@ -1476,6 +1553,20 @@ impl Cx {
                     els: vec![],
                 });
             }
+        }
+
+        // Components with no rectangle — the form's own and any declared at
+        // namespace level — are built once the window exists, so a handler
+        // they fire can already touch it.
+        let nv: Vec<ast::ComponentDecl> = f
+            .components
+            .iter()
+            .filter(|c| fl.cx.nonvisual.contains_key(&c.id))
+            .cloned()
+            .chain(fl.cx.namespace_components.clone())
+            .collect();
+        for c in &nv {
+            fl.build_nonvisual(c, Some(&f.name))?;
         }
 
         // A form's `Main`, if it has one, runs once the window and every
@@ -1717,6 +1808,16 @@ impl<'a> FnLower<'a> {
                             } else {
                                 self.build_string(vec![(String::new(), Some((v, vty)))]).0
                             };
+                            if let Some(lib) = self.cx.nonvisual.get(id).cloned() {
+                                self.push(Stmt::Expr(component_call(
+                                    &lib,
+                                    "set",
+                                    vec![Expr::Global(g), Expr::Str(snake_case(prop)), text],
+                                    vec![TyTable::I64, TyTable::STR, TyTable::STR],
+                                    TyTable::I32,
+                                )));
+                                return Ok(());
+                            }
                             self.push(Stmt::Expr(ui_set(Expr::Global(g), &snake_case(prop), text)));
                             return Ok(());
                         }
@@ -1803,13 +1904,23 @@ impl<'a> FnLower<'a> {
                 if let Some(()) = self.try_console(e)? {
                     return Ok(());
                 }
-                let (val, ty) = self.expr(e, None)?;
-                // keep the call for its effect; a bare value is dropped
-                if ty == TyTable::VOID {
-                    self.push(Stmt::Expr(val));
-                } else {
-                    self.push(Stmt::Expr(val));
+                // A statement has to do something. A literal or a name on its
+                // own does nothing, and was silently accepted — which is how a
+                // migrated `match` compiled to a string that did nothing.
+                if matches!(
+                    e.kind,
+                    ast::ExprKind::Str(_)
+                        | ast::ExprKind::Int(_)
+                        | ast::ExprKind::Float(..)
+                        | ast::ExprKind::Bool(_)
+                        | ast::ExprKind::Null
+                        | ast::ExprKind::Ident(_)
+                        | ast::ExprKind::Interp(_)
+                ) {
+                    return Err("this value on its own does nothing — a statement is a call, an assignment or a declaration".into());
                 }
+                let (val, _) = self.expr(e, None)?;
+                self.push(Stmt::Expr(val));
             }
             ast::StmtKind::Return(v) => match v {
                 None => {
@@ -1832,7 +1943,7 @@ impl<'a> FnLower<'a> {
                 }
             },
             ast::StmtKind::If { cond, then, els } => {
-                let (c, _) = self.expr(cond, Some(TyTable::BOOL))?;
+                let c = self.condition(cond)?;
                 // `if (x != null)` proves `x` present in the then-branch;
                 // `if (x == null)` proves it in the else-branch.
                 let (narrow_then, narrow_else) = null_test_target(cond);
@@ -1856,7 +1967,7 @@ impl<'a> FnLower<'a> {
             }
             ast::StmtKind::While { cond, body } => {
                 // loop { if (!cond) break; body }
-                let (c, _) = self.expr(cond, Some(TyTable::BOOL))?;
+                let c = self.condition(cond)?;
                 let mut inner = vec![Stmt::If {
                     cond: Expr::Not(Box::new(c)),
                     then: vec![Stmt::Break],
@@ -1880,7 +1991,7 @@ impl<'a> FnLower<'a> {
                     self.stmt(init)?;
                 }
                 let cond_expr = match cond {
-                    Some(c) => self.expr(c, Some(TyTable::BOOL))?.0,
+                    Some(c) => self.condition(c)?,
                     None => Expr::Bool(true),
                 };
                 let mut inner = vec![Stmt::If {
@@ -2855,6 +2966,42 @@ impl<'a> FnLower<'a> {
                             .and_then(|d| d.properties.iter().find(|p| p.name == prop))
                             .map(|p| p.ty)
                     });
+                    if let Some(lib) = self.cx.nonvisual.get(obj).cloned() {
+                        let text = component_call(
+                            &lib,
+                            "get",
+                            vec![Expr::Global(g), Expr::Str(prop)],
+                            vec![TyTable::I64, TyTable::STR],
+                            TyTable::STR,
+                        );
+                        return Ok(match pty {
+                            Some(kiln_ir::Ty::Int) | Some(kiln_ir::Ty::Int64) => (
+                                Expr::Call(Box::new(Call::Dll {
+                                    library: "c".into(),
+                                    symbol: "atoi".into(),
+                                    conv: CallConv::Cdecl,
+                                    args: vec![text],
+                                    arg_tys: vec![TyTable::STR],
+                                    ret: TyTable::I32,
+                                    varargs: false,
+                                })),
+                                TyTable::I32,
+                            ),
+                            Some(kiln_ir::Ty::Bool) => {
+                                let t = self.new_local("$prop", TyTable::STR);
+                                self.push(Stmt::Let { local: t, value: text });
+                                (
+                                    self.key_equal(
+                                        Expr::Local(t),
+                                        Expr::Str("true".into()),
+                                        TyTable::STR,
+                                    ),
+                                    TyTable::BOOL,
+                                )
+                            }
+                            _ => (text, TyTable::STR),
+                        });
+                    }
                     return Ok(match pty {
                         Some(kiln_ir::Ty::Int) | Some(kiln_ir::Ty::Int64) => (
                             ui_call(
@@ -3549,9 +3696,7 @@ impl<'a> FnLower<'a> {
         if let Some(this) = this_arg {
             kargs.push(this);
         }
-        for (a, pty) in args.iter().zip(sig.params.iter()) {
-            kargs.push(self.expr(a, Some(*pty))?.0);
-        }
+        kargs.extend(self.call_args(&key, args, &sig)?);
         Ok((
             Expr::Call(Box::new(Call::Direct {
                 func: sig.fid,
@@ -3791,10 +3936,7 @@ impl<'a> FnLower<'a> {
             fn_ptr: Box::new(Expr::Field(Box::new(Expr::Local(holder)), idx + 1)),
             env: Box::new(Expr::Field(Box::new(Expr::Local(holder)), 0)),
         };
-        let mut kargs = Vec::new();
-        for (a, pty) in args.iter().zip(sig.params.iter()) {
-            kargs.push(self.expr(a, Some(*pty))?.0);
-        }
+        let kargs = self.call_args(&format!("{iface}.{method}"), args, &sig)?;
         Ok((
             Expr::Call(Box::new(Call::Indirect {
                 callee: Box::new(callee),
@@ -5563,6 +5705,7 @@ impl<'a> FnLower<'a> {
                 .map(|(nm, t)| ast::Param {
                     name: nm.clone(),
                     ty: t.clone().unwrap_or(ast::TypeRef::Void),
+                    default: None,
                     span: Default::default(),
                 })
                 .collect(),
@@ -5623,6 +5766,133 @@ impl<'a> FnLower<'a> {
             },
             want,
         ))
+    }
+
+    /// Create a component with no rectangle, set its properties and bind its
+    /// events, through its own library's entry points. `owner` is the form or
+    /// class whose methods its handlers name.
+    fn build_nonvisual(&mut self, c: &ast::ComponentDecl, owner: Option<&str>) -> Result<(), String> {
+        let lib = self.cx.nonvisual[&c.id].clone();
+        let (g, _) = self.cx.components[&c.id];
+        self.push(Stmt::Assign {
+            place: Place::Global(g),
+            value: component_call(
+                &lib,
+                "create",
+                vec![Expr::Str(snake_case(&c.type_name))],
+                vec![TyTable::STR],
+                TyTable::I64,
+            ),
+        });
+        for (n, v) in &c.properties {
+            let text = literal_text(v)?;
+            self.push(Stmt::Expr(component_call(
+                &lib,
+                "set",
+                vec![Expr::Global(g), Expr::Str(snake_case(n)), Expr::Str(text)],
+                vec![TyTable::I64, TyTable::STR, TyTable::STR],
+                TyTable::I32,
+            )));
+        }
+        for (event, handler) in &c.handlers {
+            let fid = match handler {
+                ast::HandlerRef::Method(nm) => {
+                    let qualified = owner.map(|o| format!("{o}.{nm}"));
+                    qualified
+                        .as_ref()
+                        .and_then(|q| self.cx.methods.get(q))
+                        .or_else(|| self.cx.methods.get(nm))
+                        .ok_or_else(|| format!("`{nm}` is not a method this program declares"))?
+                        .fid
+                }
+                ast::HandlerRef::Lambda(_) => {
+                    return Err(format!(
+                        "`{}.{event}` takes a method by name; a lambda here is not supported yet",
+                        c.id
+                    ))
+                }
+            };
+            // The library calls the handler with the event's arguments, so a
+            // method declaring those parameters binds directly — the same
+            // signature on both sides.
+            self.push(Stmt::Expr(component_call(
+                &lib,
+                "on",
+                vec![Expr::Global(g), Expr::Str(snake_case(event)), Expr::FuncPtr(fid)],
+                vec![TyTable::I64, TyTable::STR, TyTable::PTR],
+                TyTable::I32,
+            )));
+        }
+        Ok(())
+    }
+
+    /// A call's arguments, lowered against the parameters: a missing trailing
+    /// argument takes its default, and any other mismatch is an error naming
+    /// the method. Pairing them with `zip` silently dropped what did not line
+    /// up, so a call short an argument read garbage where it should have been.
+    fn call_args(&mut self, name: &str, args: &[ast::Expr], sig: &Sig) -> Result<Vec<Expr>, String> {
+        let want = sig.params.len();
+        let required = sig
+            .defaults
+            .iter()
+            .rposition(|d| d.is_none())
+            .map(|i| i + 1)
+            .unwrap_or(0)
+            .min(want);
+        if args.len() > want || args.len() < required {
+            let expected = if required == want {
+                format!("{want}")
+            } else {
+                format!("{required} to {want}")
+            };
+            return Err(format!(
+                "`{name}` takes {expected} argument(s), but this call passes {}",
+                args.len()
+            ));
+        }
+        let mut out = Vec::new();
+        for (i, pty) in sig.params.iter().enumerate() {
+            let v = match args.get(i) {
+                Some(a) => self.expr(a, Some(*pty))?.0,
+                None => {
+                    let d = sig.defaults.get(i).cloned().flatten().expect("checked above");
+                    self.expr(&d, Some(*pty))?.0
+                }
+            };
+            out.push(v);
+        }
+        Ok(out)
+    }
+
+    /// A condition: something that is true or false, and nothing else.
+    ///
+    /// A string or a number used as one was accepted and emitted as a branch on
+    /// a pointer, which is invalid LLVM — the build failed in clang, far from
+    /// the line that caused it, with nothing to say what was wrong.
+    fn condition(&mut self, e: &ast::Expr) -> Result<Expr, String> {
+        let (c, ty) = self.expr(e, Some(TyTable::BOOL))?;
+        if ty != TyTable::BOOL {
+            return Err(format!(
+                "a condition must be true or false, but this is {}",
+                self.describe_ty(ty)
+            ));
+        }
+        Ok(c)
+    }
+
+    /// A type as a reader would name it, for an error.
+    fn describe_ty(&self, ty: TyId) -> String {
+        match self.tt().kind(ty) {
+            TyKind::Str => "text".into(),
+            TyKind::Bool => "true or false".into(),
+            TyKind::F32 | TyKind::F64 => "a decimal number".into(),
+            TyKind::Void => "nothing".into(),
+            TyKind::Record(_) if self.cx.as_list(ty).is_some() => "a list".into(),
+            TyKind::Record(rid) => format!("a `{}`", self.cx.b.m.record(*rid).name),
+            TyKind::Optional(_) => "an optional value — test it with `!= null`".into(),
+            k if matches!(k, TyKind::I8 | TyKind::I16 | TyKind::I32 | TyKind::I64 | TyKind::U8 | TyKind::U16 | TyKind::U32 | TyKind::U64 | TyKind::Nint | TyKind::Nuint) => "a whole number".into(),
+            _ => "a value".into(),
+        }
     }
 
     /// `button.Click += handler` / `-= handler` in code: bind or unbind an
@@ -5789,6 +6059,7 @@ impl<'a> FnLower<'a> {
                 fid,
                 this: t.this,
                 params: ptys,
+                defaults: t.method.params.iter().map(|p| p.default.clone()).collect(),
                 ret,
             })
         })();
@@ -6299,10 +6570,7 @@ impl<'a> FnLower<'a> {
         // A declared constructor wins over positional field initialisation.
         let rname = self.cx.b.m.record(rid).name.clone();
         if let Some(sig) = self.cx.methods.get(&format!("{rname}.$ctor")).cloned() {
-            let mut kargs = Vec::new();
-            for (a, pty) in args.iter().zip(sig.params.iter()) {
-                kargs.push(self.expr(a, Some(*pty))?.0);
-            }
+            let kargs = self.call_args(&format!("new {rname}"), args, &sig)?;
             return Ok((
                 Expr::Call(Box::new(Call::Direct {
                     func: sig.fid,
@@ -6346,7 +6614,7 @@ impl<'a> FnLower<'a> {
         b: &ast::Expr,
         hint: Option<TyId>,
     ) -> Result<(Expr, TyId), String> {
-        let (cond, _) = self.expr(c, Some(TyTable::BOOL))?;
+        let cond = self.condition(c)?;
         let (av, aty) = self.expr(a, hint)?;
         let (bv, _) = self.expr(b, hint.or(Some(aty)))?;
         let t = self.new_local("$tern", aty);
@@ -6385,21 +6653,28 @@ impl<'a> FnLower<'a> {
                 local: t,
                 value: av,
             });
-            let (bv, _) = self.expr(b, Some(TyTable::BOOL))?;
-            let assign = Stmt::Assign {
+            // The right side is lowered into the branch that only runs when it
+            // is needed — including any statements it emits to compute itself.
+            // Lowering it first put those before the `if`, so a bounds check
+            // or a call in `ready && xs[9] > 0` ran even when `ready` was false.
+            self.blocks.push(Vec::new());
+            let rhs = self.expr(b, Some(TyTable::BOOL));
+            let mut then = self.blocks.pop().unwrap();
+            let (bv, _) = rhs?;
+            then.push(Stmt::Assign {
                 place: Place::Local(t),
                 value: bv,
-            };
+            });
             if op == ast::BinOp::And {
                 self.push(Stmt::If {
                     cond: Expr::Local(t),
-                    then: vec![assign],
+                    then,
                     els: vec![],
                 });
             } else {
                 self.push(Stmt::If {
                     cond: Expr::Not(Box::new(Expr::Local(t))),
-                    then: vec![assign],
+                    then,
                     els: vec![],
                 });
             }
@@ -6426,16 +6701,24 @@ impl<'a> FnLower<'a> {
             ast::BinOp::And | ast::BinOp::Or => unreachable!(),
         };
         // `string + string` builds a new string rather than adding pointers.
+        // The probe is lowered into a block that is thrown away when `a` turns
+        // out not to be a string, so `a` is emitted once either way.
         if op == ast::BinOp::Add {
-            let probe = self.expr_raw(a, None)?;
+            self.blocks.push(Vec::new());
+            let probe = self.expr_raw(a, None);
+            let pushed = self.blocks.pop().unwrap();
+            let probe = probe?;
             if probe.1 == TyTable::STR {
+                for st in pushed {
+                    self.push(st);
+                }
                 let rhs = self.expr(b, Some(TyTable::STR))?;
                 return Ok(self.build_string(vec![
                     (String::new(), Some(probe)),
                     (String::new(), Some(rhs)),
                 ]));
             }
-            // not a string: fall through, re-lowering `a` with the real hint
+            // not a string: lower `a` for real below, with the real hint
         }
         let is_cmp = matches!(
             op,
@@ -6450,6 +6733,24 @@ impl<'a> FnLower<'a> {
         // comparisons.
         let (av, aty) = self.expr(a, if is_cmp { None } else { hint })?;
         let (bv, bty) = self.expr(b, Some(aty))?;
+        // Text compares by content. Comparing the pointers made
+        // `"fizz" + "buzz" == "fizzbuzz"` false, which no reader expects and
+        // which neither C# nor Kiln 1.x does.
+        if is_cmp && aty == TyTable::STR && bty == TyTable::STR {
+            let order = Expr::Call(Box::new(Call::Dll {
+                library: "c".into(),
+                symbol: "strcmp".into(),
+                conv: CallConv::Cdecl,
+                args: vec![av, bv],
+                arg_tys: vec![TyTable::STR, TyTable::STR],
+                ret: TyTable::I32,
+                varargs: false,
+            }));
+            return Ok((
+                Expr::Bin(kop, Box::new(order), Box::new(Expr::Int(0, TyTable::I32)), TyTable::I32),
+                TyTable::BOOL,
+            ));
+        }
         let operand_ty = if aty != TyTable::BOOL { aty } else { bty };
         let out = Expr::Bin(kop, Box::new(av), Box::new(bv), operand_ty);
         let rty = if is_cmp { TyTable::BOOL } else { operand_ty };
@@ -6933,6 +7234,20 @@ fn null_test_target(cond: &ast::Expr) -> (Option<String>, Option<String>) {
 }
 
 /// A call into the UI interface (`abi/kiln_ui.h`) — plain C, not the slot ABI.
+/// `kn_{lib}_component_{op}(…)` — a non-visual component's own entry point.
+/// `core` is the runtime itself, which is how the linker knows it.
+fn component_call(lib: &str, op: &str, args: Vec<Expr>, arg_tys: Vec<TyId>, ret: TyId) -> Expr {
+    Expr::Call(Box::new(Call::Dll {
+        library: if lib == "core" { "runtime".into() } else { lib.to_string() },
+        symbol: format!("kn_{lib}_component_{op}"),
+        conv: CallConv::Cdecl,
+        args,
+        arg_tys,
+        ret,
+        varargs: false,
+    }))
+}
+
 fn ui_call(symbol: &str, args: Vec<Expr>, arg_tys: Vec<TyId>, ret: TyId) -> Expr {
     Expr::Call(Box::new(Call::Dll {
         library: "ui".into(),

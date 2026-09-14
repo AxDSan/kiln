@@ -30,6 +30,9 @@ pub enum Item {
     Enum(EnumDecl),
     Interface(InterfaceDecl),
     Form(FormDecl),
+    /// A component with no rectangle, declared at namespace level: a timer, a
+    /// server. A console program that waits for something is why this exists.
+    Component(ComponentDecl),
 }
 
 /// `form MainWindow { Title = "..."; Button ok { ... } void OnOk() { } }`
@@ -158,6 +161,8 @@ pub struct ConstDecl {
 pub struct Param {
     pub name: String,
     pub ty: TypeRef,
+    /// `string mark = "!"` — used when a call leaves the argument out.
+    pub default: Option<Expr>,
     pub span: Span,
 }
 

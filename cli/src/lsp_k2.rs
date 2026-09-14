@@ -140,6 +140,12 @@ pub fn symbols(src: &str) -> Vec<DocumentSymbol> {
                 );
                 out.push(s);
             }
+            Item::Component(c) => out.push(symbol(
+                &c.id,
+                Some(c.type_name.clone()),
+                SymbolKind::OBJECT,
+                c.span.line,
+            )),
             Item::Form(f) => {
                 let mut children: Vec<DocumentSymbol> = f
                     .components
@@ -311,6 +317,13 @@ fn build_model(src: &str, caret_line: Option<usize>) -> Model {
                 let ms: Vec<_> = i.methods.iter().map(|m| (m.name.clone(), method_sig(m), "method")).collect();
                 model.entries.extend(ms.iter().cloned());
                 model.members.push((i.name.clone(), ms));
+            }
+            Item::Component(c) => {
+                model.entries.push((
+                    c.id.clone(),
+                    format!("{} {}", c.type_name, c.id),
+                    "component",
+                ));
             }
             Item::Form(f) => {
                 model

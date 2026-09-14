@@ -225,6 +225,7 @@ pub fn apply(src: &str, edit: &Edit) -> Result<String, String> {
                 .map(|(i, t)| Param {
                     name: format!("a{}", i + 1),
                     ty: TypeRef::Named(t.clone()),
+                    default: None,
                     span: Span::default(),
                 })
                 .collect(),
