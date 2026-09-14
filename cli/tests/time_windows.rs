@@ -143,7 +143,7 @@ fn same_on_both(tag: &str, source: &Path, must_say: &[&str]) {
 fn timelib_example_says_the_same_under_wine() {
     same_on_both(
         "example",
-        &repo().join("examples/timelib.kiln"),
+        &repo().join("examples/1x/timelib.kiln"),
         &["1969-07-21T02:56:15Z", "iso round trip ok"],
     );
 }

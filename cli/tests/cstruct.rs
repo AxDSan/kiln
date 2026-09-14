@@ -1,8 +1,8 @@
 //! End-to-end tests for C-struct records (`record NAME is c`): a record with a
 //! fixed C memory layout, so a `dll` is handed a pointer to a real C struct.
 //!
-//! Builds `examples/dll/geo.c` into a shared library, builds
-//! `examples/dll/cstruct.kiln` against it, runs the two together, and proves the
+//! Builds `examples/1x/dll/geo.c` into a shared library, builds
+//! `examples/1x/dll/cstruct.kiln` against it, runs the two together, and proves the
 //! whole surface — field read/write through the flat layout, `size of`,
 //! `address of` a c-record, a `dll` mutating one through its pointer, and the
 //! padding of a mixed record held to clang's own `sizeof`/`offsetof`.
@@ -34,9 +34,9 @@ fn scratch(tag: &str) -> PathBuf {
     dir
 }
 
-/// Compile `examples/dll/geo.c` to `libgeo.so` inside `dir`.
+/// Compile `examples/1x/dll/geo.c` to `libgeo.so` inside `dir`.
 fn build_geo_so(dir: &Path) {
-    let src = repo().join("examples/dll/geo.c");
+    let src = repo().join("examples/1x/dll/geo.c");
     let status = Command::new("clang")
         .args(["-shared", "-fPIC", "-o"])
         .arg(dir.join("libgeo.so"))
@@ -46,10 +46,10 @@ fn build_geo_so(dir: &Path) {
     assert!(status.success(), "clang failed to build libgeo.so");
 }
 
-/// Build `examples/dll/<name>.kiln` to `dir/<name>`; return the binary path.
+/// Build `examples/1x/dll/<name>.kiln` to `dir/<name>`; return the binary path.
 fn build_oir(name: &str, dir: &Path) -> PathBuf {
     let repo = repo();
-    let src = repo.join("examples/dll").join(format!("{name}.kiln"));
+    let src = repo.join("examples/1x/dll").join(format!("{name}.kiln"));
     let out = dir.join(name);
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", out.to_str().unwrap()])
@@ -178,7 +178,7 @@ fn cstruct_cross_builds_for_windows_and_runs_under_wine() {
     let status = Command::new("x86_64-w64-mingw32-gcc")
         .args(["-shared", "-o"])
         .arg(dir.join("geo.dll"))
-        .arg(repo().join("examples/dll/geo.c"))
+        .arg(repo().join("examples/1x/dll/geo.c"))
         .status()
         .expect("run mingw for geo.dll");
     assert!(status.success(), "mingw failed to build geo.dll");
@@ -187,7 +187,7 @@ fn cstruct_cross_builds_for_windows_and_runs_under_wine() {
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
-            repo().join("examples/dll/cstruct.kiln").to_str().unwrap(),
+            repo().join("examples/1x/dll/cstruct.kiln").to_str().unwrap(),
             "--os",
             "windows",
             "-o",

@@ -1,112 +1,130 @@
-# Rows in a grid, and a datasource that feeds it.
-#
-#   kiln run examples/grid.kiln
-#
-# The grid never holds the people itself: it is bound by name to a datasource,
-# and shows whatever that holds. Fill the datasource once — in the form, from
-# `main`, from a handler — and every grid bound to it shows the rows. That is
-# the shape a `database` kit will hand its query results into.
-#
-# Rows are one text with a newline between rows and a tab between cells,
-# because a property value is a literal. The commands are the way around
-# building that text by hand: `datasource_add_row` takes a row, `grid_cell`
-# reads one cell back, and both count from 1 like every position here.
-#
-# `select` and `activate` hand the handler the row. A handler may take it or
-# leave it out.
-module grid
-use ui
+// Rows in a grid, and a datasource that feeds it.
+//
+//   kiln run examples/grid.kiln
+//
+// The grid never holds the people itself: it is bound by name to a datasource,
+// and shows whatever that holds. Fill the datasource once — in the form, from
+// `main`, from a handler — and every grid bound to it shows the rows. That is
+// the shape a `database` kit will hand its query results into.
+//
+// Rows are one text with a newline between rows and a tab between cells,
+// because a property value is a literal. The commands are the way around
+// building that text by hand: `datasource_add_row` takes a row, `grid_cell`
+// reads one cell back, and both count from 1 like every position here.
+//
+// `select` and `activate` hand the handler the row. A handler may take it or
+// leave it out.
 
-datasource people
-  name = "people"
-  columns = "Name\tCity\tAge"
-  rows = "Ada\tLondon\t36\nLinus\tHelsinki\t28\nGrace\tArlington\t45"
-end
+namespace Grid;
 
-form win
-  title = "Grid"
-  width = 520
-  height = 330
-  background_color = "#f6f8fa"
+using Kiln.Ui;
 
-  label heading
-    text = "People"
-    left = 20
-    top = 16
-    width = 200
-    color = "#1f2328"
-  end
+Datasource people
+{
+    Name = "people";
+    Columns = "Name\tCity\tAge";
+    Rows = "Ada\tLondon\t36\nLinus\tHelsinki\t28\nGrace\tArlington\t45";
+}
 
-  grid table
-    name = "table"
-    bind = "people"
-    selected = 2
-    left = 20
-    top = 44
-    width = 480
-    height = 150
-    on select: on_select
-    on activate: on_activate
-  end
+public partial form Win
+{
+    Title = "Grid";
+    Width = 520;
+    Height = 330;
+    BackgroundColor = "#f6f8fa";
 
-  label status
-    text = "Pick a row."
-    left = 20
-    top = 208
-    width = 480
-    color = "#1f2328"
-  end
+    Label heading
+    {
+        Text = "People";
+        Left = 20;
+        Top = 16;
+        Width = 200;
+        Color = "#1f2328";
+    }
 
-  button add
-    text = "Add a row"
-    left = 20
-    top = 240
-    width = 140
-    height = 34
-    color = "#ffffff"
-    border_radius = 6
-    on click: on_add
-  end
+    Grid table
+    {
+        Name = "table";
+        Bind = "people";
+        Selected = 2;
+        Left = 20;
+        Top = 44;
+        Width = 480;
+        Height = 150;
+        Select += OnSelect;
+        Activate += OnActivate;
+    }
 
-  button older
-    text = "Age selected"
-    left = 176
-    top = 240
-    width = 140
-    height = 34
-    background_color = "#6e7781"
-    color = "#ffffff"
-    border_radius = 6
-    on click: on_older
-  end
-end
+    Label status
+    {
+        Text = "Pick a row.";
+        Left = 20;
+        Top = 208;
+        Width = 480;
+        Color = "#1f2328";
+    }
 
-# Rows added before the window opens are on screen from the first frame.
-sub main
-  call datasource_add_row("people", "Dennis\tNew York\t70")
-  let rows = grid_row_count("table")
-  call print_text("rows: {rows}")
-end
+    Button add
+    {
+        Text = "Add a row";
+        Left = 20;
+        Top = 240;
+        Width = 140;
+        Height = 34;
+        Color = "#ffffff";
+        BorderRadius = 6;
+        Click += OnAdd;
+    }
 
-sub on_select(row: int)
-  status.text = "Selected " + grid_cell("table", row, 1)
-  call print_text("select {row}")
-end
+    Button older
+    {
+        Text = "Age selected";
+        Left = 176;
+        Top = 240;
+        Width = 140;
+        Height = 34;
+        BackgroundColor = "#6e7781";
+        Color = "#ffffff";
+        BorderRadius = 6;
+        Click += OnOlder;
+    }
+}
 
-sub on_activate(row: int)
-  status.text = "Opened " + grid_cell("table", row, 1)
-  call print_text("activate {row}")
-end
+public partial form Win
+{
+    // Rows added before the window opens are on screen from the first frame.
+    void Main()
+    {
+        DatasourceAddRow("people", "Dennis\tNew York\t70");
+        let rows = GridRowCount("table");
+        Console.WriteLine($"rows: {rows}");
+    }
 
-sub on_add
-  var n = people.count + 1
-  call datasource_add_row("people", "Person {n}\tNowhere\t0")
-  table.selected = n
-end
+    void OnSelect(int row)
+    {
+        status.Text = "Selected " + GridCell("table", row, 1);
+        Console.WriteLine($"select {row}");
+    }
 
-sub on_older
-  if table.selected > 0
-    var age: int = text_to_int(grid_cell("table", table.selected, 3))
-    call grid_set_cell("table", table.selected, 3, int_to_text(age + 1))
-  end
-end
+    void OnActivate(int row)
+    {
+        status.Text = "Opened " + GridCell("table", row, 1);
+        Console.WriteLine($"activate {row}");
+    }
+
+    void OnAdd()
+    {
+        var n = people.Count + 1;
+        DatasourceAddRow("people", $"Person {n}\tNowhere\t0");
+        table.Selected = n;
+    }
+
+    void OnOlder()
+    {
+        if (table.Selected > 0)
+        {
+            int age = TextToInt(GridCell("table", table.Selected, 3));
+            GridSetCell("table", table.Selected, 3, IntToText(age + 1));
+        }
+    }
+}

@@ -3,7 +3,7 @@
 //! an ELF constructor on Linux — so the library runs the instant it is mapped,
 //! with no host code asking it to.
 //!
-//! The worked example (examples/hook/) is the headline: a Kiln library that,
+//! The worked example (examples/1x/hook/) is the headline: a Kiln library that,
 //! on load, installs a function-pointer detour into a C library the host is
 //! already calling, so the host's next call returns a hooked value — proof that
 //! `dll`, `address of` and `dll_attach` compose into a real in-process hook. A
@@ -91,7 +91,7 @@ fn run_lines(bin: &Path, cwd: &Path) -> Vec<String> {
 #[test]
 fn dll_attach_installs_a_hook_the_host_sees() {
     let dir = scratch("hook");
-    let ex = repo().join("examples/hook");
+    let ex = repo().join("examples/1x/hook");
     cc(
         "clang",
         &ex.join("hookrt.c"),
@@ -329,7 +329,7 @@ fn dll_attach_is_a_real_dllmain_under_wine() {
         return;
     }
     let dir = scratch("winhook");
-    let ex = repo().join("examples/hook");
+    let ex = repo().join("examples/1x/hook");
     cc(
         MINGW_GCC,
         &ex.join("hookrt.c"),

@@ -19,7 +19,7 @@ fn repo() -> PathBuf {
 /// flake twice.
 fn build_as(name: &str, tag: &str) -> PathBuf {
     let repo = repo();
-    let example = repo.join("examples").join(format!("{name}.kiln"));
+    let example = repo.join("examples").join("1x").join(format!("{name}.kiln"));
     let out_bin = std::env::temp_dir().join(format!("kiln_{name}_{tag}_test"));
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
@@ -565,7 +565,7 @@ fn dividing_by_zero_reports_instead_of_crashing() {
 #[test]
 fn a_build_carries_a_line_table_and_a_release_build_does_not() {
     let repo = repo();
-    let example = repo.join("examples").join("loops.kiln");
+    let example = repo.join("examples").join("1x").join("loops.kiln");
     let dir = std::env::temp_dir().join("kiln_linetable_test");
     std::fs::create_dir_all(&dir).unwrap();
 
@@ -854,7 +854,7 @@ fn designer_output_always_compiles() {
         return;
     }
     let project = std::env::temp_dir().join("kiln_roundtrip.kiln");
-    std::fs::copy(repo.join("examples/controls.kiln"), &project).expect("seed project");
+    std::fs::copy(repo.join("examples/1x/controls.kiln"), &project).expect("seed project");
 
     let out = Command::new(&designer)
         .arg(&project)
@@ -907,7 +907,7 @@ fn dragging_moves_components_precisely() {
         return;
     }
     let project = std::env::temp_dir().join("kiln_drag.kiln");
-    std::fs::copy(repo.join("examples/controls.kiln"), &project).expect("seed");
+    std::fs::copy(repo.join("examples/1x/controls.kiln"), &project).expect("seed");
 
     // grp starts at (20,120). Grab 10px inside it and drop at (150,120), so it
     // must land at (140,110) — cursor position minus the grab offset.
@@ -979,7 +979,7 @@ fn selection_outline_traces_the_rendered_frame() {
         return;
     }
     let project = std::env::temp_dir().join("kiln_sel.kiln");
-    std::fs::copy(repo.join("examples/controls.kiln"), &project).expect("seed");
+    std::fs::copy(repo.join("examples/1x/controls.kiln"), &project).expect("seed");
 
     let out = Command::new(&designer)
         .arg(&project)
@@ -1014,7 +1014,7 @@ fn dragging_snaps_to_alignment_guides() {
         return;
     }
     let project = std::env::temp_dir().join("kiln_align.kiln");
-    std::fs::copy(repo.join("examples/controls.kiln"), &project).expect("seed");
+    std::fs::copy(repo.join("examples/1x/controls.kiln"), &project).expect("seed");
 
     // Most components sit at left = 20. Drop grp at left = 23, close enough
     // that it must snap flush to 20 rather than to the 10px grid.
@@ -1050,7 +1050,7 @@ fn layout_follows_the_window_size() {
         return;
     }
     let project = std::env::temp_dir().join("kiln_resize.kiln");
-    std::fs::copy(repo.join("examples/controls.kiln"), &project).expect("seed");
+    std::fs::copy(repo.join("examples/1x/controls.kiln"), &project).expect("seed");
     let dump = std::env::temp_dir().join("kiln_resize.ppm");
 
     let out = Command::new(&designer)
@@ -1494,7 +1494,7 @@ fn support_library_examples_pass_their_own_checks() {
 
 /// Arrays and byte-sets, end to end.
 ///
-/// `examples/arrays.kiln` is a self-checking transcript: every line prints `ok`
+/// `examples/1x/arrays.kiln` is a self-checking transcript: every line prints `ok`
 /// or `FAIL`, so the assertion is that nothing failed and that the file ran at
 /// all. It covers what unit tests cannot — that an out-of-range index really
 /// does report through the error slot in a built binary rather than reading
@@ -2353,7 +2353,7 @@ fn build_src(src: &str, tag: &str) -> PathBuf {
 
 /// What an event hands its handler, end to end in a built binary.
 ///
-/// `examples/eventparams.kiln` wires two timers to the same `tick`: one handler
+/// `examples/1x/eventparams.kiln` wires two timers to the same `tick`: one handler
 /// takes the count and one ignores it. Both must be ordinary subroutines, so
 /// the assertion is the whole transcript in order — the counted handler seeing
 /// 1, 2, 3 is the entire point, and a thunk that dropped the argument or handed
@@ -2545,8 +2545,8 @@ fn the_inspector_edits_a_colour_on_a_real_component() {
         eprintln!("designer not built; skipping");
         return;
     }
-    let original = repo.join("examples/controls.kiln");
-    // Never the tracked file: Studio saves on exit, and examples/form.kiln has
+    let original = repo.join("examples/1x/controls.kiln");
+    // Never the tracked file: Studio saves on exit, and examples/1x/form.kiln has
     // been committed with a stray designer edit twice.
     let project = std::env::temp_dir().join("kiln_swatch.kiln");
     std::fs::copy(&original, &project).expect("seed project");
@@ -2589,7 +2589,7 @@ fn the_inspector_edits_a_colour_on_a_real_component() {
     let _ = std::fs::remove_file(&project);
 }
 
-/// A grid bound to a datasource, end to end: `examples/grid.kiln` adds a row
+/// A grid bound to a datasource, end to end: `examples/1x/grid.kiln` adds a row
 /// from `main` and prints the count, so `rows: 4` proves the datasource, the
 /// binding and the count command all reached a built program. It is a GUI
 /// example, so it runs only where the UI stack is vendored and is told to

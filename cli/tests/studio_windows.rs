@@ -251,7 +251,7 @@ fn studio_cross_builds_to_a_gui_pe_with_its_dlls_and_loads_under_wine() {
     // run one; the recent list and the cache go to the scratch directory,
     // never to the person's %APPDATA%.
     let form = dir.join("form.kiln");
-    std::fs::copy(repo().join("examples/form.kiln"), &form).unwrap();
+    std::fs::copy(repo().join("examples/1x/form.kiln"), &form).unwrap();
     let dump = dir.join("studio.ppm");
     let xdg = dir.join("xdg");
     let Some(out) = wine(

@@ -1191,7 +1191,7 @@ mod tests {
     /// backend moves the test rather than breaking it.
     const LINE: u32 = 14;
 
-    /// A built copy of `examples/hello.kiln`, or nothing when the compiler has
+    /// A built copy of `examples/1x/hello.kiln`, or nothing when the compiler has
     /// not been built yet.
     ///
     /// Skipping is said out loud. A test that quietly passes because it did
@@ -1216,7 +1216,7 @@ mod tests {
             let built = PathBuf::from("/tmp/kiln-debug-linux-fixture");
             let made = std::process::Command::new(&compiler)
                 .arg("build")
-                .arg(root.join("examples/hello.kiln"))
+                .arg(root.join("examples/1x/hello.kiln"))
                 .arg("-o")
                 .arg(&built)
                 .output()

@@ -1,0 +1,63 @@
+module controls
+use ui
+
+form win
+  title = "Real controls"
+  width = 420
+  height = 300
+  background_color = "#ffffff"
+
+  label lbl
+    text = "Name:"
+    left = 20
+    top = 20
+    color = "#1f2328"
+  end
+
+  editbox nameBox
+    text = "Ada"
+    left = 20
+    top = 44
+    width = 200
+    height = 26
+  end
+
+  checkbox agree
+    text = "I agree"
+    checked = true
+    left = 20
+    top = 84
+  end
+
+  groupbox grp
+    text = "Options"
+    left = 20
+    top = 120
+    width = 240
+    height = 90
+  end
+
+  progressbar bar
+    value = 65
+    left = 20
+    top = 230
+    width = 240
+    height = 16
+  end
+
+  button go
+    text = "Go"
+    left = 300
+    top = 230
+    width = 90
+    height = 30
+    background_color = "#1e60d5"
+    color = "#ffffff"
+    border_radius = 6
+    on click: on_go
+  end
+end
+
+sub on_go
+  call print_text("name = {nameBox.text}")
+end

@@ -1,12 +1,22 @@
-module mainorder
-use ui
-form win
-  title = "order"
-  label greeting
-    text = "before"
-  end
-end
-sub main
-  greeting.text = "set from main"
-  call print_text("main saw: {greeting.text}")
-end
+namespace Mainorder;
+
+using Kiln.Ui;
+
+public partial form Win
+{
+    Title = "order";
+
+    Label greeting
+    {
+        Text = "before";
+    }
+}
+
+public partial form Win
+{
+    void Main()
+    {
+        greeting.Text = "set from main";
+        Console.WriteLine($"main saw: {greeting.Text}");
+    }
+}

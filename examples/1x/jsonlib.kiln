@@ -1,0 +1,95 @@
+# Reading and writing JSON.
+#
+# A document is a handle; a place inside it is named by a dotted path —
+# "user.name", "items[2].id" — because a document's shape is not known until
+# it has been parsed, which is what tells one apart from a `record`.
+#
+#   kiln run examples/jsonlib.kiln
+module jsonlib
+use json
+
+sub main
+  # --- reading ---------------------------------------------------------
+  # A raw literal keeps every brace a brace, so the JSON reads exactly as it
+  # would in a file — no interpolation holes to escape.
+  let src = r"""{"user":{"name":"Ada","age":36,"admin":true},"items":[{"id":10},{"id":20},{"id":30}],"ratio":0.5}"""
+  let doc = json_parse(src)
+  if doc = 0
+    call print_text("parse failed: {last_error_text()}")
+  end
+
+  call print_text(json_get_text(doc, "user.name"))
+  call print_int(json_get_int(doc, "user.age"))
+  call print_double(json_get_double(doc, "ratio"))
+  call print_int(json_get_int(doc, "items[1].id"))
+  call print_int(json_count(doc, "items"))
+  call print_text(json_type(doc, "user"))
+  call print_text(json_type(doc, "items[0]"))
+  call print_text(json_type(doc, "user.nickname"))
+
+  if json_get_bool(doc, "user.admin")
+    call print_text("admin: yes")
+  else
+    call print_text("admin: no")
+  end
+
+  if json_has(doc, "user.email")
+    call print_text("has an email")
+  else
+    call print_text("no email")
+  end
+
+  # The member names of an object, by position.
+  for i in 1..json_count(doc, "user")
+    call print_text("key: " + json_key_at(doc, "user", i))
+  end
+
+  # Every element of an array, the count-plus-accessor way.
+  var total: int = 0
+  for k in 0..json_count(doc, "items") - 1
+    total += json_get_int(doc, "items[{k}].id")
+  end
+  call print_text("total = {total}")
+
+  # --- asking for the wrong thing --------------------------------------
+  let missing = json_get_text(doc, "user.nickname")
+  call print_text("missing -> code {last_error_code()}")
+  call print_text(json_get_text(doc, "user.age"))
+  call print_text(last_error_text())
+
+  # --- building --------------------------------------------------------
+  let out = json_new_object()
+  let ok0 = json_set_text(out, "name", "Kiln")
+  let ok1 = json_set_int(out, "version.major", 0)
+  let ok2 = json_set_int(out, "version.minor", 1)
+  let ok3 = json_set_bool(out, "open", true)
+  let ok4 = json_set_double(out, "score", 9.25)
+  let ok5 = json_set_array(out, "tags")
+  let ok6 = json_set_text(out, "tags[0]", "rad")
+  let ok7 = json_set_text(out, "tags[1]", "native")
+  call print_text(json_stringify(out))
+
+  # Removing: false with code 0 is a genuine "it was not there".
+  let gone = json_remove(out, "score")
+  call print_text(json_stringify(out))
+  let again = json_remove(out, "score")
+  call print_text("second remove -> code {last_error_code()}")
+
+  # --- round-tripping through a file -----------------------------------
+  let saved = json_save(out, "/tmp/kiln_jsonlib.json")
+  let back = json_parse_file("/tmp/kiln_jsonlib.json")
+  call print_text(json_get_text(back, "name"))
+  call print_int(json_get_int(back, "version.minor"))
+  call print_text(json_stringify_pretty(back))
+
+  # --- malformed input is refused, with the byte offset ----------------
+  let bad = json_parse(r"""{"a": 1,}""")
+  call print_text("bad -> handle {bad}")
+  call print_text(last_error_text())
+
+  let bad2 = json_parse("[1, 2")
+  call print_text(last_error_text())
+
+  let closed = json_close(doc)
+  call print_int(json_close_all())
+end

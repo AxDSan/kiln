@@ -3,7 +3,7 @@
 //! (`WNDCLASSEX`), a fixed inline array (`PAINTSTRUCT`'s `rgbReserved`), and a
 //! `float`.
 //!
-//! `examples/dll/structs.c` declares the same four structs in C and reports its
+//! `examples/1x/dll/structs.c` declares the same four structs in C and reports its
 //! own `sizeof` and `offsetof` for each, so every layout number the program
 //! prints is checked against the C compiler's rather than against a table
 //! written by hand — the whole point of a c-record is that clang and Kiln
@@ -40,7 +40,7 @@ fn scratch(tag: &str) -> PathBuf {
 }
 
 fn build_structs_lib(dir: &Path, cc: &str, soname: &str, shared_flags: &[&str]) {
-    let src = repo().join("examples/dll/structs.c");
+    let src = repo().join("examples/1x/dll/structs.c");
     let status = Command::new(cc)
         .args(shared_flags)
         .arg("-o")
@@ -128,7 +128,7 @@ fn nested_records_arrays_words_and_floats_match_clang() {
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
-            repo().join("examples/dll/cstruct2.kiln").to_str().unwrap(),
+            repo().join("examples/1x/dll/cstruct2.kiln").to_str().unwrap(),
             "-o",
         ])
         .arg(&bin)
@@ -156,7 +156,7 @@ fn nested_c_structs_cross_build_for_windows_and_run_under_wine() {
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
-            repo().join("examples/dll/cstruct2.kiln").to_str().unwrap(),
+            repo().join("examples/1x/dll/cstruct2.kiln").to_str().unwrap(),
             "--os",
             "windows",
             "-o",

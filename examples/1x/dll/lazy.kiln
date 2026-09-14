@@ -1,0 +1,9 @@
+# A `dll` is loaded at its first call, not at start-up: this declares a foreign
+# function from a library that is not present, never calls it, and runs cleanly.
+module dlllazy
+
+dll never_called(a: int): int from "an_absent_library"
+
+sub main
+  call print_text("lazy ok")
+end

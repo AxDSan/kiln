@@ -1,0 +1,36 @@
+# What an event hands its handler.
+#
+# `tick` reports which tick this is, counting from 1. A handler may take that
+# number or ignore it, and both are ordinary subroutines — the compiler makes
+# the two agree, so neither one is written around the other. `counted` and
+# `plain` are the same kind of component wired to the same event; only their
+# handlers differ.
+module eventparams
+
+var rounds: int = 0
+
+timer counted
+  interval = 20
+  on tick: on_counted
+end
+
+timer plain
+  interval = 20
+  on tick: on_plain
+end
+
+sub main
+  call print_text("main returned")
+end
+
+# Takes what the event hands over.
+sub on_counted(n: int)
+  call print_text("counted tick {n}")
+end
+
+# Ignores it, and says so by not naming it.
+sub on_plain
+  increment rounds
+  call print_text("plain tick")
+  call quit() if rounds >= 3
+end

@@ -1,0 +1,79 @@
+module cstruct
+
+# A C-layout record: a flat struct with the same bytes a C `struct` has, so a
+# `dll` is handed a pointer to a real struct instead of a hand-packed buffer.
+record Point is c
+  x: int
+  y: int
+end
+
+# Padding worth checking: a byte, an int, a byte, an int64 — the compiler
+# inserts 3 bytes after `a` and 7 after `c`, exactly as C does.
+record Mixed is c
+  a: byte
+  b: int
+  c: byte
+  d: int64
+end
+
+# A bool field is a C `int`: a C API writes truth as any non-zero value, and
+# reading it back must normalise to true.
+record Flags is c
+  shown: bool
+end
+
+# A text field is a `char *`: written borrowed, read as a copied-out text.
+record Named is c
+  label: text
+end
+
+# `move_point` takes `Point*`; declaring the parameter as the record passes the
+# pointer automatically. The reference helpers report clang's own sizeof and
+# offsets for `Mixed`, to hold Kiln's layout to the C compiler's.
+dll move_point(p: Point, dx: int, dy: int) from "geo"
+dll raise_flag(f: Flags) from "geo"
+dll ref_sizeof(): int64 from "geo" as "geo_mixed_sizeof"
+dll ref_off_b(): int64 from "geo" as "geo_mixed_offset_b"
+dll ref_off_d(): int64 from "geo" as "geo_mixed_offset_d"
+
+sub main
+  var p: Point
+  p.x = 3
+  p.y = 4
+  call move_point(p, 10, 20)     # C mutates the struct through the pointer
+  call print_int(p.x)            # 13
+  call print_int(p.y)            # 24
+
+  call print_int64(size of Point)   # 8
+  call print_int64(size of Mixed)   # 24, with padding
+  call print_int64(ref_sizeof())    # clang's sizeof(Mixed) — the same 24
+
+  var m: Mixed
+  m.a = 200                      # a byte reads back unsigned
+  call print_int(m.a)            # 200
+
+  # Prove Kiln's field offsets match clang's: write through the pointer at
+  # the offset C reports, then read the field Kiln placed — a wrong offset
+  # would read different bytes.
+  var mp: ptr = address of m
+  call ptr_write_int(mp, ref_off_b(), 99)
+  call print_int(m.b)            # 99: field `b` sits where clang put it
+
+  call ptr_write_int64(mp, ref_off_d(), 7000000000)
+  call print_int64(m.d)          # 7000000000: field `d` at offset 16
+
+  # A bool field written by C as 7 reads back as `true`, not as a raw 7 that an
+  # equality test would miss.
+  var flags: Flags
+  call raise_flag(flags)
+  if flags.shown = true
+    call print_text("flag-set")
+  else
+    call print_text("flag-BUG")
+  end
+
+  # A text field: stored borrowed, read as a copied-out managed text.
+  var named: Named
+  named.label = "hi"
+  call print_text(named.label)   # hi
+end

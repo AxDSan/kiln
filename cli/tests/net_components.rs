@@ -136,7 +136,7 @@ fn port_was_busy(stdout: &str, stderr: &str) -> bool {
 /// program reports the client arriving and leaving by number.
 #[test]
 fn the_echo_example_echoes_lines_and_counts_clients_from_one() {
-    let bin = build(&repo().join("examples/tcpecho.kiln"), "echo");
+    let bin = build(&repo().join("examples/1x/tcpecho.kiln"), "echo");
     let port = free_port();
     let child = start(&bin, port);
 
@@ -507,5 +507,5 @@ fn the_chat_example_builds() {
         eprintln!("RmlUi not vendored; skipping");
         return;
     }
-    build(&repo().join("examples/tcpchat.kiln"), "chat");
+    build(&repo().join("examples/1x/tcpchat.kiln"), "chat");
 }

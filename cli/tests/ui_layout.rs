@@ -30,7 +30,7 @@ fn ui_available() -> bool {
 /// Build `<repo>/examples/<name>.kiln`. `tag` must be unique per test: tests
 /// run in parallel, and two writing one output path race each other.
 fn build_as(name: &str, tag: &str) -> PathBuf {
-    let example = repo().join("examples").join(format!("{name}.kiln"));
+    let example = repo().join("examples").join("1x").join(format!("{name}.kiln"));
     build_file(
         &example,
         &std::env::temp_dir().join(format!("kiln_{name}_{tag}_layout")),

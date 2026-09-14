@@ -1,0 +1,61 @@
+# Records and dictionaries in the same program — the combination neither
+# feature can demonstrate on its own.
+#
+# A dictionary holds one type of value, and a record IS a type, so `person{}`
+# is a directory of people found by name. The two features were built
+# separately; this is the program that says they meet.
+module compose
+
+record person
+  name: text
+  age: int
+end
+
+sub describe(p: person): text
+  return "{p.name} ({p.age})"
+end
+
+sub main
+  var staff: person{} = {}
+  staff["ada"] = person{name: "Ada", age: 36}
+  staff["grace"] = person{name: "Grace", age: 45}
+  call print_text("people: {dict_count(staff)}")
+
+  # Read one back and pass it to a subroutine as a record, not as its parts.
+  call print_text(describe(staff["ada"]))
+
+  # Insertion order, so iterating a directory of records is reproducible.
+  # `for each` binds the key and its record value together.
+  for each who, member in staff
+    call print_text("  {describe(member)}")
+  end
+
+  # A record read out of a dictionary is the SAME record, not a copy — the
+  # reference semantics records already have, seen through the dictionary.
+  let ada = staff["ada"]
+  ada.age = 37
+  let after = staff["ada"]
+  call print_text("after a birthday: {describe(after)}")
+
+  # A key that is not there answers the sentinel for the value type. A record
+  # has no printable empty value, so the sentinel is no record at all — and
+  # that is caught rather than followed: reading a field of it fails the way an
+  # out-of-range index does, and says so, instead of crashing.
+  let nobody = staff["nobody"]
+  call print_text("missing lookup said: {last_error_text()}")
+  call print_text("[{nobody.name}]")
+  call print_text("reading its field said: {last_error_text()}")
+  if dict_has(staff, "nobody")
+    call print_text("BUG: it was stored after all")
+  else
+    call print_text("dict_has agrees there is no such person")
+  end
+
+  # A list of records built from a dictionary, as a comprehension — three
+  # features at once.
+  let older: person[] = [p for each k, p in staff where p.age >= 40]
+  call print_text("over forty: {count(older)}")
+  for each o in older
+    call print_text("  {describe(o)}")
+  end
+end

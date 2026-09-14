@@ -9,11 +9,11 @@
 //!
 //! Two programs, one per platform, and both are self-checking transcripts:
 //!
-//! * `examples/dll/dispatch.kiln` opens `libops.so` (from `examples/dll/ops.c`),
+//! * `examples/1x/dll/dispatch.kiln` opens `libops.so` (from `examples/1x/dll/ops.c`),
 //!   which is neither linked against nor declared, fetches five same-shaped
 //!   exports into a `ptr[5]`, and lets a request word decide which to call —
 //!   then checks C's `&`, `|`, `^`, `<<` and `>>` against Kiln's own.
-//! * `examples/win/flags.kiln` asks `GetProcAddress` for `GetCurrentProcessId`
+//! * `examples/1x/win/flags.kiln` asks `GetProcAddress` for `GetCurrentProcessId`
 //!   and calls it, checking the answer against the same function reached as a
 //!   declared import, and combines and tests the `win` kit's real constants —
 //!   including handing `VirtualAlloc` and `OpenProcess` words built with `bor`.
@@ -75,13 +75,13 @@ fn a_bit_chooses_the_slot_and_the_address_is_called() {
     let status = Command::new("clang")
         .args(["-shared", "-fPIC", "-o"])
         .arg(dir.join("libops.so"))
-        .arg(repo().join("examples/dll/ops.c"))
+        .arg(repo().join("examples/1x/dll/ops.c"))
         .status()
         .expect("run clang for libops.so");
     assert!(status.success(), "clang failed to build libops.so");
 
     let bin = dir.join("dispatch");
-    let built = build(&repo().join("examples/dll/dispatch.kiln"), &bin, &[]);
+    let built = build(&repo().join("examples/1x/dll/dispatch.kiln"), &bin, &[]);
     assert!(
         built.status.success(),
         "dispatch.kiln did not build:\n{}",
@@ -143,7 +143,7 @@ fn the_win_kit_calls_an_address_and_tests_its_own_flags_under_wine() {
     let dir = scratch("windows");
     let out = dir.join("flags");
     let built = build(
-        &repo().join("examples/win/flags.kiln"),
+        &repo().join("examples/1x/win/flags.kiln"),
         &out,
         &["--os", "windows"],
     );

@@ -32,9 +32,9 @@ fn scratch(tag: &str) -> PathBuf {
     dir
 }
 
-/// Compile `examples/dll/mathdll.c` to `libmathdll.so` inside `dir`.
+/// Compile `examples/1x/dll/mathdll.c` to `libmathdll.so` inside `dir`.
 fn build_mathdll_so(dir: &Path) {
-    let src = repo().join("examples/dll/mathdll.c");
+    let src = repo().join("examples/1x/dll/mathdll.c");
     let status = Command::new("clang")
         .args(["-shared", "-fPIC", "-o"])
         .arg(dir.join("libmathdll.so"))
@@ -44,10 +44,10 @@ fn build_mathdll_so(dir: &Path) {
     assert!(status.success(), "clang failed to build libmathdll.so");
 }
 
-/// Build `examples/dll/<name>.kiln` to `dir/<name>`; return the binary path.
+/// Build `examples/1x/dll/<name>.kiln` to `dir/<name>`; return the binary path.
 fn build_oir(name: &str, dir: &Path) -> PathBuf {
     let repo = repo();
-    let src = repo.join("examples/dll").join(format!("{name}.kiln"));
+    let src = repo.join("examples/1x/dll").join(format!("{name}.kiln"));
     let out = dir.join(name);
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build", src.to_str().unwrap(), "-o", out.to_str().unwrap()])
@@ -226,7 +226,7 @@ fn mathdll_cross_builds_for_windows_and_runs_under_wine() {
     let status = Command::new("x86_64-w64-mingw32-gcc")
         .args(["-shared", "-o"])
         .arg(dir.join("mathdll.dll"))
-        .arg(repo().join("examples/dll/mathdll.c"))
+        .arg(repo().join("examples/1x/dll/mathdll.c"))
         .status()
         .expect("run mingw for mathdll.dll");
     assert!(status.success(), "mingw failed to build mathdll.dll");
@@ -236,7 +236,7 @@ fn mathdll_cross_builds_for_windows_and_runs_under_wine() {
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
-            repo().join("examples/dll/mathdll.kiln").to_str().unwrap(),
+            repo().join("examples/1x/dll/mathdll.kiln").to_str().unwrap(),
             "--os",
             "windows",
             "-o",

@@ -1,0 +1,50 @@
+# Records: a name for a group of related values, and the way a subroutine
+# gives back more than one thing.
+module records
+
+record point
+  x: int
+  y: int
+end
+
+record person
+  name: text
+  age: int
+  home: point
+end
+
+# Two values out of one call — the reason records exist at the language level
+# rather than as a library. `point{...}` reads as a value rather than a call.
+sub midpoint(a: point, b: point): point
+  return point{x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}
+end
+
+sub describe(p: person): text
+  let where = "{p.home.x},{p.home.y}"
+  return "{p.name} ({p.age}) at {where}"
+end
+
+sub main
+  let a = point{x: 0, y: 10}
+  let b = point{x: 8, y: 20}
+  let m = midpoint(a, b)
+  call print_text("midpoint x={m.x}")
+  call print_text("midpoint y={m.y}")
+
+  let ada = person{name: "Ada", age: 36, home: point{x: 1, y: 2}}
+  call print_text(describe(ada))
+
+  # A record is a reference, exactly as a list is: `same` and `ada` are two
+  # names for one person, so a birthday is seen through both.
+  let same = ada
+  same.age = 37
+  call print_text(describe(ada))
+
+  # A list of records is a list like any other: the element is the same
+  # pointer a name holds, so `people[i]` and `ada` can be the same person.
+  var people: person[] = [ada]
+  people = append(people, person{name: "Grace", age: 45, home: point{x: 3, y: 4}})
+  for each p in people
+    call print_text("  {describe(p)}")
+  end
+end

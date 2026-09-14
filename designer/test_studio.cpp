@@ -168,8 +168,8 @@ static void test_catalog() {
 
 static void test_sessions(const std::string& kiln, const std::string& designer) {
     std::printf("sessions (%s)\n", designer.c_str());
-    const std::string form = "examples/form.kiln";
-    const std::string grid = "examples/grid.kiln";
+    const std::string form = "examples/1x/form.kiln";
+    const std::string grid = "examples/1x/grid.kiln";
 
     // The resize cursor: every anchor names its direction, and the platform
     // is asked for exactly that.
@@ -344,7 +344,7 @@ static void test_sessions(const std::string& kiln, const std::string& designer) 
         check("menu: Delete removes the component", has(out, "deleted 1 component(s)") && !has(slurp(path), "greeting"));
     }
     {
-        const std::string out = session(designer, kiln, "examples/tcpchat.kiln", "rclick:link;menu");
+        const std::string out = session(designer, kiln, "examples/1x/tcpchat.kiln", "rclick:link;menu");
         check("menu: a tray component lists its events",
               has(out, "menu: open rows=8\n  link (tcpclient)\n  Events\n  connect \xe2\x86\x92 on_connect\n"
                        "  disconnect \xe2\x86\x92 on_disconnect\n  receive \xe2\x86\x92 on_receive\n"
@@ -494,7 +494,7 @@ static void test_sessions(const std::string& kiln, const std::string& designer) 
     // position offers a subroutine that does not exist yet, and accepting it
     // writes the subroutine with the event's parameters.
     {
-        std::string src = slurp("examples/eventparams.kiln");
+        std::string src = slurp("examples/1x/eventparams.kiln");
         const size_t at = src.find("  on tick: on_plain\n");
         src.insert(at + std::string("  on tick: on_plain\n").size(), "\n");
         const std::string fixture = "/tmp/kiln_studio_test_timer.kiln";
@@ -746,12 +746,12 @@ static void test_sessions(const std::string& kiln, const std::string& designer) 
 
     // Anchors at design time: dragging the form's grip moves and stretches
     // the anchored children exactly as a window resize does in the built app
-    // (examples/anchors.kiln: a 400x300 form; ok_button right,bottom at
+    // (examples/1x/anchors.kiln: a 400x300 form; ok_button right,bottom at
     // 250,230; name_box left,right 20,44 360x26; a label with the defaults).
     {
         std::string path;
         const std::string out =
-            session(designer, kiln, "examples/anchors.kiln", "formgrip:se@100,50", &path);
+            session(designer, kiln, "examples/1x/anchors.kiln", "formgrip:se@100,50", &path);
         check("anchors: the form grew by the drag", has(out, "formgrip: se dragged form=500x350"));
         check("anchors: right,bottom moves by the whole delta",
               has(out, "  ok_button 350,280 120x36 anchors=right,bottom\n"));
@@ -819,9 +819,9 @@ static void test_sessions(const std::string& kiln, const std::string& designer) 
         // The row filling its list is the same fault seen from the other side:
         // the unstyled slider collapsed every row to a stub.
         check("browser: a row spans the list", has(file, "box 1318x30") || has(file, "box 1"));
-        const std::string dir = browse("win");
+        const std::string dir = browse("dll");
         check("browser: pressing a directory browses into it",
-              has(dir, "chose 'browsedir:") && has(dir, "examples/win'"));
+              has(dir, "chose 'browsedir:") && has(dir, "examples/dll'"));
     }
 }
 
@@ -891,7 +891,7 @@ static void test_settings(const std::string& kiln, const std::string& designer) 
         // and a test that ran would land in the next commit.
         const std::string home = "/tmp/kiln_settings_test_" + std::to_string(++n);
         const std::string copy = home + ".kiln";
-        { std::ofstream f(copy, std::ios::trunc); f << slurp("examples/form.kiln"); }
+        { std::ofstream f(copy, std::ios::trunc); f << slurp("examples/1x/form.kiln"); }
         std::string cmd = "rm -rf " + home + " && mkdir -p " + home + " && XDG_DATA_HOME=" + home +
                           " KILN_DESIGNER_SCRIPT='" + script + "' " + designer + " " + copy +
                           " " + kiln + " 2>/dev/null";
@@ -935,7 +935,7 @@ static void test_settings(const std::string& kiln, const std::string& designer) 
     // Written on change, and read back by the next start — the whole point.
     const std::string home = "/tmp/kiln_settings_persist";
     const std::string copy = home + ".kiln";
-    { std::ofstream f(copy, std::ios::trunc); f << slurp("examples/form.kiln"); }
+    { std::ofstream f(copy, std::ios::trunc); f << slurp("examples/1x/form.kiln"); }
     std::string cmd = "rm -rf " + home + " && mkdir -p " + home + " && XDG_DATA_HOME=" + home +
                       " KILN_DESIGNER_SCRIPT='settings:Appearance;click:appearance.theme=dark' " +
                       designer + " " + copy + " " + kiln + " >/dev/null 2>&1; XDG_DATA_HOME=" +
@@ -972,7 +972,7 @@ static void test_build_artifacts(const std::string& kiln, const std::string& des
     ::system(("rm -rf " + dir).c_str());
     ::mkdir(dir.c_str(), 0755);
     const std::string src = dir + "/main.kiln";
-    { std::ofstream f(src, std::ios::trunc); f << slurp("examples/hello.kiln"); }
+    { std::ofstream f(src, std::ios::trunc); f << slurp("examples/1x/hello.kiln"); }
 
     const std::string exists = "test -e ";
     auto present = [&](const std::string& p) { return ::system((exists + p).c_str()) == 0; };

@@ -9,7 +9,7 @@
 //! decides whether the kit is finished — that a real Windows program can be
 //! written with `use win` as its only foreign declaration.
 //!
-//! `examples/win/` is that program, five times over. Not one of those files
+//! `examples/1x/win/` is that program, five times over. Not one of those files
 //! contains a `dll`, a `record ... is c` or a `const` line: every struct,
 //! every number and every entry point comes from the kit. If the kit were
 //! short of anything they need, they would not build.
@@ -86,13 +86,13 @@ fn scratch(tag: &str) -> PathBuf {
     dir
 }
 
-/// Build `examples/win/<name>.kiln` for Windows into `dir`.
+/// Build `examples/1x/win/<name>.kiln` for Windows into `dir`.
 ///
 /// The working directory is the repository, which is how `use win` finds
 /// `kits/win`: a kit is resolved from the directory the build runs in, not
 /// from the directory the source sits in.
 fn build_example(dir: &Path, name: &str) -> PathBuf {
-    let src = repo().join("examples/win").join(format!("{name}.kiln"));
+    let src = repo().join("examples/1x/win").join(format!("{name}.kiln"));
     assert!(src.is_file(), "missing example {}", src.display());
     let out = dir.join(name);
     let done = Command::new(env!("CARGO_BIN_EXE_kiln"))
@@ -226,14 +226,14 @@ fn every_example_cross_builds_for_windows() {
     let dir = scratch("build");
     // Every `.kiln` the directory holds, so an example added later is covered
     // without this test being edited to know about it.
-    let mut names: Vec<String> = std::fs::read_dir(repo().join("examples/win"))
-        .expect("read examples/win")
+    let mut names: Vec<String> = std::fs::read_dir(repo().join("examples/1x/win"))
+        .expect("read examples/1x/win")
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter_map(|n| n.strip_suffix(".kiln").map(str::to_string))
         .collect();
     names.sort();
-    assert!(names.len() >= 5, "examples/win lost files: {names:?}");
+    assert!(names.len() >= 5, "examples/1x/win lost files: {names:?}");
     for name in &names {
         let image = build_example(&dir, name);
         assert_pe32_plus(&image);
@@ -264,7 +264,7 @@ fn a_raw_win32_program_is_a_console_subsystem_image() {
     let refused = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
-            repo().join("examples/win/window.kiln").to_str().unwrap(),
+            repo().join("examples/1x/win/window.kiln").to_str().unwrap(),
             "--os",
             "windows",
             "--target",
@@ -484,7 +484,7 @@ fn commands_lists_the_merged_bundle() {
 #[test]
 fn the_win_kit_is_refused_for_linux() {
     let dir = scratch("gate");
-    let src = repo().join("examples/win/meminfo.kiln");
+    let src = repo().join("examples/1x/win/meminfo.kiln");
     let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",

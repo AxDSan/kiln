@@ -24,8 +24,37 @@ pub fn migrate(src: &str) -> Result<String, String> {
 /// 1-based 1.x positions become 0-based offsets, from a list, whose do not.
 pub fn migrate_with(src: &str, registry: Option<&ir::Registry>) -> Result<String, String> {
     let m = ir::parse(src).map_err(|e| format!("{}: {}", e.line, e.msg))?;
+    // Comment blocks, keyed by the line they sit above; the one above
+    // `module` is the file's own header.
+    let lines: Vec<&str> = src.lines().collect();
+    let mut comments = std::collections::HashMap::new();
+    let mut header = Vec::new();
+    let mut block: Vec<String> = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        let t = l.trim_start();
+        if let Some(rest) = t.strip_prefix('#') {
+            // `##` is a doc comment in 1.x; `///` is Kiln 2's.
+            block.push(match rest.strip_prefix('#') {
+                Some(doc) => format!("/{doc}"),
+                None => rest.to_string(),
+            });
+            continue;
+        }
+        if t.is_empty() {
+            block.clear();
+            continue;
+        }
+        if !block.is_empty() {
+            if t.starts_with("module") && header.is_empty() {
+                header = std::mem::take(&mut block);
+            } else {
+                comments.insert(i + 1, std::mem::take(&mut block));
+            }
+        }
+    }
     TYPES.with(|t| {
         let mut t = t.borrow_mut();
+        t.comments = comments;
         t.reg = registry.cloned().unwrap_or_else(ir::Registry::core);
         t.globals = m
             .items
@@ -69,7 +98,18 @@ pub fn migrate_with(src: &str, registry: Option<&ir::Registry>) -> Result<String
             })
             .collect();
     });
-    Ok(print::program(&module(&m)))
+    let mut program = module(&m);
+    if !header.is_empty() {
+        let mut lead = header;
+        lead.push(String::new());
+        lead.extend(program.leading.drain(..));
+        program.leading = lead;
+    }
+    Ok(print::program(&program))
+}
+
+fn comments_for(line: usize) -> Vec<String> {
+    TYPES.with(|t| t.borrow_mut().comments.remove(&line).unwrap_or_default())
 }
 
 /// What the converter knows about types while it walks a subroutine. Held in
@@ -87,6 +127,10 @@ struct Types {
     /// Each subroutine's parameters and defaults, so a call with named
     /// arguments can be put in order.
     subs: std::collections::HashMap<String, Vec<(String, Option<ir::Expr>)>>,
+    /// The comment block written directly above each source line, `#` removed
+    /// — so a statement or a subroutine keeps the explanation written for it.
+    /// Taken when used, so a block is placed once.
+    comments: std::collections::HashMap<usize, Vec<String>>,
 }
 
 thread_local! {
@@ -97,6 +141,7 @@ thread_local! {
         consts: Default::default(),
         records: Default::default(),
         subs: Default::default(),
+        comments: Default::default(),
     });
 }
 
@@ -594,7 +639,7 @@ fn sub(s: &ir::Sub) -> Method {
         t.borrow_mut().vars = s.params.iter().cloned().collect();
     });
     Method {
-        leading: Vec::new(),
+        leading: comments_for(s.line),
         attrs: Vec::new(),
         is_extern: false,
         vis: Vis::Public,
@@ -643,6 +688,16 @@ fn note(mut s: Stmt, what: &str) -> Stmt {
 }
 
 fn stmt(s: &ir::Stmt) -> Stmt {
+    let mut out = stmt_inner(s);
+    let mut lead = comments_for(s.line);
+    if !lead.is_empty() {
+        lead.extend(out.leading.drain(..));
+        out.leading = lead;
+    }
+    out
+}
+
+fn stmt_inner(s: &ir::Stmt) -> Stmt {
     use ir::StmtKind as S;
     match &s.kind {
         S::Let {

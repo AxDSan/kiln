@@ -1,4 +1,4 @@
-//! The combined 0.8.0 proof: `examples/sugar_tour.kiln` uses every shorthand at
+//! The combined 0.8.0 proof: `examples/1x/sugar_tour.kiln` uses every shorthand at
 //! once — compound assignment, text `+`/`*`, interpolation, a range loop, a
 //! `for each` over a dictionary, `in`/`not in`, and a one-line `if` — and prints
 //! a fixed transcript. Building the tracked example (not an inline copy) keeps
@@ -38,7 +38,7 @@ fn sugar_tour_example_prints_its_transcript() {
     let bin = dir.join("sugar_tour");
     let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build"])
-        .arg(repo().join("examples/sugar_tour.kiln"))
+        .arg(repo().join("examples/1x/sugar_tour.kiln"))
         .arg("-o")
         .arg(&bin)
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))
@@ -110,7 +110,7 @@ fn sugar_tour_cross_builds_and_runs_under_wine() {
     let out = dir.join("sugar_tour");
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["build"])
-        .arg(repo().join("examples/sugar_tour.kiln"))
+        .arg(repo().join("examples/1x/sugar_tour.kiln"))
         .args(["--os", "windows", "-o"])
         .arg(&out)
         .env("KILN_RUNTIME_DIR", repo().join("runtime"))

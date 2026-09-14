@@ -1249,7 +1249,7 @@ fn every_1x_example_migrates_and_reparses() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
-    let dir = root.join("examples");
+    let dir = root.join("examples").join("1x");
     let mut seen = 0;
     for entry in std::fs::read_dir(&dir).unwrap() {
         let p = entry.unwrap().path();

@@ -1,45 +1,55 @@
-# Anchors: which edges of the window a control keeps its distance from.
-#
-# The form is 400x300. Resize the window and the OK button stays in the
-# bottom-right corner while the name box stretches with the width; the label
-# has the default anchors (left,top) and stays where it was drawn.
-#
-#   kiln run examples/anchors.kiln
-module anchors
-use ui
+// Anchors: which edges of the window a control keeps its distance from.
+//
+// The form is 400x300. Resize the window and the OK button stays in the
+// bottom-right corner while the name box stretches with the width; the label
+// has the default anchors (left,top) and stays where it was drawn.
+//
+//   kiln run examples/anchors.kiln
 
-form win
-  title  = "Anchors"
-  width  = 400
-  height = 300
+namespace Anchors;
 
-  button ok_button
-    text    = "OK"
-    left    = 250
-    top     = 230
-    width   = 120
-    height  = 36
-    color   = "#ffffff"
-    anchors = "right,bottom"
-    on click: on_ok
-  end
+using Kiln.Ui;
 
-  editbox name_box
-    text    = "stretches with the window"
-    left    = 20
-    top     = 44
-    width   = 360
-    height  = 26
-    anchors = "left,right"
-  end
+public partial form Win
+{
+    Title = "Anchors";
+    Width = 400;
+    Height = 300;
 
-  label caption
-    text = "Resize the window."
-    left = 20
-    top  = 20
-  end
-end
+    Button okButton
+    {
+        Text = "OK";
+        Left = 250;
+        Top = 230;
+        Width = 120;
+        Height = 36;
+        Color = "#ffffff";
+        Anchors = "right,bottom";
+        Click += OnOk;
+    }
 
-sub on_ok
-  call print_text("ok at {ok_button.left}")
-end
+    Editbox nameBox
+    {
+        Text = "stretches with the window";
+        Left = 20;
+        Top = 44;
+        Width = 360;
+        Height = 26;
+        Anchors = "left,right";
+    }
+
+    Label caption
+    {
+        Text = "Resize the window.";
+        Left = 20;
+        Top = 20;
+    }
+}
+
+public partial form Win
+{
+    void OnOk()
+    {
+        Console.WriteLine($"ok at {okButton.Left}");
+    }
+}

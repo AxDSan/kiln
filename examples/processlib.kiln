@@ -1,81 +1,97 @@
-# Running other programs: libs/process.
-#
-# The distinction the library is built around is "could not start" (-1 or
-# handle 0, with an error code) versus "ran and failed" (its real exit status,
-# no error).
-module processlib
-use process
+// Running other programs: libs/process.
+//
+// The distinction the library is built around is "could not start" (-1 or
+// handle 0, with an error code) versus "ran and failed" (its real exit status,
+// no error).
 
-sub main
-  # --- run something and look at how it ended ---
-  let ok = process_run("true")
-  call print_text("true -> {ok}")
+namespace Processlib;
 
-  let bad = process_run("exit 3")
-  call print_text("exit 3 -> {bad}")
-  call print_text("  error code {last_error_code()}")
+using Kiln.Process;
 
-  let missing = process_run("/nonexistent/program")
-  call print_text("missing -> {missing}")
-  if last_error_code() <> 0
-    call print_text("  it could not start, and said so")
-  end
-
-  # --- capture what it said ---
-  call print_text(process_run_capture("echo captured output").trim())
-
-  # --- a child kept alive, talked to line by line ---
-  var h = process_start("while read line; do echo \"got: $line\"; done")
-  if h = 0
-    call print_text("could not start the child")
-  else
-    call print_text("started")
-    if process_write_line(h, "one")
-      call print_text(process_read_line(h))
-    end
-    if process_write_line(h, "two")
-      call print_text(process_read_line(h))
-    end
-    if process_is_running(h)
-      call print_text("still running")
-    end
-    let status = process_wait(h)
-    call print_text("child exit -> {status}")
-    if process_is_running(h)
-      call print_text("BUG: still running after wait")
-    else
-      call print_text("finished")
-    end
-    if process_close(h)
-      call print_text("closed")
-    end
-  end
-
-  # --- reading to the end: "" is ambiguous, so the predicate sits beside it ---
-  # A raw literal carries the backslashes through untouched, so printf is the
-  # one that turns `\n` into newlines.
-  var lines = process_start(r"printf 'alpha\nbeta\n\ngamma\n'")
-  var count: int = 0
-  while count < 10
-    let line = process_read_line(lines)
-    if process_at_end(lines)
-      break
-    end
-    call print_text("line: [{line}]")
-    increment count
-  end
-  call print_text("end of output")
-  if process_close(lines)
-    call print_text("reader closed")
-  end
-
-  # --- a child that outlives its usefulness ---
-  let sleeper = process_start("sleep 30")
-  if process_is_running(sleeper)
-    call print_text("sleeper is running")
-  end
-  if process_kill(sleeper)
-    call print_text("sleeper killed")
-  end
-  call print_int(process_close_all())
-end
+public static class Processlib
+{
+    public static void Main()
+    {
+        // --- run something and look at how it ended ---
+        let ok = ProcessRun("true");
+        Console.WriteLine($"true -> {ok}");
+        let bad = ProcessRun("exit 3");
+        Console.WriteLine($"exit 3 -> {bad}");
+        Console.WriteLine($"  error code {LastErrorCode()}");
+        let missing = ProcessRun("/nonexistent/program");
+        Console.WriteLine($"missing -> {missing}");
+        if (LastErrorCode() != 0)
+        {
+            Console.WriteLine("  it could not start, and said so");
+        }
+        // --- capture what it said ---
+        Console.WriteLine(Trim(ProcessRunCapture("echo captured output")));
+        // --- a child kept alive, talked to line by line ---
+        var h = ProcessStart("while read line; do echo \"got: $line\"; done");
+        if (h == 0)
+        {
+            Console.WriteLine("could not start the child");
+        }
+        else
+        {
+            Console.WriteLine("started");
+            if (ProcessWriteLine(h, "one"))
+            {
+                Console.WriteLine(ProcessReadLine(h));
+            }
+            if (ProcessWriteLine(h, "two"))
+            {
+                Console.WriteLine(ProcessReadLine(h));
+            }
+            if (ProcessIsRunning(h))
+            {
+                Console.WriteLine("still running");
+            }
+            let status = ProcessWait(h);
+            Console.WriteLine($"child exit -> {status}");
+            if (ProcessIsRunning(h))
+            {
+                Console.WriteLine("BUG: still running after wait");
+            }
+            else
+            {
+                Console.WriteLine("finished");
+            }
+            if (ProcessClose(h))
+            {
+                Console.WriteLine("closed");
+            }
+        }
+        // --- reading to the end: "" is ambiguous, so the predicate sits beside it ---
+        // A raw literal carries the backslashes through untouched, so printf is the
+        // one that turns `\n` into newlines.
+        var lines = ProcessStart("printf 'alpha\\nbeta\\n\\ngamma\\n'");
+        int count = 0;
+        while (count < 10)
+        {
+            let line = ProcessReadLine(lines);
+            if (ProcessAtEnd(lines))
+            {
+                break;
+            }
+            Console.WriteLine($"line: [{line}]");
+            count = count + 1;
+        }
+        Console.WriteLine("end of output");
+        if (ProcessClose(lines))
+        {
+            Console.WriteLine("reader closed");
+        }
+        // --- a child that outlives its usefulness ---
+        let sleeper = ProcessStart("sleep 30");
+        if (ProcessIsRunning(sleeper))
+        {
+            Console.WriteLine("sleeper is running");
+        }
+        if (ProcessKill(sleeper))
+        {
+            Console.WriteLine("sleeper killed");
+        }
+        Console.WriteLine(ProcessCloseAll());
+    }
+}

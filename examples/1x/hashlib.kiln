@@ -1,0 +1,90 @@
+# The `hash` support library: digests and encodings — SHA-256, SHA-1, MD5,
+# CRC32, HMAC-SHA-256, Base64 and hex.
+#
+#   kiln run examples/hashlib.kiln
+#
+# This program is the library's permanent proof of correctness. Every digest
+# below is a published test vector, and a hash that is subtly wrong looks
+# exactly like a hash that is right — so the check lives here, where anyone can
+# run it, rather than in a comment.
+#
+# These are digests and encodings, NOT encryption. Base64 hides nothing, and a
+# bare digest is not a way to store a password.
+module hashlib
+use hash
+
+# Every published vector is checked through here: the label carries the story,
+# the boolean carries the verdict.
+sub vector(label: text, ok: bool)
+  if ok
+    call print_text("ok   {label}")
+  else
+    call print_text("FAIL {label}")
+  end
+end
+
+sub main
+  call print_text("-- SHA-256 (FIPS 180-4) --")
+  call vector("sha256 of the empty string", hash_sha256("") = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+  call vector("sha256 of \"abc\"", hash_sha256("abc") = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+  # 56 bytes: one byte too long for the length to fit in the first block, so
+  # this is the case that catches a broken padding loop.
+  call vector("sha256 across two blocks", hash_sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq") = "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1")
+
+  call print_text("-- SHA-1 (FIPS 180-4) --")
+  call vector("sha1 of the empty string", hash_sha1("") = "da39a3ee5e6b4b0d3255bfef95601890afd80709")
+  call vector("sha1 of \"abc\"", hash_sha1("abc") = "a9993e364706816aba3e25717850c26c9cd0d89d")
+  call vector("sha1 across two blocks", hash_sha1("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq") = "84983e441c3bd26ebaae4aa1f95129e5e54670f1")
+
+  call print_text("-- MD5 (RFC 1321) --")
+  call vector("md5 of the empty string", hash_md5("") = "d41d8cd98f00b204e9800998ecf8427e")
+  call vector("md5 of \"abc\"", hash_md5("abc") = "900150983cd24fb0d6963f7d28e17f72")
+  # MD5 is little-endian where SHA is big-endian: this catches the swap.
+  call vector("md5 of the pangram", hash_md5("The quick brown fox jumps over the lazy dog") = "9e107d9d372bb6826bd81d3542a419d6")
+
+  call print_text("-- CRC32 (zip / PNG) --")
+  # Returned as int64, so a checksum with the top bit set is a value and not a
+  # negative number.
+  call vector("crc32 of \"123456789\" is 0xCBF43926", int64_to_text(hash_crc32("123456789")) = "3421780262")
+  call print_int64(hash_crc32("The quick brown fox jumps over the lazy dog"))
+
+  call print_text("-- HMAC-SHA-256 (RFC 4231) --")
+  # Case 1's key is twenty 0x0b bytes, which no text literal can spell — so it
+  # is built with hex_decode, which is also a check of hex_decode itself.
+  call vector("hmac rfc 4231 case 1", hash_hmac_sha256(hex_decode("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b"), "Hi There") = "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7")
+  call vector("hmac rfc 4231 case 2", hash_hmac_sha256("Jefe", "what do ya want for nothing?") = "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843")
+  # Case 6: a 131-byte key, longer than the 64-byte block, so it must be hashed
+  # before use. A version that truncates instead still passes cases 1 and 2.
+  let bigkey = hex_decode("aa" * 131)
+  call vector("hmac rfc 4231 case 6 (oversized key)", hash_hmac_sha256(bigkey, "Test Using Larger Than Block-Size Key - Hash Key First") = "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54")
+
+  call print_text("-- Base64 (RFC 4648) --")
+  # The RFC's own progression, which covers all three padding cases.
+  for each word in ["f", "fo", "foo", "foob", "fooba", "foobar"]
+    call print_text(base64_encode(word))
+  end
+  call vector("base64 round trip", base64_decode("Zm9vYmFy") = "foobar")
+  call vector("base64 round trip of UTF-8", base64_decode(base64_encode("Kiln, 易语言")) = "Kiln, 易语言")
+
+  call print_text("-- hex --")
+  call print_text(hex_encode("hello"))
+  call vector("hex decode ignores spaces and accepts capitals", hex_decode("68 65 6C 6C 6F") = "hello")
+
+  call print_text("-- failure reporting --")
+  # The two decoders are the only fallible commands here. Bad input gives ""
+  # AND a non-zero code; good input clears the slot again.
+  let bad = base64_decode("!!! not base64 !!!")
+  if bad = "" and last_error_code() <> 0
+    call print_text("ok   base64_decode reported: {last_error_text()}")
+  else
+    call print_text("FAIL base64_decode did not report the bad input")
+  end
+  let odd = hex_decode("abc")
+  if odd = "" and last_error_code() <> 0
+    call print_text("ok   hex_decode reported: {last_error_text()}")
+  else
+    call print_text("FAIL hex_decode did not report the odd digit count")
+  end
+  let good = hex_decode("6f6b")
+  call vector("a success clears the error slot", good = "ok" and last_error_code() = 0)
+end

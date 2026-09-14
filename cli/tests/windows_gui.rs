@@ -176,7 +176,7 @@ fn form_cross_builds_to_a_gui_subsystem_pe_with_its_dlls_beside_it() {
     }
     let dir = scratch("form");
     let image = dir.join("form.exe");
-    build_windows(&repo().join("examples/form.kiln"), &image, &[]);
+    build_windows(&repo().join("examples/1x/form.kiln"), &image, &[]);
 
     assert_eq!(
         pe_subsystem(&image),
@@ -299,7 +299,7 @@ fn console_cross_build_ships_no_dlls() {
     }
     let dir = scratch("console");
     let image = dir.join("hello.exe");
-    build_windows(&repo().join("examples/hello.kiln"), &image, &[]);
+    build_windows(&repo().join("examples/1x/hello.kiln"), &image, &[]);
     assert_eq!(
         pe_subsystem(&image),
         3,

@@ -36,9 +36,9 @@ fn scratch(tag: &str) -> PathBuf {
     dir
 }
 
-/// Compile `examples/dll/cb.c` to `libcb.so` inside `dir`.
+/// Compile `examples/1x/dll/cb.c` to `libcb.so` inside `dir`.
 fn build_cb_so(dir: &Path) {
-    let src = repo().join("examples/dll/cb.c");
+    let src = repo().join("examples/1x/dll/cb.c");
     let status = Command::new("clang")
         .args(["-shared", "-fPIC", "-o"])
         .arg(dir.join("libcb.so"))
@@ -48,11 +48,11 @@ fn build_cb_so(dir: &Path) {
     assert!(status.success(), "clang failed to build libcb.so");
 }
 
-/// Build `examples/dll/cb.kiln` to `dir/cb`, optionally with `--release`; return
+/// Build `examples/1x/dll/cb.kiln` to `dir/cb`, optionally with `--release`; return
 /// the binary path.
 fn build_cb(dir: &Path, release: bool) -> PathBuf {
     let repo = repo();
-    let src = repo.join("examples/dll/cb.kiln");
+    let src = repo.join("examples/1x/dll/cb.kiln");
     let out = dir.join("cb");
     let mut args = vec![
         "build".to_string(),
@@ -210,7 +210,7 @@ fn cb_cross_builds_for_windows_and_runs_under_wine() {
     let status = Command::new("x86_64-w64-mingw32-gcc")
         .args(["-shared", "-o"])
         .arg(dir.join("cb.dll"))
-        .arg(repo().join("examples/dll/cb.c"))
+        .arg(repo().join("examples/1x/dll/cb.c"))
         .status()
         .expect("run mingw for cb.dll");
     assert!(status.success(), "mingw failed to build cb.dll");
@@ -219,7 +219,7 @@ fn cb_cross_builds_for_windows_and_runs_under_wine() {
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
             "build",
-            repo().join("examples/dll/cb.kiln").to_str().unwrap(),
+            repo().join("examples/1x/dll/cb.kiln").to_str().unwrap(),
             "--os",
             "windows",
             "-o",

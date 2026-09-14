@@ -1,0 +1,98 @@
+# Bitwise operators and hex/binary literals.
+#
+# A self-checking transcript: every line prints `ok` or `FAIL`, so running it
+# is the test. It covers the two halves that arrived together — writing a
+# constant as the bit pattern it is, and doing to bits what `+` does to
+# numbers.
+module bitwise
+
+# A flag word written the way its documentation writes it. `0x8000_0000` has
+# the top bit of a 32-bit word set, so on its own it is the most negative
+# `int`; where an `int64` is wanted it is 2147483648. Both readings are the
+# same 32 bits.
+const WS_VISIBLE = 0x1000_0000
+const WS_POPUP   = 0x8000_0000
+const WS_BORDER  = 0x0080_0000
+
+sub check(what: text, got: int, want: int)
+  if got = want
+    call print_text("ok {what}")
+  else
+    call print_text("FAIL {what}: got {got}, wanted {want}")
+  end
+end
+
+sub check64(what: text, got: int64, want: int64)
+  if got = want
+    call print_text("ok {what}")
+  else
+    call print_text("FAIL {what}: got {got}, wanted {want}")
+  end
+end
+
+sub main
+  # --- literals ------------------------------------------------------------
+  call check("hex", 0xFF, 255)
+  call check("hex lower", 0xff, 255)
+  call check("binary", 0b1010, 10)
+  call check("underscores", 0b1111_1111, 255)
+  # A 32-bit pattern is an `int` holding exactly those bits.
+  call check("sign bit", 0x80000000, -2147483648)
+  call check("all ones", 0xFFFF_FFFF, -1)
+  call check("deadbeef", 0xDEAD_BEEF, -559038737)
+  # ...and the same pattern is 2147483648 where an int64 is wanted.
+  var wide: int64 = 0x8000_0000
+  call check64("sign bit widens with zeros", wide, 2147483648)
+  # A pattern that needs more than 32 bits is an int64 on its own.
+  var big: int64 = 0x1_0000_0000
+  call check64("wide literal", big, 4294967296)
+  var ones: int64 = 0xFFFF_FFFF_FFFF_FFFF
+  call check64("64 ones", ones, -1)
+  # A leading `-` says the pattern was meant as a magnitude.
+  call check("negated hex", -0x10, -16)
+
+  # --- the operators -------------------------------------------------------
+  call check("band", 0xF0 band 0x0F, 0)
+  call check("band keeps", 0xF3 band 0x0F, 3)
+  call check("bor", 0xF0 bor 0x0F, 255)
+  call check("bxor", 5 bxor 1, 4)
+  call check("bnot", bnot 0, -1)
+  call check("bnot again", bnot 5, -6)
+  call check("shl", 1 shl 4, 16)
+  call check("shr", 256 shr 4, 16)
+  # `shr` keeps the sign; `ushr` shifts zeros in.
+  call check("shr is arithmetic", -16 shr 2, -4)
+  call check("ushr is logical", -16 ushr 2, 1073741820)
+  var n: int = 3
+  call check("a computed count", 1 shl n, 8)
+
+  # --- precedence ----------------------------------------------------------
+  # A bitwise operator binds LOOSER than a comparison, so a flag test needs no
+  # parentheses. (This is the one place C's table is famously the wrong way
+  # round.)
+  var style: int = WS_VISIBLE bor WS_POPUP
+  if style band WS_VISIBLE <> 0
+    call print_text("ok flag is set")
+  else
+    call print_text("FAIL flag is set")
+  end
+  if style band WS_BORDER = 0
+    call print_text("ok flag is clear")
+  else
+    call print_text("FAIL flag is clear")
+  end
+  # Shifts bind tighter than `band`, and `+` tighter than a shift.
+  call check("shl before band", 1 shl 4 band 0xFF, 16)
+  call check("plus before shl", 1 shl 2 + 2, 16)
+  call check("band before bor", 1 bor 6 band 4, 5)
+
+  # --- what this was for ---------------------------------------------------
+  # LOWORD / HIWORD of a WPARAM, which is an int64. The mask is an int
+  # literal, and a literal takes the width of what it meets.
+  var wparam: int64 = 196610
+  call check64("LOWORD", wparam band 0xFFFF, 2)
+  call check64("HIWORD", wparam ushr 16 band 0xFFFF, 3)
+  # Flags combined, then one taken away.
+  var flags: int = WS_VISIBLE bor WS_POPUP bor WS_BORDER
+  call check("flag cleared", flags band bnot WS_BORDER, WS_VISIBLE bor WS_POPUP)
+end

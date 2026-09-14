@@ -1,4 +1,4 @@
-//! The combined 0.9.0 proof: `examples/sugar09_tour.kiln` uses the whole
+//! The combined 0.9.0 proof: `examples/1x/sugar09_tour.kiln` uses the whole
 //! milestone's sugar at once — block and raw text, collection literals,
 //! slicing, the dot call, `let` inference, the value `if`, `enum`, `match`,
 //! `repeat`, `assert`, parameter defaults, named arguments, record literals
@@ -58,7 +58,7 @@ fn build(dir: &Path, extra: &[&str]) -> PathBuf {
     let bin = dir.join("sugar09_tour");
     let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .arg("build")
-        .arg(repo().join("examples/sugar09_tour.kiln"))
+        .arg(repo().join("examples/1x/sugar09_tour.kiln"))
         .args(extra)
         .arg("-o")
         .arg(&bin)

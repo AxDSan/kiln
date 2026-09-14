@@ -1,0 +1,80 @@
+# One command, several controls.
+#
+# The caption, the shortcut, whether it can be invoked at all, and the code
+# behind it live in the `action` — not in any of the buttons. Both buttons
+# offer the same command, so disabling it greys both and renaming it renames
+# both, and neither button knows the other exists.
+#
+# A control names the action it offers rather than pointing at it: a component
+# identifier deliberately never reaches the built binary, so the action's
+# `name` is what ties them together.
+module actions
+use ui
+
+var saves: int = 0
+
+action save_action
+  name = "save"
+  text = "Save"
+  shortcut = "ctrl+s"
+  on execute: on_save
+end
+
+form win
+  title = "Actions"
+  width = 460
+  height = 210
+  background_color = "#ffffff"
+
+  label status
+    text = "Nothing saved yet."
+    left = 20
+    top = 20
+    width = 420
+    color = "#1f2328"
+  end
+
+  button toolbar_save
+    action = "save"
+    left = 20
+    top = 56
+    width = 130
+    height = 34
+    color = "#ffffff"
+    border_radius = 6
+  end
+
+  button menu_save
+    action = "save"
+    left = 170
+    top = 56
+    width = 130
+    height = 34
+    color = "#ffffff"
+    border_radius = 6
+  end
+
+  button lock
+    text = "Lock it"
+    left = 20
+    top = 120
+    width = 130
+    height = 34
+    background_color = "#6e7781"
+    color = "#ffffff"
+    border_radius = 6
+    on click: on_lock
+  end
+end
+
+sub on_save
+  increment saves
+  status.text = "saved {saves}"
+  call print_text("save executed, count {saves}")
+end
+
+sub on_lock
+  save_action.text = "Save (locked)"
+  save_action.enabled = false
+  call print_text("the action is disabled; both buttons follow it")
+end

@@ -1,36 +1,51 @@
-# Calling a C library through `dll`. The library is `libmathdll.so`, built from
-# `mathdll.c` and sitting beside this program.
-module dllmath
+// Calling a C library through `dll`. The library is `libmathdll.so`, built from
+// `mathdll.c` and sitting beside this program.
 
-dll add_ints(a: int, b: int): int from "mathdll"
-dll banner(): text from "mathdll"
-dll bump(cell: ptr) from "mathdll"
-dll tentimes(x: int): int from "mathdll" as "times_ten"
-dll add_bignums(a: int64, b: int64): int64 from "mathdll"
-dll halve(x: double): double from "mathdll"
-dll is_positive(x: int): bool from "mathdll"
+namespace Dllmath;
 
-sub main
-  # A value in, a value out.
-  call print_int(add_ints(40, 2))
+public static class Dllmath
+{
+    [Dll("mathdll", Entry = "add_ints")]
+    public static extern int AddInts(int a, int b);
 
-  # A C string out, copied into a managed text.
-  call print_text(banner())
+    [Dll("mathdll", Entry = "banner")]
+    public static extern string Banner();
 
-  # A pointer the callee writes through: a 4-byte cell, set to 41, bumped to 42.
-  let cell: ptr = mem_alloc(4)
-  call ptr_write_int(cell, 0, 41)
-  call bump(cell)
-  call print_int(ptr_read_int(cell, 0))
-  call mem_free(cell)
+    [Dll("mathdll", Entry = "bump")]
+    public static extern void Bump(Ptr cell);
 
-  # The exported symbol is `times_ten`; `as` lets the program call it `tentimes`.
-  call print_int(tentimes(5))
+    [Dll("mathdll", Entry = "times_ten")]
+    public static extern int Tentimes(int x);
 
-  # int64, double and bool all cross the boundary.
-  call print_int64(add_bignums(9000000000, 1))
-  call print_double(halve(7.0))
-  if is_positive(3)
-    call print_text("positive")
-  end
-end
+    [Dll("mathdll", Entry = "add_bignums")]
+    public static extern long AddBignums(long a, long b);
+
+    [Dll("mathdll", Entry = "halve")]
+    public static extern double Halve(double x);
+
+    [Dll("mathdll", Entry = "is_positive")]
+    public static extern bool IsPositive(int x);
+
+    public static void Main()
+    {
+        // A value in, a value out.
+        Console.WriteLine(AddInts(40, 2));
+        // A C string out, copied into a managed text.
+        Console.WriteLine(Banner());
+        // A pointer the callee writes through: a 4-byte cell, set to 41, bumped to 42.
+        Ptr cell = MemAlloc(4);
+        PtrWriteInt(cell, 0, 41);
+        Bump(cell);
+        Console.WriteLine(PtrReadInt(cell, 0));
+        MemFree(cell);
+        // The exported symbol is `times_ten`; `as` lets the program call it `tentimes`.
+        Console.WriteLine(Tentimes(5));
+        // int64, double and bool all cross the boundary.
+        PrintInt64(AddBignums(9000000000, 1));
+        Console.WriteLine(Halve(7.0));
+        if (IsPositive(3))
+        {
+            Console.WriteLine("positive");
+        }
+    }
+}

@@ -1,69 +1,88 @@
-# Pseudo-random numbers: dice, coins, chances and reproducible sequences.
-#
-#   kiln run examples/randomlib.kiln
-#
-# The generator is NOT for anything security sensitive. It is fast, and a seed
-# reproduces the sequence exactly — which is the point here, and the reason it
-# must never hold a password or a token.
-module randomlib
-use random
+// Pseudo-random numbers: dice, coins, chances and reproducible sequences.
+//
+//   kiln run examples/randomlib.kiln
+//
+// The generator is NOT for anything security sensitive. It is fast, and a seed
+// reproduces the sequence exactly — which is the point here, and the reason it
+// must never hold a password or a token.
 
-sub main
-  # A seed makes the run repeatable: these five rolls are the same every time,
-  # on every machine.
-  call random_seed(1234)
-  repeat 5 times
-    call print_int(random_between(1, 6))
-  end
+namespace Randomlib;
 
-  # Re-seeding with the same number starts the very same sequence over.
-  call random_seed(1234)
-  call print_text("first roll again: {random_between(1, 6)}")
+using Kiln.Random;
 
-  # random_int(n) picks one of n things: 0 .. n-1.
-  call random_seed(7)
-  let pick = random_int(3)
-  call print_text("random_int in range") if 0 <= pick <= 2
-
-  # A double in 0..1, and one in a range of your own.
-  let u = random_double()
-  call print_text("random_double in range") if 0.0 <= u < 1.0
-  let t = random_double_between(10.0, 20.0)
-  call print_text("random_double_between in range") if 10.0 <= t < 20.0
-
-  # Coins and chances. 0% never happens, 100% always does.
-  if random_chance(100)
-    call print_text("100% happened")
-  end
-  if random_chance(0)
-    call print_text("unreachable")
-  else
-    call print_text("0% did not happen")
-  end
-
-  # Heads over a hundred flips: neither all heads nor all tails.
-  call random_seed(99)
-  var heads: int = 0
-  repeat 100 times
-    increment heads if random_bool()
-  end
-  call print_text("coin looks fair") if 20 < heads < 80
-
-  # Hex digits, for a test id or a throwaway colour.
-  call random_seed(2024)
-  let id = random_hex(8)
-  call print_int(length(id))
-  call print_text("#{random_hex(6)}")
-
-  # The one real error: an empty range. The command returns 0 AND leaves a
-  # code behind, because 0 is also a perfectly good draw.
-  let bad = random_between(10, 1)
-  call print_int(bad)
-  call print_int(last_error_code())
-  call print_text(last_error_text())
-
-  # A good call clears the slot again.
-  let ok = random_between(5, 5)
-  call print_int(ok)
-  call print_int(last_error_code())
-end
+public static class Randomlib
+{
+    public static void Main()
+    {
+        // A seed makes the run repeatable: these five rolls are the same every time,
+        // on every machine.
+        RandomSeed(1234);
+        foreach (var repeat1 in 1..5)
+        {
+            Console.WriteLine(RandomBetween(1, 6));
+        }
+        // Re-seeding with the same number starts the very same sequence over.
+        RandomSeed(1234);
+        Console.WriteLine($"first roll again: {RandomBetween(1, 6)}");
+        // random_int(n) picks one of n things: 0 .. n-1.
+        RandomSeed(7);
+        let pick = RandomInt(3);
+        if (0 <= pick && pick <= 2)
+        {
+            Console.WriteLine("random_int in range");
+        }
+        // A double in 0..1, and one in a range of your own.
+        let u = RandomDouble();
+        if (0.0 <= u && u < 1.0)
+        {
+            Console.WriteLine("random_double in range");
+        }
+        let t = RandomDoubleBetween(10.0, 20.0);
+        if (10.0 <= t && t < 20.0)
+        {
+            Console.WriteLine("random_double_between in range");
+        }
+        // Coins and chances. 0% never happens, 100% always does.
+        if (RandomChance(100))
+        {
+            Console.WriteLine("100% happened");
+        }
+        if (RandomChance(0))
+        {
+            Console.WriteLine("unreachable");
+        }
+        else
+        {
+            Console.WriteLine("0% did not happen");
+        }
+        // Heads over a hundred flips: neither all heads nor all tails.
+        RandomSeed(99);
+        int heads = 0;
+        foreach (var repeat2 in 1..100)
+        {
+            if (RandomBool())
+            {
+                heads = heads + 1;
+            }
+        }
+        if (20 < heads && heads < 80)
+        {
+            Console.WriteLine("coin looks fair");
+        }
+        // Hex digits, for a test id or a throwaway colour.
+        RandomSeed(2024);
+        let id = RandomHex(8);
+        Console.WriteLine(Length(id));
+        Console.WriteLine($"#{RandomHex(6)}");
+        // The one real error: an empty range. The command returns 0 AND leaves a
+        // code behind, because 0 is also a perfectly good draw.
+        let bad = RandomBetween(10, 1);
+        Console.WriteLine(bad);
+        Console.WriteLine(LastErrorCode());
+        Console.WriteLine(LastErrorText());
+        // A good call clears the slot again.
+        let ok = RandomBetween(5, 5);
+        Console.WriteLine(ok);
+        Console.WriteLine(LastErrorCode());
+    }
+}

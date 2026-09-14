@@ -62,7 +62,7 @@ impl std::error::Error for UnitError {}
 
 /// The unit file a `use <name>` from a file in `dir` would resolve to, if
 /// there is one. `None` means "a library": either there is no such file, or
-/// the file is a program — `examples/hello.kiln` beside `examples/hellolib.kiln`
+/// the file is a program — `examples/1x/hello.kiln` beside `examples/1x/hellolib.kiln`
 /// must not capture `use hello`, which names the support library. Only a file
 /// whose header says `unit` is a unit; the header is sniffed, not parsed, so
 /// a unit with a mistake further down is still found and then reported.

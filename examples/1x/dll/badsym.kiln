@@ -1,0 +1,8 @@
+# Reaching for a symbol the library does not export is a named run-time error.
+module dllbadsym
+
+dll nope(x: int): int from "mathdll" as "does_not_exist"
+
+sub main
+  call print_int(nope(1))
+end

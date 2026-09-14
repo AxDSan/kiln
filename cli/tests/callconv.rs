@@ -36,7 +36,7 @@ fn scratch(tag: &str) -> PathBuf {
 
 /// The same C library the FFI tests use, compiled to `libmathdll.so` in `dir`.
 fn build_mathdll_so(dir: &Path) {
-    let src = repo().join("examples/dll/mathdll.c");
+    let src = repo().join("examples/1x/dll/mathdll.c");
     let status = Command::new("clang")
         .args(["-shared", "-fPIC", "-o"])
         .arg(dir.join("libmathdll.so"))
@@ -177,7 +177,7 @@ fn a_marked_dll_cross_builds_for_windows_and_runs_under_wine() {
     let status = Command::new("x86_64-w64-mingw32-gcc")
         .args(["-shared", "-o"])
         .arg(dir.join("mathdll.dll"))
-        .arg(repo().join("examples/dll/mathdll.c"))
+        .arg(repo().join("examples/1x/dll/mathdll.c"))
         .status()
         .expect("run mingw for mathdll.dll");
     assert!(status.success(), "mingw failed to build mathdll.dll");

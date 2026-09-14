@@ -1,0 +1,209 @@
+# The visual palette: one window holding every control you can put on a form.
+#
+#   kiln run examples/gallery.kiln
+#
+# Items are ONE text with a newline between entries. That is not shorthand for
+# a `text[]` — a property value is a literal, so a list has to arrive as one
+# value — and it is what a subroutine appends to as well:
+#
+#   colours.items &= "\nPurple"
+#
+# Positions count from 1, so `selected = 2` is the second entry and 0 is
+# "nothing chosen".
+module gallery
+use ui
+
+form win
+  title = "Kiln palette"
+  width = 640
+  height = 520
+  background_color = "#f6f8fa"
+
+  label pick_label
+    text = "Pick a colour"
+    left = 24
+    top = 20
+    width = 200
+    color = "#1f2328"
+  end
+
+  combobox colours
+    items = "Red\nGreen\nBlue\nAmber"
+    selected = 3
+    left = 24
+    top = 44
+    width = 200
+    height = 28
+    on change: on_colour
+  end
+
+  label list_label
+    text = "Or from a visible list"
+    left = 24
+    top = 92
+    width = 220
+    color = "#1f2328"
+  end
+
+  listbox cities
+    items = "Amsterdam\nBerlin\nCairo\nDakar\nEdinburgh"
+    selected = 2
+    left = 24
+    top = 116
+    width = 200
+    height = 140
+    on change: on_city
+  end
+
+  groupbox size_group
+    text = "Size"
+    left = 260
+    top = 20
+    width = 180
+    height = 130
+  end
+
+  radiobutton size_small
+    text = "Small"
+    group = "size"
+    left = 276
+    top = 52
+    color = "#1f2328"
+    on change: on_size
+  end
+
+  radiobutton size_medium
+    text = "Medium"
+    group = "size"
+    checked = true
+    left = 276
+    top = 82
+    color = "#1f2328"
+    on change: on_size
+  end
+
+  radiobutton size_large
+    text = "Large"
+    group = "size"
+    left = 276
+    top = 112
+    color = "#1f2328"
+    on change: on_size
+  end
+
+  label notes_label
+    text = "Notes"
+    left = 260
+    top = 164
+    width = 200
+    color = "#1f2328"
+  end
+
+  memo notes
+    text = "A memo holds more than one line.\nThis is the second."
+    left = 260
+    top = 188
+    width = 340
+    height = 92
+    color = "#1f2328"
+  end
+
+  label volume_label
+    text = "Volume"
+    left = 24
+    top = 268
+    width = 200
+    color = "#1f2328"
+  end
+
+  slider volume
+    min = 0
+    max = 100
+    value = 70
+    left = 24
+    top = 292
+    width = 200
+    height = 20
+    on change: on_volume
+  end
+
+  label copies_label
+    text = "Copies"
+    left = 260
+    top = 296
+    width = 120
+    color = "#1f2328"
+  end
+
+  spinner copies
+    value = 3
+    min = 1
+    max = 99
+    step = 1
+    left = 340
+    top = 292
+    width = 110
+    height = 28
+    on change: on_copies
+  end
+
+  progressbar bar
+    value = 70
+    left = 24
+    top = 340
+    width = 426
+    height = 16
+  end
+
+  button report
+    text = "Report"
+    left = 24
+    top = 380
+    width = 140
+    height = 40
+    background_color = "#1e60d5"
+    color = "#ffffff"
+    border_radius = 6
+    on click: on_report
+  end
+
+  label status
+    text = "Nothing chosen yet."
+    left = 184
+    top = 392
+    width = 420
+    color = "#1f2328"
+  end
+end
+
+sub on_colour
+  status.text = "colour #{colours.selected}"
+end
+
+sub on_city
+  status.text = "city #{cities.selected}"
+end
+
+sub on_size
+  status.text = "size changed"
+end
+
+# The bar follows the slider, which is the shortest way to see that reading a
+# control gives back what the person did rather than what the form said.
+sub on_volume
+  bar.value = volume.value
+  status.text = "volume {volume.value}"
+end
+
+sub on_copies
+  status.text = "copies {copies.value}"
+end
+
+sub on_report
+  call print_text("colour  = {colours.selected}")
+  call print_text("city    = {cities.selected}")
+  call print_text("cities  = {cities.count}")
+  call print_text("volume  = {volume.value}")
+  call print_text("copies  = {copies.value}")
+  call print_text("notes   = {notes.text}")
+end

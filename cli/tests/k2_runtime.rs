@@ -872,3 +872,41 @@ fn bytes_cross_the_command_boundary_both_ways() {
     assert_eq!(build_and_run("bytesrt", &src), "65 0 66\n");
     assert_eq!(std::fs::read(&path).unwrap(), b"A\0B");
 }
+
+#[test]
+fn every_shipped_example_is_kiln_2_and_builds() {
+    // The examples beside the toolchain are the first programs anyone runs.
+    // Every one at the top of `examples/` must be Kiln 2 and must build with
+    // `kiln build` — the 1.x originals live under `examples/1x/`.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+    let mut failures = Vec::new();
+    let mut seen = 0;
+    for dir in ["examples", "examples/dll", "examples/k2"] {
+        for entry in std::fs::read_dir(root.join(dir)).unwrap() {
+            let p = entry.unwrap().path();
+            if p.extension().and_then(|e| e.to_str()) != Some("kiln") {
+                continue;
+            }
+            seen += 1;
+            let src = std::fs::read_to_string(&p).unwrap();
+            let name = p.file_name().unwrap().to_string_lossy().to_string();
+            if src.lines().any(|l| l.trim_start().starts_with("module ")) {
+                failures.push(format!("{dir}/{name} is still a 1.x program"));
+                continue;
+            }
+            let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
+                .args(["k2", p.to_str().unwrap(), "--runtime", "--emit-ir"])
+                .current_dir(&root)
+                .output()
+                .expect("kiln k2");
+            if !out.status.success() {
+                failures.push(format!(
+                    "{dir}/{name}: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                ));
+            }
+        }
+    }
+    assert!(seen >= 45, "expected the shipped examples, found {seen}");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

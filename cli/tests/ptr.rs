@@ -1,5 +1,5 @@
 //! End-to-end tests for the `ptr` type and the raw-memory commands: build
-//! `examples/ptr.kiln` to a native binary, run it, and check that every
+//! `examples/1x/ptr.kiln` to a native binary, run it, and check that every
 //! pointer operation round-trips the value it was handed.
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -15,7 +15,7 @@ fn repo() -> PathBuf {
 /// per test so parallel tests do not race on the output path (see build.rs).
 fn build_as(name: &str, tag: &str) -> PathBuf {
     let repo = repo();
-    let example = repo.join("examples").join(format!("{name}.kiln"));
+    let example = repo.join("examples").join("1x").join(format!("{name}.kiln"));
     let out_bin = std::env::temp_dir().join(format!("kiln_{name}_{tag}_test"));
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([

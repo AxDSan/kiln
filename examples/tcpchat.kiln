@@ -1,100 +1,124 @@
-# A chat client: a form, a `tcpclient`, and nothing that blocks.
-#
-#   kiln run examples/tcpecho.kiln 7000     (in one terminal)
-#   kiln run examples/tcpchat.kiln          (in another)
-#
-# Connect is non-blocking: `Connect` asks, and the answer arrives later as
-# `connect` or `error` while the window keeps painting. `receive` hands the
-# handler each line the server sent, delimiter stripped, and `send` puts a
-# line on the wire — the client speaks lines because `delimiter` is a
-# newline, which is the default.
-module tcpchat
-use ui
-use net
+// A chat client: a form, a `tcpclient`, and nothing that blocks.
+//
+//   kiln run examples/tcpecho.kiln 7000     (in one terminal)
+//   kiln run examples/tcpchat.kiln          (in another)
+//
+// Connect is non-blocking: `Connect` asks, and the answer arrives later as
+// `connect` or `error` while the window keeps painting. `receive` hands the
+// handler each line the server sent, delimiter stripped, and `send` puts a
+// line on the wire — the client speaks lines because `delimiter` is a
+// newline, which is the default.
 
-tcpclient link
-  name = "link"
-  host = "127.0.0.1"
-  port = 7000
-  on connect: on_connect
-  on disconnect: on_disconnect
-  on receive: on_receive
-  on error: on_error
-end
+namespace Tcpchat;
 
-form win
-  title = "Chat"
-  width = 480
-  height = 360
+using Kiln.Ui;
+using Kiln.Net;
 
-  memo log
-    left = 12
-    top = 12
-    width = 456
-    height = 250
-    enabled = false
-  end
+Tcpclient link
+{
+    Name = "link";
+    Host = "127.0.0.1";
+    Port = 7000;
+    Connect += OnConnect;
+    Disconnect += OnDisconnect;
+    Receive += OnReceive;
+    Error += OnError;
+}
 
-  editbox entry
-    left = 12
-    top = 274
-    width = 300
-  end
+public partial form Win
+{
+    Title = "Chat";
+    Width = 480;
+    Height = 360;
 
-  button send
-    text = "Send"
-    left = 320
-    top = 274
-    width = 60
-    on click: on_send
-  end
+    Memo log
+    {
+        Left = 12;
+        Top = 12;
+        Width = 456;
+        Height = 250;
+        Enabled = false;
+    }
 
-  button connect
-    text = "Connect"
-    left = 388
-    top = 274
-    width = 80
-    on click: on_toggle
-  end
-end
+    Editbox entry
+    {
+        Left = 12;
+        Top = 274;
+        Width = 300;
+    }
 
-sub say(line: text)
-  log.text &= "{line}\n"
-end
+    Button send
+    {
+        Text = "Send";
+        Left = 320;
+        Top = 274;
+        Width = 60;
+        Click += OnSend;
+    }
 
-sub on_toggle
-  if link.connected
-    link.active = false
-  else
-    call say("connecting...")
-    link.active = true
-  end
-end
+    Button connect
+    {
+        Text = "Connect";
+        Left = 388;
+        Top = 274;
+        Width = 80;
+        Click += OnToggle;
+    }
+}
 
-sub on_send
-  if tcpclient_send("link", entry.text + "\n")
-    call say("> {entry.text}")
-    entry.text = ""
-  else
-    call say("not sent: {last_error_text()}")
-  end
-end
+public partial form Win
+{
+    void Say(string line)
+    {
+        log.Text = $"{log.Text}{line}\n";
+    }
 
-sub on_connect
-  call say("connected")
-  connect.text = "Disconnect"
-end
+    void OnToggle()
+    {
+        if (link.Connected)
+        {
+            link.Active = false;
+        }
+        else
+        {
+            Say("connecting...");
+            link.Active = true;
+        }
+    }
 
-sub on_disconnect
-  call say("disconnected")
-  connect.text = "Connect"
-end
+    void OnSend()
+    {
+        if (TcpclientSend("link", entry.Text + "\n"))
+        {
+            Say($"> {entry.Text}");
+            entry.Text = "";
+        }
+        else
+        {
+            Say($"not sent: {LastErrorText()}");
+        }
+    }
 
-sub on_receive(data: text)
-  call say("< {data}")
-end
+    void OnConnect()
+    {
+        Say("connected");
+        connect.Text = "Disconnect";
+    }
 
-sub on_error(message: text)
-  call say("error: {message}")
-  connect.text = "Connect"
-end
+    void OnDisconnect()
+    {
+        Say("disconnected");
+        connect.Text = "Connect";
+    }
+
+    void OnReceive(string data)
+    {
+        Say($"< {data}");
+    }
+
+    void OnError(string message)
+    {
+        Say($"error: {message}");
+        connect.Text = "Connect";
+    }
+}

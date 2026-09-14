@@ -430,11 +430,30 @@ fn stmt(o: &mut Out, s: &Stmt) {
             for s in then {
                 stmt(o, s);
             }
-            if els.is_empty() {
-                o.close();
-            } else {
+            // An else branch that is exactly one `if`, with nothing written
+            // above it, is an `else if` — the chain is flat, as it is written.
+            let mut els = els;
+            loop {
+                if els.is_empty() {
+                    o.close();
+                    break;
+                }
                 o.depth -= 1;
                 o.line("}");
+                if let [only] = els.as_slice() {
+                    if let (StmtKind::If { cond, then, els: next }, true) =
+                        (&only.kind, only.leading.is_empty())
+                    {
+                        o.line(&format!("else if ({})", expr(cond)));
+                        o.line("{");
+                        o.depth += 1;
+                        for s in then {
+                            stmt(o, s);
+                        }
+                        els = next;
+                        continue;
+                    }
+                }
                 o.line("else");
                 o.line("{");
                 o.depth += 1;
@@ -442,6 +461,7 @@ fn stmt(o: &mut Out, s: &Stmt) {
                     stmt(o, s);
                 }
                 o.close();
+                break;
             }
         }
         StmtKind::While { cond, body } => {

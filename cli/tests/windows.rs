@@ -114,7 +114,7 @@ fn hello_cross_builds_to_pe32_plus_and_runs_under_wine() {
     let dir = scratch("hello");
     // `-o hello` on purpose: a Windows program named without an extension is
     // a file Windows will not run, so the build adds one.
-    build_windows(&repo().join("examples/hello.kiln"), &dir.join("hello"), &[]);
+    build_windows(&repo().join("examples/1x/hello.kiln"), &dir.join("hello"), &[]);
     let image = dir.join("hello.exe");
     assert!(
         image.is_file(),
@@ -142,7 +142,7 @@ fn release_cross_build_is_a_pe_that_runs() {
     }
     let dir = scratch("release");
     build_windows(
-        &repo().join("examples/hello.kiln"),
+        &repo().join("examples/1x/hello.kiln"),
         &dir.join("hello.exe"),
         &["--release"],
     );
@@ -233,7 +233,7 @@ fn library_cross_builds_to_dll_and_archive() {
         return;
     }
     let dir = scratch("lib");
-    let source = repo().join("examples/hellolib.kiln");
+    let source = repo().join("examples/1x/hellolib.kiln");
     let dll = dir.join("hellolib.dll");
     build_windows(&source, &dll, &["--target", "sharedlib"]);
     assert_pe32_plus(&dll);
@@ -268,7 +268,7 @@ fn library_cross_builds_to_dll_and_archive() {
 
 /// The `ptr` type and the raw-memory commands must marshal identically on
 /// Windows: the slot layout is ABI, and a pointer travels in the slot's union
-/// exactly as it does on Linux. Building `examples/ptr.kiln` for Windows and
+/// exactly as it does on Linux. Building `examples/1x/ptr.kiln` for Windows and
 /// running it under wine proves the whole path — int64 offsets, the int<->ptr
 /// escape hatch, and pointer-width reads — behaves the same on LLP64.
 #[test]
@@ -277,7 +277,7 @@ fn ptr_cross_builds_and_runs_under_wine() {
         return;
     }
     let dir = scratch("ptr");
-    build_windows(&repo().join("examples/ptr.kiln"), &dir.join("ptr.exe"), &[]);
+    build_windows(&repo().join("examples/1x/ptr.kiln"), &dir.join("ptr.exe"), &[]);
     let image = dir.join("ptr.exe");
     assert!(
         image.is_file(),

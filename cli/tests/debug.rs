@@ -19,7 +19,7 @@ fn repo() -> PathBuf {
 
 fn build(name: &str, tag: &str, release: bool) -> PathBuf {
     let repo = repo();
-    let example = repo.join("examples").join(format!("{name}.kiln"));
+    let example = repo.join("examples").join("1x").join(format!("{name}.kiln"));
     let dir = std::env::temp_dir().join("kiln_debug_tests");
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join(format!("{name}_{tag}"));

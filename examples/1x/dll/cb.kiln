@@ -1,0 +1,39 @@
+# Passing a subroutine to C as a function pointer. The library is `libcb.so`,
+# built from `cb.c` and sitting beside this program. `apply` calls back into
+# `summer` for a value; `each` calls `announce` once per number for its side
+# effect — proof that C can drive Kiln code, not only the other way round.
+module dllcb
+
+dll apply(fn: ptr, a: int, b: int): int from "cb"
+dll each(fn: ptr, n: int) from "cb"
+dll greet(fn: ptr) from "cb"
+
+# A callback C invokes for a result: two ints in, their sum out. Its signature
+# is C-representable, so `address of summer` is a pointer C can call directly.
+sub summer(a: int, b: int): int
+  return a + b
+end
+
+# A callback C invokes for effect: printed, nothing returned. `each` calls it
+# with 1, 2, 3, so the program prints that sequence from inside C's loop.
+sub announce(n: int)
+  call print_int(n)
+end
+
+# A callback handed a C string. It arrives as a `text` the sub reads for the
+# duration of the call, proving a text parameter crosses the boundary intact.
+sub say(t: text)
+  call print_text(t)
+end
+
+sub main
+  # C receives the address of `summer` and calls it with (40, 2).
+  var add: ptr = address of summer
+  call print_int(apply(add, 40, 2))
+
+  # C calls `announce` three times, from its own loop.
+  call each(address of announce, 3)
+
+  # C hands `say` a string it owns; the sub reads it and prints "from C".
+  call greet(address of say)
+end

@@ -1,57 +1,71 @@
-# A TCP echo server with no socket anywhere in sight.
-#
-#   kiln run examples/tcpecho.kiln 7000
-#   nc localhost 7000        (then type lines; `quit` stops the server)
-#
-# The server is a component, the way `httpserver` is: properties, events, and
-# no rectangle, so it is declared at module level and needs no form. `main`
-# sets the port from the command line — a property value in the source must
-# be a literal — switches it on, and returns; the program stays alive because
-# an active server is a live event source.
-#
-# Every event names the client it is about, as a small int counted from 1 in
-# order of arrival and never reused. `receive` fires once per line with the
-# delimiter already stripped, and the commands take the server's `name`, the
-# same way `grid_cell` takes a grid's.
-module tcpecho
-use net
-use system
+// A TCP echo server with no socket anywhere in sight.
+//
+//   kiln run examples/tcpecho.kiln 7000
+//   nc localhost 7000        (then type lines; `quit` stops the server)
+//
+// The server is a component, the way `httpserver` is: properties, events, and
+// no rectangle, so it is declared at module level and needs no form. `main`
+// sets the port from the command line — a property value in the source must
+// be a literal — switches it on, and returns; the program stays alive because
+// an active server is a live event source.
+//
+// Every event names the client it is about, as a small int counted from 1 in
+// order of arrival and never reused. `receive` fires once per line with the
+// delimiter already stripped, and the commands take the server's `name`, the
+// same way `grid_cell` takes a grid's.
 
-tcpserver echo
-  name = "echo"
-  on connect: on_connect
-  on disconnect: on_disconnect
-  on receive: on_receive
-  on error: on_error
-end
+namespace Tcpecho;
 
-sub main
-  echo.port = text_to_int(sys_arg(1))
-  echo.active = true
-  call print_text("echo server on port {echo.port}")
-end
+using Kiln.Net;
+using Kiln.System;
 
-sub on_connect(client: int)
-  call print_text("connect {client}")
-  call print_text("  from " + tcpserver_client_address("echo", client))
-end
+Tcpserver echo
+{
+    Name = "echo";
+    Connect += OnConnect;
+    Disconnect += OnDisconnect;
+    Receive += OnReceive;
+    Error += OnError;
+}
 
-sub on_disconnect(client: int)
-  call print_text("disconnect {client}")
-end
+public static class Tcpecho
+{
+    public static void Main()
+    {
+        echo.Port = TextToInt(SysArg(1));
+        echo.Active = true;
+        Console.WriteLine($"echo server on port {echo.Port}");
+    }
 
-sub on_receive(client: int, data: text)
-  if data = "quit"
-    call tcpserver_send_all("echo", "bye\n")
-    call quit()
-  else
-    call tcpserver_send("echo", client, "echo: {data}\n")
-  end
-end
+    public static void OnConnect(int client)
+    {
+        Console.WriteLine($"connect {client}");
+        Console.WriteLine("  from " + TcpserverClientAddress("echo", client));
+    }
 
-# A port already in use lands here. With no `error` handler wired the server
-# would say so on stderr and stop the program instead.
-sub on_error(message: text)
-  call print_text("error: {message}")
-  call quit()
-end
+    public static void OnDisconnect(int client)
+    {
+        Console.WriteLine($"disconnect {client}");
+    }
+
+    public static void OnReceive(int client, string data)
+    {
+        if (data == "quit")
+        {
+            TcpserverSendAll("echo", "bye\n");
+            Quit();
+        }
+        else
+        {
+            TcpserverSend("echo", client, $"echo: {data}\n");
+        }
+    }
+
+    // A port already in use lands here. With no `error` handler wired the server
+    // would say so on stderr and stop the program instead.
+    public static void OnError(string message)
+    {
+        Console.WriteLine($"error: {message}");
+        Quit();
+    }
+}

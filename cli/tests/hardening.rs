@@ -13,7 +13,7 @@ fn repo() -> PathBuf {
         .to_path_buf()
 }
 
-/// Build `examples/hello.kiln`, once per mode for the whole test binary.
+/// Build `examples/1x/hello.kiln`, once per mode for the whole test binary.
 ///
 /// Once, because tests run in parallel and two of them writing one output path
 /// race — one truncating the file the other is reading.
@@ -23,7 +23,7 @@ fn hello(release: bool) -> &'static Path {
     let cell = if release { &RELEASE } else { &DEBUG };
     cell.get_or_init(|| {
         let repo = repo();
-        let example = repo.join("examples").join("hello.kiln");
+        let example = repo.join("examples").join("1x").join("hello.kiln");
         let mode = if release { "release" } else { "debug" };
         let out = std::env::temp_dir().join(format!("kiln_hardening_{mode}"));
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_kiln"));

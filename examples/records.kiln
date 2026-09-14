@@ -1,50 +1,48 @@
-# Records: a name for a group of related values, and the way a subroutine
-# gives back more than one thing.
-module records
+// Records: a name for a group of related values, and the way a subroutine
+// gives back more than one thing.
 
-record point
-  x: int
-  y: int
-end
+namespace Records;
 
-record person
-  name: text
-  age: int
-  home: point
-end
+public record Point(int X, int Y);
 
-# Two values out of one call — the reason records exist at the language level
-# rather than as a library. `point{...}` reads as a value rather than a call.
-sub midpoint(a: point, b: point): point
-  return point{x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}
-end
+public record Person(string Name, int Age, Point Home);
 
-sub describe(p: person): text
-  let where = "{p.home.x},{p.home.y}"
-  return "{p.name} ({p.age}) at {where}"
-end
+public static class Records
+{
+    // Two values out of one call — the reason records exist at the language level
+    // rather than as a library. `point{...}` reads as a value rather than a call.
+    public static Point Midpoint(Point a, Point b)
+    {
+        return new Point((a.X + b.X) / 2, (a.Y + b.Y) / 2);
+    }
 
-sub main
-  let a = point{x: 0, y: 10}
-  let b = point{x: 8, y: 20}
-  let m = midpoint(a, b)
-  call print_text("midpoint x={m.x}")
-  call print_text("midpoint y={m.y}")
+    public static string Describe(Person p)
+    {
+        let where = $"{p.Home.X},{p.Home.Y}";
+        return $"{p.Name} ({p.Age}) at {where}";
+    }
 
-  let ada = person{name: "Ada", age: 36, home: point{x: 1, y: 2}}
-  call print_text(describe(ada))
-
-  # A record is a reference, exactly as a list is: `same` and `ada` are two
-  # names for one person, so a birthday is seen through both.
-  let same = ada
-  same.age = 37
-  call print_text(describe(ada))
-
-  # A list of records is a list like any other: the element is the same
-  # pointer a name holds, so `people[i]` and `ada` can be the same person.
-  var people: person[] = [ada]
-  people = append(people, person{name: "Grace", age: 45, home: point{x: 3, y: 4}})
-  for each p in people
-    call print_text("  {describe(p)}")
-  end
-end
+    public static void Main()
+    {
+        let a = new Point(0, 10);
+        let b = new Point(8, 20);
+        let m = Midpoint(a, b);
+        Console.WriteLine($"midpoint x={m.X}");
+        Console.WriteLine($"midpoint y={m.Y}");
+        let ada = new Person("Ada", 36, new Point(1, 2));
+        Console.WriteLine(Describe(ada));
+        // A record is a reference, exactly as a list is: `same` and `ada` are two
+        // names for one person, so a birthday is seen through both.
+        let same = ada;
+        same.Age = 37;
+        Console.WriteLine(Describe(ada));
+        // A list of records is a list like any other: the element is the same
+        // pointer a name holds, so `people[i]` and `ada` can be the same person.
+        List<Person> people = [ada];
+        people.Add(new Person("Grace", 45, new Point(3, 4)));
+        foreach (var p in people)
+        {
+            Console.WriteLine($"  {Describe(p)}");
+        }
+    }
+}

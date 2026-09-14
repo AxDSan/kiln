@@ -1,8 +1,14 @@
-# Reaching for a symbol the library does not export is a named run-time error.
-module dllbadsym
+// Reaching for a symbol the library does not export is a named run-time error.
 
-dll nope(x: int): int from "mathdll" as "does_not_exist"
+namespace Dllbadsym;
 
-sub main
-  call print_int(nope(1))
-end
+public static class Dllbadsym
+{
+    [Dll("mathdll", Entry = "does_not_exist")]
+    public static extern int Nope(int x);
+
+    public static void Main()
+    {
+        Console.WriteLine(Nope(1));
+    }
+}

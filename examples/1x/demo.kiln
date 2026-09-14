@@ -1,0 +1,34 @@
+# A tour of the core commands: text, numbers, maths and dates, and calls used
+# as expressions — many of them written left-to-right with the method dot.
+#
+#   kiln run examples/demo.kiln
+module demo
+
+sub main
+  # --- text ---
+  # `x.f(a)` is `f(x, a)`, so a chain reads in the order it happens.
+  let greeting = "Hello, " + "Kiln"
+  call print_text(greeting.uppercase())
+  call print_int(greeting.length())
+  call print_text("a-b-c-d".replace("-", "/"))
+  call print_text("   padded   ".trim())
+  call print_text("stressed".reverse())
+
+  # --- integer math ---
+  call print_int(max_int(3, 9))
+  call print_int(pow_int(2, 10))
+  call print_int(17 % 5)
+
+  # --- floating point (no implicit conversion: convert explicitly) ---
+  let two: double = int_to_double(2)
+  let root = sqrt(two)
+  call print_double(root)
+  call print_double(round(pow(root, 2.0)))
+
+  # --- conversions round-trip ---
+  let n = text_to_int("42")
+  call print_text("n = {n}")
+
+  # --- datetime (year of the epoch, UTC) ---
+  call print_int(year(int_to_int64(0)))
+end

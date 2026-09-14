@@ -1,0 +1,81 @@
+# Running other programs: libs/process.
+#
+# The distinction the library is built around is "could not start" (-1 or
+# handle 0, with an error code) versus "ran and failed" (its real exit status,
+# no error).
+module processlib
+use process
+
+sub main
+  # --- run something and look at how it ended ---
+  let ok = process_run("true")
+  call print_text("true -> {ok}")
+
+  let bad = process_run("exit 3")
+  call print_text("exit 3 -> {bad}")
+  call print_text("  error code {last_error_code()}")
+
+  let missing = process_run("/nonexistent/program")
+  call print_text("missing -> {missing}")
+  if last_error_code() <> 0
+    call print_text("  it could not start, and said so")
+  end
+
+  # --- capture what it said ---
+  call print_text(process_run_capture("echo captured output").trim())
+
+  # --- a child kept alive, talked to line by line ---
+  var h = process_start("while read line; do echo \"got: $line\"; done")
+  if h = 0
+    call print_text("could not start the child")
+  else
+    call print_text("started")
+    if process_write_line(h, "one")
+      call print_text(process_read_line(h))
+    end
+    if process_write_line(h, "two")
+      call print_text(process_read_line(h))
+    end
+    if process_is_running(h)
+      call print_text("still running")
+    end
+    let status = process_wait(h)
+    call print_text("child exit -> {status}")
+    if process_is_running(h)
+      call print_text("BUG: still running after wait")
+    else
+      call print_text("finished")
+    end
+    if process_close(h)
+      call print_text("closed")
+    end
+  end
+
+  # --- reading to the end: "" is ambiguous, so the predicate sits beside it ---
+  # A raw literal carries the backslashes through untouched, so printf is the
+  # one that turns `\n` into newlines.
+  var lines = process_start(r"printf 'alpha\nbeta\n\ngamma\n'")
+  var count: int = 0
+  while count < 10
+    let line = process_read_line(lines)
+    if process_at_end(lines)
+      break
+    end
+    call print_text("line: [{line}]")
+    increment count
+  end
+  call print_text("end of output")
+  if process_close(lines)
+    call print_text("reader closed")
+  end
+
+  # --- a child that outlives its usefulness ---
+  let sleeper = process_start("sleep 30")
+  if process_is_running(sleeper)
+    call print_text("sleeper is running")
+  end
+  if process_kill(sleeper)
+    call print_text("sleeper killed")
+  end
+  call print_int(process_close_all())
+end

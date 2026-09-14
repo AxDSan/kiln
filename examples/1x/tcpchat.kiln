@@ -1,0 +1,100 @@
+# A chat client: a form, a `tcpclient`, and nothing that blocks.
+#
+#   kiln run examples/tcpecho.kiln 7000     (in one terminal)
+#   kiln run examples/tcpchat.kiln          (in another)
+#
+# Connect is non-blocking: `Connect` asks, and the answer arrives later as
+# `connect` or `error` while the window keeps painting. `receive` hands the
+# handler each line the server sent, delimiter stripped, and `send` puts a
+# line on the wire — the client speaks lines because `delimiter` is a
+# newline, which is the default.
+module tcpchat
+use ui
+use net
+
+tcpclient link
+  name = "link"
+  host = "127.0.0.1"
+  port = 7000
+  on connect: on_connect
+  on disconnect: on_disconnect
+  on receive: on_receive
+  on error: on_error
+end
+
+form win
+  title = "Chat"
+  width = 480
+  height = 360
+
+  memo log
+    left = 12
+    top = 12
+    width = 456
+    height = 250
+    enabled = false
+  end
+
+  editbox entry
+    left = 12
+    top = 274
+    width = 300
+  end
+
+  button send
+    text = "Send"
+    left = 320
+    top = 274
+    width = 60
+    on click: on_send
+  end
+
+  button connect
+    text = "Connect"
+    left = 388
+    top = 274
+    width = 80
+    on click: on_toggle
+  end
+end
+
+sub say(line: text)
+  log.text &= "{line}\n"
+end
+
+sub on_toggle
+  if link.connected
+    link.active = false
+  else
+    call say("connecting...")
+    link.active = true
+  end
+end
+
+sub on_send
+  if tcpclient_send("link", entry.text + "\n")
+    call say("> {entry.text}")
+    entry.text = ""
+  else
+    call say("not sent: {last_error_text()}")
+  end
+end
+
+sub on_connect
+  call say("connected")
+  connect.text = "Disconnect"
+end
+
+sub on_disconnect
+  call say("disconnected")
+  connect.text = "Connect"
+end
+
+sub on_receive(data: text)
+  call say("< {data}")
+end
+
+sub on_error(message: text)
+  call say("error: {message}")
+  connect.text = "Connect"
+end

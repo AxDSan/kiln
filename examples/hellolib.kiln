@@ -1,8 +1,14 @@
-# Uses a third-party support library (libs/hello) via the ABI.
-module hellolib
-use hello
+// Uses a third-party support library (libs/hello) via the ABI.
 
-sub main
-  call print_text(greet("Kiln"))
-  call print_text(greet("world").uppercase())   # read left to right: greet, then shout
-end
+namespace Hellolib;
+
+using Kiln.Hello;
+
+public static class Hellolib
+{
+    public static void Main()
+    {
+        Console.WriteLine(Greet("Kiln"));
+        Console.WriteLine(Uppercase(Greet("world")));
+    }
+}

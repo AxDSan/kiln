@@ -1,0 +1,119 @@
+# Settings files — the `config` support library.
+#
+#   kiln run examples/configlib.kiln
+#
+# INI is the format a person can open in a text editor and understand without
+# being taught anything first: a [section], then `key = value` lines, and `#`
+# for a comment. This program writes one, reads it back, and walks it.
+#
+# The scratch file lives in /tmp, so running this leaves the repository clean.
+module configlib
+use config
+
+sub main
+  let path = "/tmp/kiln-configlib.ini"
+
+  # --- write a settings file --------------------------------------------
+  # config_create remembers the path; nothing touches the disk until save.
+  var h = config_create(path)
+  if h = 0
+    call print_text("cannot create: {last_error_text()}")
+  else
+    if config_set(h, "window", "title", "Kiln")
+      call print_text("set window.title")
+    end
+    if config_set_int(h, "window", "width", 1024)
+      call print_text("set window.width")
+    end
+    if config_set_int(h, "window", "height", 768)
+      call print_text("set window.height")
+    end
+    if config_set_bool(h, "window", "maximized", false)
+      call print_text("set window.maximized")
+    end
+    if config_set_double(h, "editor", "line_spacing", 1.25)
+      call print_text("set editor.line_spacing")
+    end
+    if config_set(h, "editor", "font", "Iosevka")
+      call print_text("set editor.font")
+    end
+
+    if config_save(h)
+      call print_text("saved")
+    else
+      call print_text("cannot save: {last_error_text()}")
+    end
+    if config_close(h)
+      call print_text("closed")
+    end
+  end
+
+  # --- read it back ------------------------------------------------------
+  h = config_open(path)
+  call print_text(config_path(h))
+  call print_text(config_get(h, "window", "title"))
+  call print_int(config_get_int(h, "window", "width", 640))
+  call print_double(config_get_double(h, "editor", "line_spacing", 1.0))
+  if config_get_bool(h, "window", "maximized", true)
+    call print_text("maximized")
+  else
+    call print_text("not maximized")
+  end
+
+  # A missing key is not a failure: the answer is the fallback you supplied,
+  # and last_error_code() stays 0. config_has is the predicate that tells
+  # "not set" apart from "set to exactly that value".
+  call print_int(config_get_int(h, "window", "depth", 32))
+  call print_int(last_error_code())
+  if config_has(h, "window", "depth")
+    call print_text("depth is set")
+  else
+    call print_text("depth is not set")
+  end
+  call print_text("[" + config_get(h, "window", "nothing_here") + "]")
+
+  # A missing FILE, on the other hand, is a failure: 0, and a reason.
+  call print_int(config_open("/tmp/kiln-configlib-absent.ini"))
+  call print_text(last_error_text())
+
+  # --- walk it: a count plus an indexed accessor -------------------------
+  for s in 1..config_section_count(h)
+    let name = config_section_at(h, s)
+    call print_text("[{name}]")
+    for k in 1..config_key_count(h, name)
+      let key = config_key_at(h, name, k)
+      call print_text("  {key} = {config_get(h, name, key)}")
+    end
+  end
+
+  # --- change one setting, leaving everything else where it was ----------
+  if config_set_int(h, "window", "width", 1280)
+    call print_text("width changed")
+  end
+  if config_remove(h, "editor", "font")
+    call print_text("removed editor.font")
+  end
+  # Removing something that was never there is a genuine "no", not a failure:
+  # false with error code 0.
+  if not config_remove(h, "editor", "font")
+    call print_text("nothing to remove, code {last_error_code()}")
+  end
+  if not config_save(h)
+    call print_text("cannot save: {last_error_text()}")
+  end
+
+  h = config_open(path)
+  call print_int(config_get_int(h, "window", "width", 0))
+  call print_int(config_key_count(h, "editor"))
+
+  # Section names match the way a person typed them, not the way a computer
+  # would insist on.
+  if config_has_section(h, "WINDOW")
+    call print_text("the window section is there")
+  end
+  if not config_has_section(h, "toolbar")
+    call print_text("the toolbar section is not")
+  end
+
+  call print_int(config_close_all())
+end

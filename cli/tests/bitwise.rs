@@ -6,7 +6,7 @@
 //! division tricks, and every one of the win kit's ~880 constants was a
 //! decimal with the hex in a comment beside it.
 //!
-//! `examples/bitwise.kiln` is a self-checking transcript: every line prints `ok`
+//! `examples/1x/bitwise.kiln` is a self-checking transcript: every line prints `ok`
 //! or `FAIL`. The tests below run it and then pin the handful of answers that
 //! would be silently wrong rather than loudly wrong if a rule slipped — the
 //! width of a literal, the sign of a shift, the precedence of a flag test —
@@ -72,15 +72,15 @@ fn value_of(dir: &Path, tag: &str, decls: &str, printer: &str, expr: &str) -> St
 
 // --- the transcript ---------------------------------------------------------
 
-/// The whole surface at once: `examples/bitwise.kiln` checks its own answers.
+/// The whole surface at once: `examples/1x/bitwise.kiln` checks its own answers.
 #[test]
 fn the_bitwise_example_passes_its_own_checks() {
     let dir = scratch("example");
     let bin = dir.join("bitwise");
-    let built = build(&repo().join("examples/bitwise.kiln"), &bin);
+    let built = build(&repo().join("examples/1x/bitwise.kiln"), &bin);
     assert!(
         built.status.success(),
-        "examples/bitwise.kiln did not build:\n{}",
+        "examples/1x/bitwise.kiln did not build:\n{}",
         String::from_utf8_lossy(&built.stderr)
     );
     let out = Command::new(&bin).output().expect("run the example");

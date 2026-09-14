@@ -1,63 +1,75 @@
-module controls
-use ui
+namespace Controls;
 
-form win
-  title = "Real controls"
-  width = 420
-  height = 300
-  background_color = "#ffffff"
+using Kiln.Ui;
 
-  label lbl
-    text = "Name:"
-    left = 20
-    top = 20
-    color = "#1f2328"
-  end
+public partial form Win
+{
+    Title = "Real controls";
+    Width = 420;
+    Height = 300;
+    BackgroundColor = "#ffffff";
 
-  editbox nameBox
-    text = "Ada"
-    left = 20
-    top = 44
-    width = 200
-    height = 26
-  end
+    Label lbl
+    {
+        Text = "Name:";
+        Left = 20;
+        Top = 20;
+        Color = "#1f2328";
+    }
 
-  checkbox agree
-    text = "I agree"
-    checked = true
-    left = 20
-    top = 84
-  end
+    Editbox nameBox
+    {
+        Text = "Ada";
+        Left = 20;
+        Top = 44;
+        Width = 200;
+        Height = 26;
+    }
 
-  groupbox grp
-    text = "Options"
-    left = 20
-    top = 120
-    width = 240
-    height = 90
-  end
+    Checkbox agree
+    {
+        Text = "I agree";
+        Checked = true;
+        Left = 20;
+        Top = 84;
+    }
 
-  progressbar bar
-    value = 65
-    left = 20
-    top = 230
-    width = 240
-    height = 16
-  end
+    Groupbox grp
+    {
+        Text = "Options";
+        Left = 20;
+        Top = 120;
+        Width = 240;
+        Height = 90;
+    }
 
-  button go
-    text = "Go"
-    left = 300
-    top = 230
-    width = 90
-    height = 30
-    background_color = "#1e60d5"
-    color = "#ffffff"
-    border_radius = 6
-    on click: on_go
-  end
-end
+    Progressbar bar
+    {
+        Value = 65;
+        Left = 20;
+        Top = 230;
+        Width = 240;
+        Height = 16;
+    }
 
-sub on_go
-  call print_text("name = {nameBox.text}")
-end
+    Button go
+    {
+        Text = "Go";
+        Left = 300;
+        Top = 230;
+        Width = 90;
+        Height = 30;
+        BackgroundColor = "#1e60d5";
+        Color = "#ffffff";
+        BorderRadius = 6;
+        Click += OnGo;
+    }
+}
+
+public partial form Win
+{
+    void OnGo()
+    {
+        Console.WriteLine($"name = {nameBox.Text}");
+    }
+}

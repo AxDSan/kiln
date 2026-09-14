@@ -8,7 +8,7 @@
 //! address nothing in the language could call — and it is the single operation
 //! a COM vtable is made of.
 //!
-//! The library under test is `examples/dll/plug.c`, built as `libplug.so` here
+//! The library under test is `examples/1x/dll/plug.c`, built as `libplug.so` here
 //! and as `plug.dll` for the Windows case. Neither program links against it and
 //! neither declares a single one of its functions.
 
@@ -69,7 +69,7 @@ fn build_source(dir: &Path, body: &str) -> (bool, String) {
 
 // --- the POSIX path: dlopen + dlsym + call through --------------------------
 
-/// The whole happy path on Linux. `examples/dll/plug.kiln` opens `libplug.so`
+/// The whole happy path on Linux. `examples/1x/dll/plug.kiln` opens `libplug.so`
 /// with `dlopen`, fetches four addresses with `dlsym`, and calls each one:
 ///
 /// * a value in and a value out (`add`),
@@ -84,13 +84,13 @@ fn dlopen_dlsym_and_call_through() {
     let status = Command::new("clang")
         .args(["-shared", "-fPIC", "-o"])
         .arg(dir.join("libplug.so"))
-        .arg(repo().join("examples/dll/plug.c"))
+        .arg(repo().join("examples/1x/dll/plug.c"))
         .status()
         .expect("run clang for libplug.so");
     assert!(status.success(), "clang failed to build libplug.so");
 
     let bin = dir.join("plug");
-    let built = build(&repo().join("examples/dll/plug.kiln"), &bin, &[]);
+    let built = build(&repo().join("examples/1x/dll/plug.kiln"), &bin, &[]);
     assert!(
         built.status.success(),
         "plug.kiln did not build:\n{}",
@@ -317,7 +317,7 @@ fn mingw_present() -> bool {
 
 /// The gap this stage closed, proved where it was found: `use win` gives a
 /// program `LoadLibraryA` and `GetProcAddress`, and until now the `ptr` they
-/// answered with was a dead end. `examples/dll/plugwin.kiln` loads a DLL it does
+/// answered with was a dead end. `examples/1x/dll/plugwin.kiln` loads a DLL it does
 /// not link against, fetches three exports by name, and calls all three —
 /// cross-built with mingw and run under wine, because a Win32 call cannot be
 /// proved by reading it.
@@ -330,14 +330,14 @@ fn loadlibrary_getprocaddress_and_call_through_under_wine() {
     let status = Command::new("x86_64-w64-mingw32-gcc")
         .args(["-shared", "-o"])
         .arg(dir.join("plug.dll"))
-        .arg(repo().join("examples/dll/plug.c"))
+        .arg(repo().join("examples/1x/dll/plug.c"))
         .status()
         .expect("run mingw for plug.dll");
     assert!(status.success(), "mingw failed to build plug.dll");
 
     let out = dir.join("plugwin");
     let built = build(
-        &repo().join("examples/dll/plugwin.kiln"),
+        &repo().join("examples/1x/dll/plugwin.kiln"),
         &out,
         &["--os", "windows"],
     );

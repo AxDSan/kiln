@@ -1,40 +1,49 @@
-# A window with a label and a button, and a handler wired to its click.
-#
-# This is exactly the shape the visual designer reads and writes, so you can
-# open it in Studio, drag things around, and the file stays yours.
-#
-#   kiln run examples/form.kiln
-module hello_form
-use ui
+// A window with a label and a button, and a handler wired to its click.
+//
+// This is exactly the shape the visual designer reads and writes, so you can
+// open it in Studio, drag things around, and the file stays yours.
+//
+//   kiln run examples/form.kiln
 
-form main_window
-  title  = "Kiln"
-  width  = 480
-  height = 300
-  background_color = "#1e2233"
+namespace HelloForm;
 
-  label greeting
-    text  = "Click the button."
-    left  = 40
-    top   = 40
-    width = 400
-    color = "#ffffff"
-  end
+using Kiln.Ui;
 
-  button ok_button
-    text   = "Click me"
-    left   = 40
-    top    = 110
-    width  = 160
-    height = 44
-    background_color = "#4a86e8"
-    border_radius = 8
-    on click: on_ok_click
-  end
-end
+public partial form MainWindow
+{
+    Title = "Kiln";
+    Width = 480;
+    Height = 300;
+    BackgroundColor = "#1e2233";
 
-# The click handler is an ordinary subroutine — bound by function pointer, so
-# its name never reaches the shipped binary (G8).
-sub on_ok_click
-  call print_text("button clicked!")
-end
+    Label greeting
+    {
+        Text = "Click the button.";
+        Left = 40;
+        Top = 40;
+        Width = 400;
+        Color = "#ffffff";
+    }
+
+    Button okButton
+    {
+        Text = "Click me";
+        Left = 40;
+        Top = 110;
+        Width = 160;
+        Height = 44;
+        BackgroundColor = "#4a86e8";
+        BorderRadius = 8;
+        Click += OnOkClick;
+    }
+}
+
+public partial form MainWindow
+{
+    // The click handler is an ordinary subroutine — bound by function pointer, so
+    // its name never reaches the shipped binary (G8).
+    void OnOkClick()
+    {
+        Console.WriteLine("button clicked!");
+    }
+}

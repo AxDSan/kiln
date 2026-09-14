@@ -1,25 +1,35 @@
-# A console program that outlives `main`.
-#
-# `main` prints one line and returns — and the program keeps running, because
-# the timer is a live event source and the runtime's loop stays in it until
-# something calls `quit`. A timer has no rectangle, so it is declared here at
-# module level rather than inside a form; a program that waits for something
-# needs no window at all, which is the whole point.
-module loopdemo
+// A console program that outlives `main`.
+//
+// `main` prints one line and returns — and the program keeps running, because
+// the timer is a live event source and the runtime's loop stays in it until
+// something calls `quit`. A timer has no rectangle, so it is declared here at
+// module level rather than inside a form; a program that waits for something
+// needs no window at all, which is the whole point.
 
-var ticks: int = 0
+namespace Loopdemo;
 
-timer ticker
-  interval = 20
-  on tick: on_tick
-end
+Timer ticker
+{
+    Interval = 20;
+    Tick += OnTick;
+}
 
-sub main
-  call print_text("main returned; the timer keeps the program alive")
-end
+public static class Loopdemo
+{
+    private int ticks = 0;
 
-sub on_tick
-  increment ticks
-  call print_text("tick {ticks}")
-  call quit() if ticks >= 3
-end
+    public static void Main()
+    {
+        Console.WriteLine("main returned; the timer keeps the program alive");
+    }
+
+    public static void OnTick()
+    {
+        ticks = ticks + 1;
+        Console.WriteLine($"tick {ticks}");
+        if (ticks >= 3)
+        {
+            Quit();
+        }
+    }
+}

@@ -153,7 +153,7 @@ fn a_new_project_carries_no_placeholders() {
 fn a_timer_program_outlives_main_and_quits_itself() {
     let home = scratch("timer_home");
     let root = scratch("timer_root");
-    let example = repo().join("examples/loopdemo.kiln");
+    let example = repo().join("examples/1x/loopdemo.kiln");
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args(["run", example.to_str().unwrap()])
