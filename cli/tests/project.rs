@@ -168,6 +168,13 @@ fn the_projects_target_yields_to_the_flag() {
         .unwrap()
         .replace("target: console", "target: sharedlib");
     std::fs::write(&proj, text).unwrap();
+    // Library targets are 1.x's until Kiln 2 learns to export, so the entry
+    // is a 1.x module with no target of its own.
+    std::fs::write(
+        dir.join("main.kiln"),
+        "module kiln_proj_target\n\nsub add(a: int, b: int): int\n  return a + b\nend\n\nsub main\n  call print_int(add(1, 2))\nend\n",
+    )
+    .unwrap();
 
     let built = kiln(&repo(), &["build", dir.to_str().unwrap()]);
     assert!(built.status.success(), "{}", stderr(&built));
@@ -274,6 +281,6 @@ fn a_gui_project_is_untitled_until_titled() {
     );
     assert!(out.status.success(), "{}", stderr(&out));
     let src = std::fs::read_to_string(dir.join("main.kiln")).unwrap();
-    assert!(src.contains("title = \"Inventory\""), "{src}");
+    assert!(src.contains("Title = \"Inventory\";"), "{src}");
     let _ = std::fs::remove_dir_all(&dir);
 }
