@@ -1384,7 +1384,7 @@ fn the_module_name_follows_the_directory() {
         "dashes are not legal in an identifier: {text}"
     );
     let src = std::fs::read_to_string(dir.join("main.kiln")).expect("read");
-    assert!(src.contains("module kiln_my_app"));
+    assert!(src.contains("namespace kiln_my_app;"));
     assert!(!src.contains("__MODULE__"), "placeholder left behind");
     let _ = std::fs::remove_dir_all(&dir);
 }
