@@ -375,6 +375,18 @@ pub struct Module {
     /// resolves a `dll`. Anything not listed — libc, the runtime — is a
     /// symbol the link already provides.
     pub foreign_libraries: std::collections::BTreeSet<String>,
+    /// What a library exports to a C host, in declaration order: the plain
+    /// symbol, its parameters and its return type as C sees them. Empty for a
+    /// program. The CLI writes the library's header from this.
+    pub exports: Vec<ExportDef>,
+}
+
+/// One function a library exports under a plain C name.
+#[derive(Clone, Debug)]
+pub struct ExportDef {
+    pub symbol: String,
+    pub params: Vec<(String, TyId)>,
+    pub ret: TyId,
 }
 
 impl Module {
@@ -391,6 +403,7 @@ impl Module {
             source: None,
             allocator: Allocator::Libc,
             foreign_libraries: Default::default(),
+            exports: Vec::new(),
         }
     }
 

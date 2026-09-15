@@ -1,24 +1,28 @@
-# A shared library: no entry point. Every `sub` is exported under its own name,
-# and `__MODULE___init` initialises module variables when the host is ready.
-# The build writes `__MODULE__.h` beside the library — consumer.cpp includes it.
-module __MODULE__
-target sharedlib
+// A shared library: no entry point. Every `public static` method of a
+// `public static class` is exported under its own name, and `__MODULE___init`
+// sets the static fields when the host is ready. The build writes
+// `__MODULE__.h` beside the library — consumer.cpp includes it.
+//
+//   kiln build main.kiln --target sharedlib -o lib__MODULE__.so
 
-var greetings: int = 0
+namespace __MODULE__;
 
-sub greet
-  call print_text("Hello from a shared library.")
-end
+public static class Library
+{
+    static int greetings = 0;
 
-sub add(a: int, b: int): int
-  return a + b
-end
+    public static void Greet()
+    {
+        Console.WriteLine("Hello from a shared library.");
+    }
 
-sub greeting(name: text): text
-  greetings += 1
-  return "Hello, " + name + "!"
-end
+    public static int Add(int a, int b) => a + b;
 
-sub greetings_so_far: int
-  return greetings
-end
+    public static string Greeting(string name)
+    {
+        greetings += 1;
+        return $"Hello, {name}!";
+    }
+
+    public static int GreetingsSoFar() => greetings;
+}

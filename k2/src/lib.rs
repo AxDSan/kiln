@@ -76,6 +76,23 @@ pub fn compile_named(
     Ok(m)
 }
 
+/// Parse and lower for a chosen artifact and machine — a library, or a program
+/// for another operating system or architecture.
+pub fn compile_opts(
+    src: &str,
+    runtime: Runtime,
+    registry: Option<&kiln_ir::Registry>,
+    source: Option<&str>,
+    opts: &lower::Options,
+) -> Result<kiln_kir::Module, String> {
+    let toks = lexer::lex(src).map_err(|e| format!("{}:{}: {}", e.line, e.col, e.msg))?;
+    let program =
+        parser::parse(toks).map_err(|e| format!("{}:{}: {}", e.span.line, e.span.col, e.msg))?;
+    let mut m = lower::lower_opts(&program, runtime, registry, opts)?;
+    m.source = source.map(|s| s.to_string());
+    Ok(m)
+}
+
 /// Parse and lower to textual LLVM IR for a chosen runtime.
 pub fn compile_to_llvm_with(src: &str, runtime: Runtime) -> Result<String, String> {
     Ok(kiln_kir::emit::emit(&compile_with(src, runtime)?))

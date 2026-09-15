@@ -726,9 +726,26 @@ fn cmd_k2(rest: &[String]) -> i32 {
     let mut emit_ir = false;
     let mut use_runtime = false;
     let mut release = false;
+    let mut goal = K2Target::host();
     let mut it = rest.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
+            "--os" => match it.next().map(String::as_str) {
+                Some("windows") => goal.os = Os::Windows,
+                Some("linux") => goal.os = Os::Linux,
+                other => {
+                    eprintln!("kiln k2: unknown `--os {}`", other.unwrap_or(""));
+                    return 2;
+                }
+            },
+            "--arch" => match it.next().map(String::as_str) {
+                Some("x86") => goal.arch = Arch::X86,
+                Some("x86_64") => goal.arch = Arch::X86_64,
+                other => {
+                    eprintln!("kiln k2: unknown `--arch {}`", other.unwrap_or(""));
+                    return 2;
+                }
+            },
             "--run" => run = true,
             "--emit-ir" => emit_ir = true,
             "--runtime" => use_runtime = true,
@@ -745,18 +762,40 @@ fn cmd_k2(rest: &[String]) -> i32 {
         eprintln!("usage: kiln k2 <in.kiln> [-o out] [--run] [--emit-ir] [--runtime] [--release]");
         return 2;
     };
-    build_k2(input, output, run, emit_ir, use_runtime, release)
+    build_k2_for(input, output, run, emit_ir, use_runtime, release, goal)
+}
+
+/// What a Kiln 2 build is for, beyond its source: the artifact, the machine,
+/// and where a library's header goes. `kiln k2` builds for this machine;
+/// `kiln build` fills this from its flags and the project file.
+struct K2Target {
+    target: Target,
+    os: Os,
+    arch: Arch,
+    header: Option<PathBuf>,
+}
+
+impl K2Target {
+    fn host() -> K2Target {
+        K2Target {
+            target: Target::Console,
+            os: Os::host(),
+            arch: Arch::host(),
+            header: None,
+        }
+    }
 }
 
 /// Build a Kiln 2 program. `kiln build` calls this for a K2 file with the
 /// runtime linked, which is what a program is; `kiln k2` exposes the switches.
-fn build_k2(
+fn build_k2_for(
     input: String,
     output: Option<String>,
     run: bool,
     emit_ir: bool,
     use_runtime: bool,
     release: bool,
+    goal: K2Target,
 ) -> i32 {
     let src = match std::fs::read_to_string(&input) {
         Ok(s) => s,
@@ -765,6 +804,11 @@ fn build_k2(
             return 1;
         }
     };
+    let library = !goal.target.is_executable();
+    let cross = goal.os != Os::host() || goal.arch != Arch::host();
+    // A library and a program for another machine are always built against the
+    // runtime: there is no libc-only shim for either.
+    let use_runtime = use_runtime || library || cross;
     let runtime = if use_runtime {
         kiln_k2::Runtime::Kiln
     } else {
@@ -774,11 +818,22 @@ fn build_k2(
     // what makes `File.ReadText(p)` resolve to the `file_read_text` command.
     let uses = k2_uses(&src);
     let registry = find_repo_root().and_then(|root| {
-        libload::load_metadata(&root, &uses, Arch::host())
+        libload::load_metadata(&root, &uses, goal.arch)
             .ok()
             .map(|p| p.registry)
     });
-    let module = match kiln_k2::compile_named(&src, runtime, registry.as_ref(), Some(&input)) {
+    let opts = kiln_k2::lower::Options {
+        kind: match goal.target {
+            Target::SharedLib => kiln_k2::ModuleKind::SharedLib,
+            Target::StaticLib => kiln_k2::ModuleKind::StaticLib,
+            _ => kiln_k2::ModuleKind::Console,
+        },
+        target: kiln_kir::Target {
+            ptr_bits: if goal.arch == Arch::X86 { 32 } else { 64 },
+            windows: goal.os == Os::Windows,
+        },
+    };
+    let module = match kiln_k2::compile_opts(&src, runtime, registry.as_ref(), Some(&input), &opts) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("kiln k2: {input}:{e}");
@@ -788,11 +843,33 @@ fn build_k2(
     // A program with a form is a GUI program: it needs the ui library, and the
     // runtime enters its event loop.
     let is_gui = module.kind == kiln_k2::ModuleKind::Gui;
+    if is_gui && goal.arch == Arch::X86 {
+        eprintln!(
+            "kiln: a GUI cannot be built for x86 yet — the vendored UI stack \
+             (RmlUi, SDL2, freetype) is 64-bit only. Use a console program or a \
+             library, or build for x86_64."
+        );
+        return 2;
+    }
     // A command lives in the runtime, and some are reached without a `using`:
     // `s.Length` is core's `length`. Link the runtime whenever one is called,
     // rather than making the reader know which members are commands.
     let use_runtime = use_runtime || module.calls_commands() || !module.foreign_libraries.is_empty();
-    let ll = kiln_kir::emit::emit(&module);
+    let mut ll = kiln_kir::emit::emit(&module);
+    // A program carries the pictures its form names, as a 1.x one does; a
+    // Windows program carries the table even when it is empty, because a PE
+    // link has no weak symbol for the UI library to find missing.
+    if !library {
+        match render_resources(&k2_resources(&src), Path::new(&input)) {
+            Ok(Some(table)) => ll.push_str(&table),
+            Ok(None) if goal.os == Os::Windows => ll.push_str(EMPTY_RESOURCE_TABLE),
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("kiln: {e}");
+                return 1;
+            }
+        }
+    }
     if emit_ir {
         print!("{ll}");
         return 0;
@@ -801,8 +878,12 @@ fn build_k2(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("a");
-    let out = output.unwrap_or_else(|| stem.to_string());
-    let ll_path = std::env::temp_dir().join(format!("{stem}.k2.ll"));
+    let out = output.unwrap_or_else(|| {
+        default_output(Path::new(&input), None, goal.target, goal.os)
+            .to_string_lossy()
+            .to_string()
+    });
+    let ll_path = std::env::temp_dir().join(format!("{stem}.{}.k2.ll", std::process::id()));
     if let Err(e) = std::fs::write(&ll_path, &ll) {
         eprintln!("kiln k2: {e}");
         return 1;
@@ -819,29 +900,76 @@ fn build_k2(
         if is_gui && !uses.iter().any(|u| u == "ui") {
             uses.push("ui".to_string());
         }
-        let plan = match libload::load(&root, &uses) {
+        let plan = if goal.os == Os::host() {
+            libload::load(&root, &uses)
+        } else {
+            libload::load_cross(&root, &uses, goal.arch)
+        };
+        let mut plan = match plan {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("kiln k2: {e}");
                 return 1;
             }
         };
-        let out_path = std::path::PathBuf::from(&out);
-        if clang_link(
-            &ll_path,
-            &root,
-            &plan,
-            &out_path,
-            if is_gui { Target::Gui } else { Target::Console },
-            Os::Linux,
-            Arch::host(),
-            release,
-        )
-        .is_err()
-        {
+        for (kit, platforms) in &plan.gated {
+            if !platforms.iter().any(|p| p == goal.os.as_platform()) {
+                eprintln!(
+                    "kiln: kit `{kit}` supports {} — it cannot be built for {}",
+                    platforms.join(", "),
+                    goal.os.as_platform()
+                );
+                return 1;
+            }
+        }
+        // A shared library exporting `DllAttach`/`DllDetach` gets the platform
+        // loader entry, exactly as a 1.x one with `dll_attach` does.
+        if goal.target == Target::SharedLib {
+            let has = |s: &str| module.exports.iter().any(|e| e.symbol == s);
+            if has("dll_attach") || has("dll_detach") {
+                plan.build.defines.push("KN_DLLMAIN".into());
+                plan.build
+                    .defines
+                    .push(format!("KN_MODULE_INIT={}_init", module.name.replace('.', "_")));
+                if has("dll_attach") {
+                    plan.build.defines.push("KN_HAS_ATTACH".into());
+                }
+                if has("dll_detach") {
+                    plan.build.defines.push("KN_HAS_DETACH".into());
+                }
+            }
+        }
+        let target = if is_gui { Target::Gui } else { goal.target };
+        let out_path = output_for_os(std::path::PathBuf::from(&out), target, goal.os);
+        let linked = clang_link(
+            &ll_path, &root, &plan, &out_path, target, goal.os, goal.arch, release,
+        );
+        let _ = std::fs::remove_file(&ll_path);
+        if linked.is_err() {
             return 1;
         }
+        if library {
+            let name = module.name.replace('.', "_");
+            let header_path = goal
+                .header
+                .clone()
+                .unwrap_or_else(|| header::default_path(&out_path, &name));
+            if let Err(e) = std::fs::write(&header_path, header::render_k2(&module, &name)) {
+                eprintln!("kiln: cannot write {}: {e}", header_path.display());
+                return 1;
+            }
+            eprintln!("kiln: wrote {}", out_path.display());
+            eprintln!("kiln: wrote {}", header_path.display());
+            if goal.os == Os::Windows && goal.target == Target::SharedLib {
+                eprintln!("kiln: wrote {}", implib_path(&out_path).display());
+            }
+            return 0;
+        }
         if run {
+            if cross {
+                eprintln!("kiln: cannot run a program built for another machine here");
+                return 2;
+            }
             let run_path = if out_path.is_absolute() {
                 out_path.clone()
             } else {
@@ -859,7 +987,7 @@ fn build_k2(
     }
 
     // Without it, a one-line shim provides `main` so the libc-only subset links.
-    let shim_path = std::env::temp_dir().join(format!("{stem}.k2.shim.c"));
+    let shim_path = std::env::temp_dir().join(format!("{stem}.{}.k2.shim.c", std::process::id()));
     if let Err(e) = std::fs::write(
         &shim_path,
         "extern int ECodeStart(void); int main(void){return ECodeStart();}\n",
@@ -875,6 +1003,8 @@ fn build_k2(
         .arg("-o")
         .arg(&out)
         .status();
+    let _ = std::fs::remove_file(&ll_path);
+    let _ = std::fs::remove_file(&shim_path);
     match status {
         Ok(s) if s.success() => {}
         Ok(_) => {
@@ -1457,32 +1587,45 @@ fn cmd_build(rest: &[String], then_run: bool) -> i32 {
             eprintln!("kiln: `--1x` was given, but {} is a Kiln 2 program", input.display());
             return 2;
         }
-        if io.os != Os::host() || io.arch != Arch::host() {
+        if io.arch == Arch::X86 && io.os != Os::Windows {
             eprintln!(
-                "kiln: Kiln 2 builds for this machine only so far — `--os` and `--arch` \
-                 are 1.x's until the Kiln 2 backend learns other targets"
+                "kiln: the 32-bit backend targets Windows x86 only — build with \
+                 `--os windows --arch x86`"
             );
             return 2;
         }
-        if matches!(io.target, Some(Target::SharedLib) | Some(Target::StaticLib)) {
-            eprintln!(
-                "kiln: Kiln 2 builds programs only so far — a shared or static library \
-                 is 1.x's (`--1x`) until the Kiln 2 backend learns to export"
-            );
-            return 2;
+        if io.os == Os::Windows {
+            if let Err(e) = mingw_available(io.arch) {
+                eprintln!("kiln: {e}");
+                return 1;
+            }
+            if then_run {
+                eprintln!(
+                    "kiln: cannot run a Windows program here — build it, then run it under \
+                     wine or on Windows"
+                );
+                return 2;
+            }
         }
-        let output = io
-            .output
-            .clone()
-            .or(io.project_output.clone())
-            .map(|p| p.to_string_lossy().to_string());
-        return build_k2(
+        let target = io.target.unwrap_or(Target::Console);
+        let output = match io.output.clone() {
+            Some(p) => Some(p),
+            None => Some(default_output(&input, io.project_output.as_deref(), target, io.os)),
+        }
+        .map(|p| p.to_string_lossy().to_string());
+        return build_k2_for(
             input.to_string_lossy().to_string(),
             output,
             then_run,
             false,
             true, // a built program links the runtime and its collector
             io.release,
+            K2Target {
+                target,
+                os: io.os,
+                arch: io.arch,
+                header: io.header.clone(),
+            },
         );
     }
     if !explicit_1x {
@@ -1878,30 +2021,71 @@ fn elsewhere(repo_root: &Path) -> HashMap<String, String> {
 fn embed_resources(module: &Module, input: &Path) -> Result<Option<String>, String> {
     // Relative to the SOURCE, not to the working directory: a project is built
     // from wherever the person happens to be standing.
-    let base = input.parent().unwrap_or(Path::new("."));
-    let mut found: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut wanted: Vec<(String, String)> = Vec::new();
     for form in module.forms() {
         // The form's own icon rides the same path as an image's source: a
         // window icon that only exists on the author's disk is not shipped.
-        let mut wanted: Vec<(&str, &kiln_ir::Expr)> = form
-            .properties
-            .iter()
-            .filter(|(name, _)| name == "icon")
-            .map(|(_, v)| (form.name.as_str(), v))
-            .collect();
+        for (name, v) in &form.properties {
+            if name == "icon" {
+                wanted.push((form.name.clone(), literal_text(v)));
+            }
+        }
         for child in &form.children {
             if child.type_name != "image" {
                 continue;
             }
             for (name, v) in &child.properties {
                 if name == "source" {
-                    wanted.push((child.id.as_str(), v));
+                    wanted.push((child.id.clone(), literal_text(v)));
                 }
             }
         }
-        for (owner, value) in wanted {
+    }
+    render_resources(&wanted, input)
+}
+
+/// The pictures a Kiln 2 form names — its `Icon`, and each `Image`'s `Source`
+/// — as `(owner, path)`, across every `partial form` block.
+fn k2_resources(src: &str) -> Vec<(String, String)> {
+    let Ok(toks) = kiln_k2::lexer::lex(src) else { return Vec::new() };
+    let Ok(program) = kiln_k2::parser::parse(toks) else { return Vec::new() };
+    let text = |e: &kiln_k2::ast::Expr| match &e.kind {
+        kiln_k2::ast::ExprKind::Str(s) => s.clone(),
+        _ => String::new(),
+    };
+    let mut wanted = Vec::new();
+    for item in &program.items {
+        let kiln_k2::ast::Item::Form(f) = item else { continue };
+        for (name, v) in &f.properties {
+            if name == "Icon" {
+                wanted.push((f.name.clone(), text(v)));
+            }
+        }
+        for c in &f.components {
+            if c.type_name != "Image" {
+                continue;
+            }
+            for (name, v) in &c.properties {
+                if name == "Source" {
+                    wanted.push((c.id.clone(), text(v)));
+                }
+            }
+        }
+    }
+    wanted
+}
+
+/// The resource table for a program: each picture read from beside the source
+/// and emitted as bytes. `None` when there is nothing to carry.
+fn render_resources(wanted: &[(String, String)], input: &Path) -> Result<Option<String>, String> {
+    // Relative to the SOURCE, not to the working directory: a project is built
+    // from wherever the person happens to be standing.
+    let base = input.parent().unwrap_or(Path::new("."));
+    let mut found: Vec<(String, Vec<u8>)> = Vec::new();
+    {
+        for (owner, src) in wanted {
             {
-                let src = literal_text(value);
+                let src = src.clone();
                 if src.is_empty() {
                     continue;
                 }

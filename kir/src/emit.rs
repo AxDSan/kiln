@@ -992,8 +992,8 @@ impl<'a, 'b> FnEmit<'a, 'b> {
             Allocator::Libc => {
                 self.e
                     .externs
-                    .insert("declare ptr @malloc(i64)".to_string());
-                writeln!(self.body, "  {base} = call ptr @malloc(i64 {size})").unwrap();
+                    .insert(format!("declare ptr @malloc(i{})", self.e.m.target.ptr_bits));
+                writeln!(self.body, "  {base} = call ptr @malloc(i{} {size})", self.e.m.target.ptr_bits).unwrap();
             }
         }
         // Storage held in place has no value to store: it starts as zero bytes,

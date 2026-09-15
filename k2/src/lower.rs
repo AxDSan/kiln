@@ -59,10 +59,39 @@ pub fn lower_full(
     runtime: Runtime,
     registry: Option<&kiln_ir::Registry>,
 ) -> Result<Module, String> {
+    lower_opts(p, runtime, registry, &Options::default())
+}
+
+/// What a build asks of lowering beyond the source: the kind of artifact, and
+/// the machine it is for.
+#[derive(Clone, Copy, Debug)]
+pub struct Options {
+    /// `SharedLib` or `StaticLib` to build a library; anything else builds a
+    /// program, whose kind the source decides (a form makes it a GUI program).
+    pub kind: ModuleKind,
+    pub target: Target,
+}
+
+impl Default for Options {
+    fn default() -> Options {
+        Options {
+            kind: ModuleKind::Console,
+            target: Target::X86_64_LINUX,
+        }
+    }
+}
+
+pub fn lower_opts(
+    p: &ast::Program,
+    runtime: Runtime,
+    registry: Option<&kiln_ir::Registry>,
+    opts: &Options,
+) -> Result<Module, String> {
+    let library = matches!(opts.kind, ModuleKind::SharedLib | ModuleKind::StaticLib);
     let mut b = ModuleBuilder::new(
         p.namespace.as_deref().unwrap_or("program"),
-        ModuleKind::Console,
-        Target::X86_64_LINUX,
+        if library { opts.kind } else { ModuleKind::Console },
+        opts.target,
     );
 
     // Pass 1: reserve a RecordId + interned type for every declared type.
@@ -507,6 +536,9 @@ pub fn lower_full(
             }
         }
     };
+    if form.is_some() && library {
+        return Err("a library has no window — a form is built into a program, not a shared or static library".into());
+    }
     if let Some(f) = &form {
         cx.b.m.kind = ModuleKind::Gui;
         for c in &f.components {
@@ -576,6 +608,15 @@ pub fn lower_full(
         return Ok(cx.b.build());
     }
 
+    if library {
+        if !p.top_level.is_empty() {
+            return Err("a library has no entry point — top-level statements belong in a program".into());
+        }
+        library_exports(&mut cx, p)?;
+        cx.drain_pending()?;
+        return Ok(cx.b.build());
+    }
+
     // Top-level statements become Main.
     if !p.top_level.is_empty() {
         let main = cx.b.declare_func("kmain", vec![], TyTable::VOID);
@@ -600,6 +641,102 @@ pub fn lower_full(
     cx.drain_pending()?;
 
     Ok(cx.b.build())
+}
+
+/// A library's face to a C host: each `public static` method of a `public static
+/// class`, exported under its own name (or the one `[Export("name")]` gives),
+/// and `<Namespace>_init` for the static fields' initial values.
+///
+/// The export is a thin wrapper around the method, as 1.x's is around a sub:
+/// internal calls keep the method's own symbol, and the wrapper carries the C
+/// shape — a `bool` crosses as a 32-bit int, which is what a C `_Bool`-free
+/// header can promise. `DllAttach` and `DllDetach` are exported as the loader
+/// hooks `dll_attach` and `dll_detach`.
+fn library_exports(cx: &mut Cx, p: &ast::Program) -> Result<(), String> {
+    let module = cx.b.m.name.replace('.', "_");
+    let mut seen: HashMap<String, String> = HashMap::new();
+    for item in &p.items {
+        let ast::Item::Type(td) = item else { continue };
+        if td.kind != ast::TypeKind::StaticClass || td.vis != ast::Vis::Public {
+            continue;
+        }
+        for m in &td.methods {
+            if !m.is_static || m.vis != ast::Vis::Public || m.is_extern || !m.type_params.is_empty() {
+                continue;
+            }
+            let export = m.attrs.iter().find(|a| a.name == "Export");
+            let symbol = match (m.name.as_str(), export) {
+                (_, Some(a)) => match a.args.first().map(|e| &e.kind) {
+                    Some(ast::ExprKind::Str(s)) => s.clone(),
+                    None => m.name.clone(),
+                    _ => return Err(format!("`[Export]` on `{}` takes the C name as a string", m.name)),
+                },
+                ("DllAttach", None) => "dll_attach".into(),
+                ("DllDetach", None) => "dll_detach".into(),
+                _ => m.name.clone(),
+            };
+            let what = format!("{}.{}", td.name, m.name);
+            if let Some(prev) = seen.insert(symbol.clone(), what.clone()) {
+                return Err(format!("`{what}` and `{prev}` would both be exported as `{symbol}` — rename one with `[Export(\"name\")]`"));
+            }
+            let sig = cx.methods[&what].clone();
+            let c_ty = |t: TyId| if t == TyTable::BOOL { TyTable::I32 } else { t };
+            let names: Vec<String> = m.params.iter().map(|p| p.name.clone()).collect();
+            let params: Vec<(&str, TyId)> =
+                names.iter().map(|n| n.as_str()).zip(sig.params.iter().map(|t| c_ty(*t))).collect();
+            let ret = c_ty(sig.ret);
+            let fid = cx.b.func_full(&symbol, params.clone(), ret, CallConv::Cdecl, Linkage::Exported, true);
+            let mut fl = FnLower::new(cx, fid, ret);
+            let args: Vec<Expr> = sig
+                .params
+                .iter()
+                .enumerate()
+                .map(|(i, t)| {
+                    let a = Expr::Local(LocalId(i as u32));
+                    if *t == TyTable::BOOL {
+                        Expr::Bin(BinOp::Ne, Box::new(a), Box::new(Expr::Int(0, TyTable::I32)), TyTable::I32)
+                    } else {
+                        a
+                    }
+                })
+                .collect();
+            let call = Expr::Call(Box::new(Call::Direct { func: sig.fid, args }));
+            if sig.ret == TyTable::VOID {
+                fl.push(Stmt::Expr(call));
+                fl.push(Stmt::Return(None));
+            } else if sig.ret == TyTable::BOOL {
+                fl.push(Stmt::Return(Some(Expr::Cast { value: Box::new(call), to: TyTable::I32 })));
+            } else {
+                fl.push(Stmt::Return(Some(call)));
+            }
+            let body = fl.finish();
+            cx.b.set_body(fid, body);
+            cx.b.m.exports.push(ExportDef {
+                symbol,
+                params: params.iter().map(|(n, t)| (n.to_string(), *t)).collect(),
+                ret,
+            });
+        }
+    }
+    // Static fields still need their initial values, and a library has no
+    // moment that is obviously start-up: the host says when, as with 1.x.
+    let init_sym = format!("{module}_init");
+    let init = cx.b.func_full(&init_sym, vec![], TyTable::VOID, CallConv::Cdecl, Linkage::Exported, true);
+    let inits = std::mem::take(&mut cx.static_inits);
+    let components = std::mem::take(&mut cx.namespace_components);
+    let mut fl = FnLower::new(cx, init, TyTable::VOID);
+    for (g, ty, value) in &inits {
+        let (v, _) = fl.expr(value, Some(*ty))?;
+        fl.push(Stmt::Assign { place: Place::Global(*g), value: v });
+    }
+    for c in &components {
+        fl.build_nonvisual(c, None)?;
+    }
+    fl.push(Stmt::Return(None));
+    let body = fl.finish();
+    cx.b.set_body(init, body);
+    cx.b.m.exports.insert(0, ExportDef { symbol: init_sym, params: Vec::new(), ret: TyTable::VOID });
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -1487,8 +1624,17 @@ impl Cx {
             None
         };
         if let Some(e) = &m.expr_body {
-            let (val, _) = fl.expr(e, Some(ret))?;
-            fl.push(Stmt::Return(Some(val)));
+            // `=> e` is `{ return e; }` — checked and converted as that is.
+            if ret == TyTable::VOID {
+                let (val, _) = fl.expr(e, None)?;
+                fl.push(Stmt::Expr(val));
+            } else {
+                fl.stmt(&ast::Stmt {
+                    kind: ast::StmtKind::Return(Some(e.clone())),
+                    leading: Vec::new(),
+                    span: e.span,
+                })?;
+            }
         } else {
             for s in &m.body {
                 fl.stmt(s)?;
@@ -2088,6 +2234,22 @@ impl<'a> FnLower<'a> {
                     let (val, vty) = self.expr(e, Some(self.ret))?;
                     let want = self.ret;
                     self.check_fits(vty, want, "`return`")?;
+                    // A number returned where a number of another width is
+                    // declared is converted: `long Calls() => count;`.
+                    let is_num = |t: TyId| {
+                        matches!(
+                            self.tt().kind(t),
+                            TyKind::I8 | TyKind::I16 | TyKind::I32 | TyKind::I64
+                                | TyKind::U8 | TyKind::U16 | TyKind::U32 | TyKind::U64
+                                | TyKind::Nint | TyKind::Nuint | TyKind::F32 | TyKind::F64
+                                | TyKind::Char
+                        )
+                    };
+                    let val = if vty != want && is_num(vty) && is_num(want) {
+                        Expr::Cast { value: Box::new(val), to: want }
+                    } else {
+                        val
+                    };
                     // `return x;` from a Result-returning method is `Ok(x)`
                     // unless the value already is a Result.
                     let val = match self.cx.as_result(self.ret) {
@@ -2663,7 +2825,7 @@ impl<'a> FnLower<'a> {
                 symbol: "snprintf".into(),
                 conv: CallConv::Cdecl,
                 args,
-                arg_tys: vec![TyTable::STR, TyTable::I64, TyTable::STR],
+                arg_tys: vec![TyTable::STR, TyTable::NUINT, TyTable::STR],
                 ret: TyTable::I32,
                 varargs: true,
             }))
@@ -2671,7 +2833,7 @@ impl<'a> FnLower<'a> {
         // n = snprintf(null, 0, fmt, ...)
         let mut measure = vec![
             Expr::Null(TyTable::STR),
-            Expr::Int(0, TyTable::I64),
+            Expr::Int(0, TyTable::NUINT),
             Expr::Str(fmt.clone()),
         ];
         measure.extend(held.iter().cloned());
@@ -2688,7 +2850,7 @@ impl<'a> FnLower<'a> {
                 Box::new(Expr::Int(1, TyTable::I32)),
                 TyTable::I32,
             )),
-            to: TyTable::I64,
+            to: TyTable::NUINT,
         };
         let buf = self.new_local("$buf", TyTable::STR);
         let alloc = self.alloc(size, TyTable::STR);
@@ -2706,7 +2868,7 @@ impl<'a> FnLower<'a> {
                     Box::new(Expr::Int(1, TyTable::I32)),
                     TyTable::I32,
                 )),
-                to: TyTable::I64,
+                to: TyTable::NUINT,
             },
             Expr::Str(fmt),
         ];
@@ -4870,7 +5032,7 @@ impl<'a> FnLower<'a> {
                 symbol: "malloc".into(),
                 conv: CallConv::Cdecl,
                 args: vec![size],
-                arg_tys: vec![TyTable::I64],
+                arg_tys: vec![TyTable::NUINT],
                 ret,
                 varargs: false,
             })),
@@ -4910,10 +5072,10 @@ impl<'a> FnLower<'a> {
                     },
                     Expr::Cast {
                         value: Box::new(size),
-                        to: TyTable::I64,
+                        to: TyTable::NUINT,
                     },
                 ],
-                arg_tys: vec![TyTable::PTR, TyTable::I64],
+                arg_tys: vec![TyTable::PTR, TyTable::NUINT],
                 ret,
                 varargs: false,
             })),
@@ -4926,8 +5088,8 @@ impl<'a> FnLower<'a> {
             library: "c".into(),
             symbol: "memcpy".into(),
             conv: CallConv::Cdecl,
-            args: vec![dst, src, Expr::Int(n as i128, TyTable::I64)],
-            arg_tys: vec![TyTable::PTR, TyTable::PTR, TyTable::I64],
+            args: vec![dst, src, Expr::Int(n as i128, TyTable::NUINT)],
+            arg_tys: vec![TyTable::PTR, TyTable::PTR, TyTable::NUINT],
             ret: TyTable::PTR,
             varargs: false,
         }))
@@ -5001,10 +5163,10 @@ impl<'a> FnLower<'a> {
                 Expr::Int(0, TyTable::I32),
                 Expr::Cast {
                     value: Box::new(Expr::Local(len)),
-                    to: TyTable::I64,
+                    to: TyTable::NUINT,
                 },
             ],
-            arg_tys: vec![TyTable::PTR, TyTable::I32, TyTable::I64],
+            arg_tys: vec![TyTable::PTR, TyTable::I32, TyTable::NUINT],
             ret: TyTable::PTR,
             varargs: false,
         }))));
@@ -6755,18 +6917,7 @@ impl<'a> FnLower<'a> {
     fn present_or_stop(&mut self, v: Expr, oty: TyId, member: &str) -> Result<Expr, String> {
         let held = self.new_local("$present", oty);
         self.push(Stmt::Let { local: held, value: v });
-        let report = Expr::Call(Box::new(Call::Dll {
-            library: "c".into(),
-            symbol: "dprintf".into(),
-            conv: CallConv::Cdecl,
-            args: vec![
-                Expr::Int(2, TyTable::I32),
-                Expr::Str(format!("kiln: `.{member}` was read through a value that is not there\n")),
-            ],
-            arg_tys: vec![TyTable::I32, TyTable::STR],
-            ret: TyTable::I32,
-            varargs: true,
-        }));
+        let report = self.stop_message(vec![Expr::Str(format!("kiln: `.{member}` was read through a value that is not there\n"))]);
         let stop = Expr::Call(Box::new(Call::Dll {
             library: "c".into(),
             symbol: "exit".into(),
@@ -7263,6 +7414,45 @@ impl<'a> FnLower<'a> {
     /// naming the position and the length, as 1.x does. Without it a read
     /// returned whatever lay past the buffer and a write corrupted it — the
     /// one outcome an index must never have, and silent.
+    /// The call that reports why a program stops: `kn_stop` in the runtime,
+    /// which every target links, or `dprintf` for a libc-only build. The
+    /// format's trailing newline is the runtime's to add.
+    fn stop_message(&self, mut args: Vec<Expr>) -> Expr {
+        match self.cx.runtime {
+            Runtime::Kiln => {
+                if let Some(Expr::Str(s)) = args.first_mut() {
+                    if s.ends_with('\n') {
+                        s.pop();
+                    }
+                    if let Some(rest) = s.strip_prefix("kiln: ") {
+                        *s = rest.to_string();
+                    }
+                }
+                Expr::Call(Box::new(Call::Dll {
+                    library: "runtime".into(),
+                    symbol: "kn_stop".into(),
+                    conv: CallConv::Cdecl,
+                    args,
+                    arg_tys: vec![TyTable::STR],
+                    ret: TyTable::VOID,
+                    varargs: true,
+                }))
+            }
+            Runtime::Libc => {
+                args.insert(0, Expr::Int(2, TyTable::I32));
+                Expr::Call(Box::new(Call::Dll {
+                    library: "c".into(),
+                    symbol: "dprintf".into(),
+                    conv: CallConv::Cdecl,
+                    args,
+                    arg_tys: vec![TyTable::I32, TyTable::STR],
+                    ret: TyTable::I32,
+                    varargs: true,
+                }))
+            }
+        }
+    }
+
     /// Bounds-check a 1-based position into an inline array of `count`, as a
     /// list's is checked, and give back the array and the 0-based index.
     fn checked_inline_index(&mut self, arr: Expr, count: u32, pos: Expr) -> (Expr, Expr) {
@@ -7274,20 +7464,8 @@ impl<'a> FnLower<'a> {
             Box::new(Expr::Bin(BinOp::Gt, Box::new(Expr::Local(p)), Box::new(Expr::Int(count as i128, TyTable::I32)), TyTable::I32)),
             TyTable::BOOL,
         );
-        let report = Expr::Call(Box::new(Call::Dll {
-            library: "c".into(),
-            symbol: "dprintf".into(),
-            conv: CallConv::Cdecl,
-            args: vec![
-                Expr::Int(2, TyTable::I32),
-                Expr::Str("kiln: index %d is outside an inline array of %d element(s)\n".into()),
-                Expr::Local(p),
-                Expr::Int(count as i128, TyTable::I32),
-            ],
-            arg_tys: vec![TyTable::I32, TyTable::STR],
-            ret: TyTable::I32,
-            varargs: true,
-        }));
+        let report = self.stop_message(vec![Expr::Str("kiln: index %d is outside an inline array of %d element(s)\n".into()), Expr::Local(p),
+                Expr::Int(count as i128, TyTable::I32)]);
         let stop = Expr::Call(Box::new(Call::Dll {
             library: "c".into(),
             symbol: "exit".into(),
@@ -7330,20 +7508,8 @@ impl<'a> FnLower<'a> {
             )),
             TyTable::BOOL,
         );
-        let report = Expr::Call(Box::new(Call::Dll {
-            library: "c".into(),
-            symbol: "dprintf".into(),
-            conv: CallConv::Cdecl,
-            args: vec![
-                Expr::Int(2, TyTable::I32),
-                Expr::Str("kiln: index %d is outside a list of %d element(s)\n".into()),
-                Expr::Local(p),
-                len,
-            ],
-            arg_tys: vec![TyTable::I32, TyTable::STR],
-            ret: TyTable::I32,
-            varargs: true,
-        }));
+        let report = self.stop_message(vec![Expr::Str("kiln: index %d is outside a list of %d element(s)\n".into()), Expr::Local(p),
+                len]);
         let stop = Expr::Call(Box::new(Call::Dll {
             library: "c".into(),
             symbol: "exit".into(),
@@ -7854,18 +8020,7 @@ impl<'a> FnLower<'a> {
             self.push(Stmt::Let { local: l, value: av });
             let r = self.new_local("$divisor", bty);
             self.push(Stmt::Let { local: r, value: bv });
-            let report = Expr::Call(Box::new(Call::Dll {
-                library: "c".into(),
-                symbol: "dprintf".into(),
-                conv: CallConv::Cdecl,
-                args: vec![
-                    Expr::Int(2, TyTable::I32),
-                    Expr::Str("kiln: division by zero\n".into()),
-                ],
-                arg_tys: vec![TyTable::I32, TyTable::STR],
-                ret: TyTable::I32,
-                varargs: true,
-            }));
+            let report = self.stop_message(vec![Expr::Str("kiln: division by zero\n".into())]);
             let stop = Expr::Call(Box::new(Call::Dll {
                 library: "c".into(),
                 symbol: "exit".into(),
