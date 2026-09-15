@@ -67,7 +67,11 @@ impl Emit<'_> {
         // Named struct types for C-layout records.
         for r in &self.m.records {
             if let Layout::C { .. } = r.layout {
-                let fields: Vec<String> = r.fields.iter().map(|f| self.ty().llvm(f.ty)).collect();
+                let fields: Vec<String> = r
+                    .fields
+                    .iter()
+                    .map(|f| self.ty().llvm_in_place(f.ty, |rid| self.m.record(rid).name.clone()))
+                    .collect();
                 writeln!(out, "%rec.{} = type {{ {} }}", r.name, fields.join(", ")).unwrap();
             }
         }
@@ -583,6 +587,9 @@ impl<'a, 'b> FnEmit<'a, 'b> {
             Place::Index(base, idx) => {
                 let b = self.expr(base);
                 let i = self.expr(idx);
+                if let TyKind::Inline { elem, .. } = *self.tt().kind(b.ty) {
+                    return (self.inline_elem_ptr(&b, &i), elem);
+                }
                 let elem = match self.tt().kind(b.ty) {
                     TyKind::Array(e) => *e,
                     k => panic!("index assignment on non-array {k:?}"),
@@ -618,6 +625,21 @@ impl<'a, 'b> FnEmit<'a, 'b> {
             b.op
         )
         .unwrap();
+        p
+    }
+
+    /// Address of element `i` (0-based) of an inline array whose address is `b`.
+    fn inline_elem_ptr(&mut self, b: &V, i: &V) -> String {
+        let ty = self.tt().llvm_in_place(b.ty, |rid| self.e.m.record(rid).name.clone());
+        let idx = if self.tt().llvm(i.ty) == "i64" {
+            i.op.clone()
+        } else {
+            let t = self.fresh();
+            writeln!(self.body, "  {t} = sext {} {} to i64", self.tt().llvm(i.ty), i.op).unwrap();
+            t
+        };
+        let p = self.fresh();
+        writeln!(self.body, "  {p} = getelementptr {ty}, ptr {}, i64 0, i64 {idx}", b.op).unwrap();
         p
     }
 
@@ -694,6 +716,11 @@ impl<'a, 'b> FnEmit<'a, 'b> {
             Expr::Field(base, idx) => {
                 let b = self.expr(base);
                 let (ptr, fty) = self.field_ptr(&b, *idx);
+                // Storage held in place is not loaded: its address is the value
+                // — a nested record is that record, an inline array is itself.
+                if let TyKind::Inline { elem, count } = *self.tt().kind(fty) {
+                    return V { op: ptr, ty: if count == 0 { elem } else { fty } };
+                }
                 let t = self.fresh();
                 writeln!(self.body, "  {t} = load {}, ptr {ptr}", self.tt().llvm(fty)).unwrap();
                 V { op: t, ty: fty }
@@ -701,6 +728,15 @@ impl<'a, 'b> FnEmit<'a, 'b> {
             Expr::Index(base, idx) => {
                 let b = self.expr(base);
                 let i = self.expr(idx);
+                if let TyKind::Inline { elem, .. } = *self.tt().kind(b.ty) {
+                    let p = self.inline_elem_ptr(&b, &i);
+                    if matches!(self.tt().kind(elem), TyKind::Record(_)) {
+                        return V { op: p, ty: elem };
+                    }
+                    let t = self.fresh();
+                    writeln!(self.body, "  {t} = load {}, ptr {p}", self.tt().llvm(elem)).unwrap();
+                    return V { op: t, ty: elem };
+                }
                 let elem = match self.tt().kind(b.ty) {
                     TyKind::Array(e) => *e,
                     k => panic!("index read on non-array {k:?}"),
@@ -960,8 +996,26 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                 writeln!(self.body, "  {base} = call ptr @malloc(i64 {size})").unwrap();
             }
         }
+        // Storage held in place has no value to store: it starts as zero bytes,
+        // as a C struct from `calloc` would.
+        let has_inline = field_tys
+            .iter()
+            .any(|t| matches!(self.tt().kind(*t), TyKind::Inline { .. }));
+        if has_inline {
+            self.e
+                .externs
+                .insert("declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)".into());
+            writeln!(
+                self.body,
+                "  call void @llvm.memset.p0.i64(ptr {base}, i8 0, i64 {size}, i1 false)"
+            )
+            .unwrap();
+        }
         let vals: Vec<V> = fields.iter().map(|f| self.expr(f)).collect();
         for (i, v) in vals.iter().enumerate() {
+            if matches!(self.tt().kind(field_tys[i]), TyKind::Inline { .. }) {
+                continue;
+            }
             let p = self.fresh();
             writeln!(
                 self.body,
@@ -1112,6 +1166,40 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                     })
                     .collect();
                 self.emit_call(&format!("@{sym}"), &argv, ret, "")
+            }
+            Call::Indirect { callee, args, sig }
+                if matches!(self.tt().kind(*sig), TyKind::CFunc { .. }) =>
+            {
+                // A C function address: no environment, the callee's own
+                // convention, and a `char*` result copied as a `[Dll]` one is.
+                let (params, ret, conv) = match self.tt().kind(*sig) {
+                    TyKind::CFunc { params, ret, conv } => (params.clone(), *ret, *conv),
+                    _ => unreachable!(),
+                };
+                let fp = self.expr(callee);
+                let argv: Vec<String> = args
+                    .iter()
+                    .zip(&params)
+                    .map(|(a, pt)| {
+                        let v = self.expr(a);
+                        format!("{} {}", self.tt().llvm(*pt), v.op)
+                    })
+                    .collect();
+                let cc = match conv {
+                    CallConv::Stdcall if self.e.m.target.windows && self.e.m.target.ptr_bits == 32 => {
+                        "x86_stdcallcc "
+                    }
+                    _ => "",
+                };
+                if ret == TyTable::STR {
+                    self.e.externs.insert("declare ptr @kn_dll_text(ptr)".into());
+                    let raw = self.fresh();
+                    writeln!(self.body, "  {raw} = call {cc}ptr {}({})", fp.op, argv.join(", ")).unwrap();
+                    let out = self.fresh();
+                    writeln!(self.body, "  {out} = call ptr @kn_dll_text(ptr {raw})").unwrap();
+                    return Some(V { op: out, ty: TyTable::STR });
+                }
+                self.emit_call(&fp.op, &argv, ret, cc)
             }
             Call::Indirect { callee, args, sig } => {
                 let clos = self.expr(callee);

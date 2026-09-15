@@ -82,6 +82,21 @@ pub enum TyKind {
         params: Vec<TyId>,
         ret: TyId,
     },
+    /// The address of a C function: a bare code pointer, called with no
+    /// environment in the given convention. `delegate* unmanaged<…>` in K2.
+    CFunc {
+        params: Vec<TyId>,
+        ret: TyId,
+        conv: CallConv,
+    },
+    /// Storage held in place inside a C-layout record: `count` elements of
+    /// `elem` (a C `T name[count]`), or — with `count` 0 — one C-layout
+    /// record nested by value. Only a field has this type; reading the field
+    /// yields the address of that storage.
+    Inline {
+        elem: TyId,
+        count: u32,
+    },
     /// No value.
     Void,
 }
@@ -192,6 +207,7 @@ impl TyTable {
             }
             // A function value is a closure pair: code pointer + environment.
             TyKind::Func { .. } => "{ ptr, ptr }".into(),
+            TyKind::CFunc { .. } | TyKind::Inline { .. } => "ptr".into(),
             TyKind::Void => "void".into(),
         }
     }
@@ -208,7 +224,28 @@ impl TyTable {
                 | TyKind::Dict(..)
                 | TyKind::Set(_)
                 | TyKind::Record(_)
+                | TyKind::CFunc { .. }
+                | TyKind::Inline { .. }
         )
+    }
+
+    /// The LLVM type of a C-layout field as it sits in its struct: a nested
+    /// record or an inline array in place, anything else as its value type.
+    pub fn llvm_in_place(&self, id: TyId, record_name: impl Fn(RecordId) -> String) -> String {
+        match self.kind(id) {
+            TyKind::Inline { elem, count } => {
+                let e = match self.kind(*elem) {
+                    TyKind::Record(rid) => format!("%rec.{}", record_name(*rid)),
+                    _ => self.llvm(*elem),
+                };
+                if *count == 0 {
+                    e
+                } else {
+                    format!("[{count} x {e}]")
+                }
+            }
+            _ => self.llvm(id),
+        }
     }
 
     pub fn is_float(&self, id: TyId) -> bool {
@@ -242,7 +279,7 @@ impl TyTable {
             TyKind::F32 | TyKind::F64 => 6,                                // KN_SDT_DOUBLE
             TyKind::Str => 9,
             TyKind::Bytes => 10,
-            TyKind::Ptr => 14,
+            TyKind::Ptr | TyKind::CFunc { .. } | TyKind::Inline { .. } => 14,
             TyKind::Record(_) => 13,
             TyKind::Array(e) => ARRAY | self.sdt_tag(*e),
             TyKind::Dict(_, v) => DICT | self.sdt_tag(*v),
@@ -274,6 +311,8 @@ fn is_ptr_kind(k: &TyKind) -> bool {
             | TyKind::Dict(..)
             | TyKind::Set(_)
             | TyKind::Record(_)
+            | TyKind::CFunc { .. }
+            | TyKind::Inline { .. }
     )
 }
 
@@ -482,7 +521,7 @@ pub struct GlobalDef {
 
 // ─── Functions ──────────────────────────────────────────────────────────────
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum CallConv {
     Kiln,
     Cdecl,

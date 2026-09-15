@@ -2143,3 +2143,61 @@ public static class P { public static void Main() {
     let err = kiln_k2::compile_to_llvm(cont).unwrap_err();
     assert!(err.contains("inside a loop"), "got: {err}");
 }
+
+#[test]
+fn a_function_pointer_calls_a_c_address_and_a_struct_holds_arrays_and_structs_in_place() {
+    let src = r#"
+namespace FnPtr;
+
+[CLayout]
+public record Point(int X, int Y);
+
+[CLayout]
+public record Box(int Tag, Point Corner, int[3] Values, delegate* unmanaged<int, int, int>[2] Ops);
+
+public static class P
+{
+    static int Add(int a, int b) => a + b;
+    static int Mul(int a, int b) => a * b;
+
+    public static void Main()
+    {
+        delegate* unmanaged<int, int, int> f = Add;
+        Console.WriteLine(f(2, 3));
+
+        var b = new Box();
+        b.Tag = 7;
+        b.Corner.X = 10;
+        b.Corner.Y = 20;
+        foreach (var i in 1..3)
+            b.Values[i] = i * 100;
+        b.Ops[1] = Add;
+        b.Ops[2] = Mul;
+        Console.WriteLine($"{b.Tag} {b.Corner.X} {b.Corner.Y} {b.Values[1]} {b.Values[3]}");
+        Console.WriteLine($"{b.Ops[1](6, 7)} {b.Ops[2](6, 7)}");
+        Console.WriteLine($"{Box.Size} {Box.OffsetOf("Values")} {Box.OffsetOf("Ops")}");
+        long big = 12;
+        Console.WriteLine(Box.OffsetOf("Values") == big);
+    }
+}
+"#;
+    // Box: Tag 4, Corner 8 at 4, Values 12 at 12, Ops 16 at 24 → 40.
+    assert_eq!(run_k2(src), "5\n7 10 20 100 300\n13 42\n40 12 24\ntrue\n");
+}
+
+#[test]
+fn a_function_pointer_with_the_wrong_signature_is_a_compile_error() {
+    let src = r#"
+namespace FnPtr2;
+public static class P
+{
+    static int Add(int a, int b) => a + b;
+    public static void Main()
+    {
+        delegate* unmanaged<int, int> f = Add;
+    }
+}
+"#;
+    let err = kiln_k2::compile_to_llvm(src).unwrap_err();
+    assert!(err.contains("signature"), "got: {err}");
+}

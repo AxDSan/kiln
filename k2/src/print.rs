@@ -369,9 +369,16 @@ pub fn ty(t: &TypeRef) -> String {
         TypeRef::Named(n) => n.clone(),
         TypeRef::Optional(i) => format!("{}?", ty(i)),
         TypeRef::Array(i) => format!("{}[]", ty(i)),
+        TypeRef::Fixed(i, n) => format!("{}[{n}]", ty(i)),
         TypeRef::Generic(n, args) => {
             let a: Vec<String> = args.iter().map(ty).collect();
             format!("{n}<{}>", a.join(", "))
+        }
+        TypeRef::FnPtr { conv, params, ret } => {
+            let mut a: Vec<String> = params.iter().map(ty).collect();
+            a.push(ty(ret));
+            let conv = conv.as_ref().map(|c| format!("[{c}]")).unwrap_or_default();
+            format!("delegate* unmanaged{conv}<{}>", a.join(", "))
         }
     }
 }

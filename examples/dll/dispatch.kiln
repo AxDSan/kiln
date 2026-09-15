@@ -1,0 +1,132 @@
+// Bits choose the function, and an address is what gets called.
+//
+// `libops.so` is opened while this program runs and is not declared anywhere —
+// its five exports are fetched by name into a table of addresses, exactly as a
+// COM vtable holds them. A request word says which of the five to run: bit one
+// is slot one, and `flags & (1 << (slot - 1))` is how a bit is tested. Each
+// slot is C's own operator, so what the call brings back is checked against
+// what `&`, `|`, `^`, `<<` and `>>>` compute here.
+//
+//   clang -shared -fPIC -o libops.so examples/dll/ops.c
+//   kiln build examples/dll/dispatch.kiln -o dispatch && ./dispatch
+
+namespace Dispatch;
+
+// Five C function addresses held in place inside a C struct.
+[CLayout]
+public record Table(delegate* unmanaged<int, int, int>[5] Fn);
+
+public static class Dispatch
+{
+    // The POSIX loader, which is itself a C library.
+    [Dll("libdl.so.2", Entry = "dlopen")]
+    public static extern Ptr Dlopen(string path, int mode);
+
+    [Dll("libdl.so.2", Entry = "dlsym")]
+    public static extern Ptr Dlsym(Ptr handle, string symbol);
+
+    [Dll("libdl.so.2", Entry = "dlclose")]
+    public static extern int Dlclose(Ptr handle);
+
+    const int RtldNow = 2;
+
+    // One bit per slot, written as the bit it is.
+    const int WantAnd = 0b0_0001;
+    const int WantOr = 0b0_0010;
+    const int WantXor = 0b0_0100;
+    const int WantShl = 0b0_1000;
+    const int WantUshr = 0b1_0000;
+
+    // The pair every operation is given. `0xDEAD_BEEF` is 32 bits with the top
+    // one set, so as an `int` it is negative — which is the whole point of
+    // asking for `>>` against `>>>`.
+    const int Left = 0xDEAD_BEEF;
+    const int Right = 4;
+
+    static string NameOf(int slot) => slot switch
+    {
+        1 => "and",
+        2 => "or",
+        3 => "xor",
+        4 => "shl",
+        _ => "ushr",
+    };
+
+    static string SymbolOf(int slot) => "op_" + NameOf(slot);
+
+    // The same five operations, computed here rather than in C.
+    static int Native(int slot, int a, int b)
+    {
+        switch (slot)
+        {
+            case 1:
+                return a & b;
+            case 2:
+                return a | b;
+            case 3:
+                return a ^ b;
+            case 4:
+                return a << b;
+            default:
+                return a >>> b;
+        }
+    }
+
+    static void Say(string what, int fromC, int fromKiln)
+    {
+        if (fromC == fromKiln)
+            Console.WriteLine($"ok {what} = {fromC}");
+        else
+            Console.WriteLine($"FAIL {what}: C said {fromC}, Kiln said {fromKiln}");
+    }
+
+    public static void Main()
+    {
+        Ptr lib = Dlopen("./libops.so", RtldNow);
+        if (PtrIsNull(lib))
+        {
+            Console.WriteLine("libops.so did not load");
+            return;
+        }
+
+        // Five addresses into five slots. Nothing here is a declared symbol.
+        var vt = new Table();
+        foreach (var slot in 1..5)
+        {
+            vt.Fn[slot] = (delegate* unmanaged<int, int, int>)Dlsym(lib, SymbolOf(slot));
+            if (PtrIsNull(vt.Fn[slot]))
+            {
+                Console.WriteLine($"FAIL missing {SymbolOf(slot)}");
+                return;
+            }
+        }
+
+        // Everything except the left shift. A bit is tested, not a number compared.
+        int request = WantAnd | WantOr | WantXor | WantUshr;
+        foreach (var want in 1..5)
+        {
+            if ((request & (1 << (want - 1))) == 0)
+            {
+                Console.WriteLine($"skipped {NameOf(want)}");
+                continue;
+            }
+            Say(NameOf(want), vt.Fn[want](Left, Right), Native(want, Left, Right));
+        }
+
+        // `>>` is the one operation C's `>>` on a signed value does not pin
+        // down, so it has no slot — it is checked against the shift it differs
+        // from instead.
+        if (Left >> Right != Left >>> Right)
+            Console.WriteLine("ok shr keeps the sign where ushr does not");
+        else
+            Console.WriteLine("FAIL shr and ushr agreed on a negative value");
+
+        // Turning the left shift back on is one `|`, and the slot it lights up
+        // is reached the same way.
+        int more = request | WantShl;
+        if ((more & WantShl) != 0)
+            Say(NameOf(4), vt.Fn[4](Left, Right), Native(4, Left, Right));
+
+        Console.WriteLine(Dlclose(lib));
+    }
+}

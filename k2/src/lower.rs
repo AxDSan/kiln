@@ -254,7 +254,18 @@ pub fn lower_full(
         }
     }
 
-    // Pass 2: fill record fields and compute C layout.
+    // Pass 2: fill record fields and compute C layout. A `[CLayout]` record
+    // nested by value in another needs its own size first, so the pass repeats
+    // until every nesting depth has settled.
+    let clayout_names: std::collections::HashSet<String> = p
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            ast::Item::Type(td) if td.attrs.iter().any(|a| a.name == "CLayout") => Some(td.name.clone()),
+            _ => None,
+        })
+        .collect();
+    for _round in 0..=clayout_names.len() {
     for item in &p.items {
         if let ast::Item::Type(td) = item {
             if td.kind == ast::TypeKind::StaticClass || !td.type_params.is_empty() {
@@ -264,7 +275,32 @@ pub fn lower_full(
             let clayout = td.attrs.iter().any(|a| a.name == "CLayout");
             let mut fields = Vec::new();
             for (i, f) in td.record_params.iter().chain(td.fields.iter()).enumerate() {
-                let mut ty = cx.resolve(&f.ty)?;
+                let mut ty = match &f.ty {
+                    // `byte[16] Bytes` — a C `unsigned char Bytes[16]`.
+                    ast::TypeRef::Fixed(inner, n) if clayout => {
+                        let elem = cx.resolve(inner)?;
+                        if elem == TyTable::BOOL {
+                            return Err(format!(
+                                "field `{}`: an inline array of `bool` has no one C width — use `int[{n}]` or `byte[{n}]`",
+                                f.name
+                            ));
+                        }
+                        if *n == 0 {
+                            return Err(format!("field `{}`: an inline array holds at least one value", f.name));
+                        }
+                        cx.b.m.types.intern(TyKind::Inline { elem, count: *n })
+                    }
+                    _ => cx.resolve(&f.ty)?,
+                };
+                // A `[CLayout]` record inside another is held by value, as a C
+                // struct member is; a pointer to one is a `Ptr`.
+                if clayout {
+                    if let ast::TypeRef::Named(n) = &f.ty {
+                        if clayout_names.contains(n) {
+                            ty = cx.b.m.types.intern(TyKind::Inline { elem: ty, count: 0 });
+                        }
+                    }
+                }
                 // A `bool` in a C struct is a C int — a Win32 `BOOL` — and a C
                 // API writes truth as any non-zero value. It is stored as an int
                 // and read back as `!= 0`, so a 7 is true.
@@ -295,6 +331,7 @@ pub fn lower_full(
                 offsets,
             };
         }
+    }
     }
 
     // Collect constants (literal-valued) for reference resolution.
@@ -936,6 +973,29 @@ impl Cx {
                 let e = self.resolve(elem)?;
                 self.b.m.types.intern(TyKind::Array(e))
             }
+            ast::TypeRef::Fixed(..) => {
+                return Err(
+                    "`T[N]` holds N values in place, which only a `[CLayout]` record's field can do — use `List<T>` elsewhere"
+                        .into(),
+                )
+            }
+            ast::TypeRef::FnPtr { conv, params, ret } => {
+                let conv = match conv.as_deref() {
+                    None | Some("Cdecl") => CallConv::Cdecl,
+                    Some("Stdcall") => CallConv::Stdcall,
+                    Some(other) => {
+                        return Err(format!(
+                            "`delegate* unmanaged[{other}]` — Kiln calls C functions as `Cdecl` or `Stdcall`"
+                        ))
+                    }
+                };
+                let mut ps = Vec::new();
+                for p in params {
+                    ps.push(self.resolve(p)?);
+                }
+                let ret = self.resolve(ret)?;
+                self.b.m.types.intern(TyKind::CFunc { params: ps, ret, conv })
+            }
             ast::TypeRef::Generic(n, args) => match n.as_str() {
                 "List" => {
                     let e = self.resolve(&args[0])?;
@@ -1277,13 +1337,37 @@ impl Cx {
         let mut align = 1i64;
         let mut offsets = Vec::new();
         for f in fields {
-            let sz = self.scalar_size(f.ty);
-            offset = round_up(offset, sz);
+            let (sz, al) = self.size_align(f.ty);
+            offset = round_up(offset, al);
             offsets.push(offset);
             offset += sz;
-            align = align.max(sz);
+            align = align.max(al);
         }
         (round_up(offset, align.max(1)), align, offsets)
+    }
+
+    /// Size and alignment of a C field: storage held in place is its element's
+    /// size times the count, aligned as one element is.
+    fn size_align(&self, ty: TyId) -> (i64, i64) {
+        match *self.b.m.types.kind(ty) {
+            TyKind::Inline { elem, count } => {
+                let (esz, eal) = match *self.b.m.types.kind(elem) {
+                    TyKind::Record(rid) => match &self.b.m.record(rid).layout {
+                        Layout::C { size, align, .. } => (*size, *align),
+                        Layout::Managed => (0, 1),
+                    },
+                    _ => {
+                        let s = self.scalar_size(elem);
+                        (s, s)
+                    }
+                };
+                (esz * (count.max(1) as i64), eal.max(1))
+            }
+            _ => {
+                let s = self.scalar_size(ty);
+                (s, s)
+            }
+        }
     }
 
     pub(crate) fn scalar_size(&self, ty: TyId) -> i64 {
@@ -2795,10 +2879,12 @@ impl<'a> FnLower<'a> {
             // callback handed to C. Only a static method: an instance method
             // has a `this` no C caller would supply.
             ast::ExprKind::Ident(name)
-                if hint == Some(TyTable::PTR)
+                if (hint == Some(TyTable::PTR)
+                    || hint.is_some_and(|h| matches!(self.tt().kind(h), TyKind::CFunc { .. })))
                     && !self.scope.contains_key(name.as_str())
                     && !self.cells.contains_key(name.as_str()) =>
             {
+                let want = hint.unwrap();
                 let found = self
                     .cx
                     .methods
@@ -2806,9 +2892,21 @@ impl<'a> FnLower<'a> {
                     .find(|(k, sig)| {
                         !sig.this && (k.as_str() == name || k.ends_with(&format!(".{name}")))
                     })
-                    .map(|(_, sig)| sig.fid);
+                    .map(|(_, sig)| (sig.fid, sig.params.clone(), sig.ret));
                 match found {
-                    Some(fid) => Ok((Expr::FuncPtr(fid), TyTable::PTR)),
+                    Some((fid, params, ret)) => {
+                        // Typed as a function address, the method's signature
+                        // must be the one the address promises.
+                        if let TyKind::CFunc { params: wp, ret: wr, .. } = self.tt().kind(want).clone() {
+                            if wp != params || wr != ret {
+                                return Err(format!(
+                                    "`{name}` does not have the signature this function pointer names"
+                                ));
+                            }
+                            return Ok((Expr::FuncPtr(fid), want));
+                        }
+                        Ok((Expr::FuncPtr(fid), TyTable::PTR))
+                    }
                     None => self.ident(name, e.span),
                 }
             }
@@ -2870,6 +2968,12 @@ impl<'a> FnLower<'a> {
                          exception to throw for a missing key"
                             .into(),
                     );
+                }
+                // `blob.Bytes[i]` — an inline array, positions from 1.
+                if let TyKind::Inline { elem, count } = *self.tt().kind(bty) {
+                    let (i, _) = self.expr(idx, Some(TyTable::I32))?;
+                    let (b, i0) = self.checked_inline_index(b, count, i);
+                    return Ok((Expr::Index(Box::new(b), Box::new(i0)), elem));
                 }
                 // `list[i]` reads the buffer; positions are 1-based.
                 if let Some((_, elem)) = self.cx.as_list(bty) {
@@ -3354,6 +3458,10 @@ impl<'a> FnLower<'a> {
                         TyTable::BOOL,
                     ));
                 }
+                // A nested record reads as that record, in place.
+                if let TyKind::Inline { elem, count: 0 } = *self.tt().kind(fty) {
+                    return Ok((Expr::Field(Box::new(base), idx), elem));
+                }
                 return Ok((Expr::Field(Box::new(base), idx), fty));
             }
         }
@@ -3377,6 +3485,76 @@ impl<'a> FnLower<'a> {
     }
 
     fn call(&mut self, callee: &ast::Expr, args: &[ast::Expr]) -> Result<(Expr, TyId), String> {
+        // `T.OffsetOf("Field")` — where a field of a record starts, in bytes,
+        // known while compiling as `T.Size` is.
+        if let ast::ExprKind::Member(recv, m) = &callee.kind {
+            if let ast::ExprKind::Ident(obj) = &recv.kind {
+                if m == "OffsetOf" && self.cx.type_ids.contains_key(obj.as_str()) {
+                    let [ast::Expr { kind: ast::ExprKind::Str(field), .. }] = args else {
+                        return Err(format!("`{obj}.OffsetOf` takes a field name as a string: `{obj}.OffsetOf(\"X\")`"));
+                    };
+                    let rty = self.cx.record_ty(obj);
+                    if let TyKind::Record(rid) = *self.tt().kind(rty) {
+                        let rec = self.cx.b.m.record(rid);
+                        let idx = rec
+                            .fields
+                            .iter()
+                            .position(|f| f.name == *field)
+                            .ok_or_else(|| format!("`{obj}` has no field `{field}`"))?;
+                        if let Layout::C { offsets, .. } = &rec.layout {
+                            return Ok((Expr::Int(offsets[idx] as i128, TyTable::I32), TyTable::I32));
+                        }
+                    }
+                }
+            }
+        }
+        // Calling a C function address — `add(5, 10)`, `table[3](2, 3)`,
+        // `((delegate* unmanaged<Ptr, void>)p)(cell)`. The callee is lowered
+        // as a value in a throwaway block first: only if it turns out to be a
+        // function address is that lowering kept.
+        let value_callee = match &callee.kind {
+            ast::ExprKind::Ident(n) => self
+                .scope
+                .get(n.as_str())
+                .is_some_and(|(_, t)| matches!(self.tt().kind(*t), TyKind::CFunc { .. })),
+            ast::ExprKind::Member(..) | ast::ExprKind::Index(..) | ast::ExprKind::Cast(..) | ast::ExprKind::Call(..) => true,
+            _ => false,
+        };
+        if value_callee {
+            self.blocks.push(Vec::new());
+            let probe = self.expr_raw(callee, None);
+            let pushed = self.blocks.pop().unwrap();
+            if let Ok((fv, fty)) = probe {
+                if let TyKind::CFunc { params, ret, .. } = self.tt().kind(fty).clone() {
+                    for st in pushed {
+                        self.push(st);
+                    }
+                    if args.len() != params.len() {
+                        return Err(format!(
+                            "this function pointer takes {} argument(s), got {}",
+                            params.len(),
+                            args.len()
+                        ));
+                    }
+                    let held = self.new_local("$fnptr", fty);
+                    self.push(Stmt::Let { local: held, value: fv });
+                    let mut kargs = Vec::new();
+                    for (i, (a, pty)) in args.iter().zip(params.iter()).enumerate() {
+                        let (v, vty) = self.expr(a, Some(*pty))?;
+                        self.check_fits(vty, *pty, &format!("argument {}", i + 1))?;
+                        kargs.push(v);
+                    }
+                    return Ok((
+                        Expr::Call(Box::new(Call::Indirect {
+                            callee: Box::new(Expr::Local(held)),
+                            args: kargs,
+                            sig: fty,
+                        })),
+                        ret,
+                    ));
+                }
+            }
+        }
         // Calling a value of function type: an indirect call through its
         // `{fn, env}` pair.
         if let ast::ExprKind::Ident(name) = &callee.kind {
@@ -6552,6 +6730,10 @@ impl<'a> FnLower<'a> {
                 true
             }
             (TyKind::Func { .. }, TyKind::Func { .. }) => true,
+            // A function address is an address: it goes where a `Ptr` does.
+            (TyKind::CFunc { .. }, TyKind::Ptr) => true,
+            // Storage held in place converts to the address of its first byte.
+            (TyKind::Inline { .. }, TyKind::Ptr) => true,
             _ => false,
         }
     }
@@ -6634,6 +6816,7 @@ impl<'a> FnLower<'a> {
             TyKind::Record(_) if self.cx.as_result(ty).is_some() => "a Result".into(),
             TyKind::Record(rid) => format!("a `{}`", self.cx.b.m.record(*rid).name),
             TyKind::Optional(_) => "an optional value — test it with `!= null`".into(),
+            TyKind::CFunc { .. } => "a C function address".into(),
             k if matches!(k, TyKind::I8 | TyKind::I16 | TyKind::I32 | TyKind::I64 | TyKind::U8 | TyKind::U16 | TyKind::U32 | TyKind::U64 | TyKind::Nint | TyKind::Nuint) => "a whole number".into(),
             _ => "a value".into(),
         }
@@ -7080,6 +7263,45 @@ impl<'a> FnLower<'a> {
     /// naming the position and the length, as 1.x does. Without it a read
     /// returned whatever lay past the buffer and a write corrupted it — the
     /// one outcome an index must never have, and silent.
+    /// Bounds-check a 1-based position into an inline array of `count`, as a
+    /// list's is checked, and give back the array and the 0-based index.
+    fn checked_inline_index(&mut self, arr: Expr, count: u32, pos: Expr) -> (Expr, Expr) {
+        let p = self.new_local("$ixpos", TyTable::I32);
+        self.push(Stmt::Let { local: p, value: pos });
+        let outside = Expr::Bin(
+            BinOp::Or,
+            Box::new(Expr::Bin(BinOp::Lt, Box::new(Expr::Local(p)), Box::new(Expr::Int(1, TyTable::I32)), TyTable::I32)),
+            Box::new(Expr::Bin(BinOp::Gt, Box::new(Expr::Local(p)), Box::new(Expr::Int(count as i128, TyTable::I32)), TyTable::I32)),
+            TyTable::BOOL,
+        );
+        let report = Expr::Call(Box::new(Call::Dll {
+            library: "c".into(),
+            symbol: "dprintf".into(),
+            conv: CallConv::Cdecl,
+            args: vec![
+                Expr::Int(2, TyTable::I32),
+                Expr::Str("kiln: index %d is outside an inline array of %d element(s)\n".into()),
+                Expr::Local(p),
+                Expr::Int(count as i128, TyTable::I32),
+            ],
+            arg_tys: vec![TyTable::I32, TyTable::STR],
+            ret: TyTable::I32,
+            varargs: true,
+        }));
+        let stop = Expr::Call(Box::new(Call::Dll {
+            library: "c".into(),
+            symbol: "exit".into(),
+            conv: CallConv::Cdecl,
+            args: vec![Expr::Int(1, TyTable::I32)],
+            arg_tys: vec![TyTable::I32],
+            ret: TyTable::VOID,
+            varargs: false,
+        }));
+        self.push(Stmt::If { cond: outside, then: vec![Stmt::Expr(report), Stmt::Expr(stop)], els: vec![] });
+        let i0 = Expr::Bin(BinOp::Sub, Box::new(Expr::Local(p)), Box::new(Expr::Int(1, TyTable::I32)), TyTable::I32);
+        (arr, i0)
+    }
+
     fn checked_list_index(&mut self, list: Expr, lty: TyId, pos: Expr) -> (Expr, Expr) {
         let held = self.new_local("$ixlist", lty);
         self.push(Stmt::Let {
@@ -7346,6 +7568,19 @@ impl<'a> FnLower<'a> {
             .map(|f| (f.name.clone(), f.ty))
             .collect();
         let mut values: Vec<Expr> = Vec::with_capacity(field_tys.len());
+        if field_tys.iter().any(|(_, t)| matches!(self.tt().kind(*t), TyKind::Inline { .. })) {
+            if !args.is_empty() {
+                return Err(format!(
+                    "`{rname}` holds storage in place, so it is made zeroed with `new {rname}()` and filled field by field"
+                ));
+            }
+            if let Some((n, _)) = inits
+                .iter()
+                .find(|(n, _)| field_tys.iter().any(|(f, t)| f == n && matches!(self.tt().kind(*t), TyKind::Inline { .. })))
+            {
+                return Err(format!("`{n}` is held in place — fill it element by element after `new`"));
+            }
+        }
         if !args.is_empty() {
             // Positional: one argument per field, in order. `zip` dropped what
             // did not line up, so a short list left fields holding garbage.
@@ -7563,6 +7798,25 @@ impl<'a> FnLower<'a> {
                 TyTable::BOOL,
             ));
         }
+        // Two numbers of different widths meet at the wider one — a float
+        // over any whole number — so `intValue == longValue` compares 64 bits
+        // rather than emitting an i32 beside an i64.
+        let rank = |t: TyId| -> Option<i64> {
+            match self.tt().kind(t) {
+                TyKind::I8 | TyKind::U8 => Some(1),
+                TyKind::I16 | TyKind::U16 => Some(2),
+                TyKind::I32 | TyKind::U32 | TyKind::Char => Some(4),
+                TyKind::I64 | TyKind::U64 | TyKind::Nint | TyKind::Nuint => Some(8),
+                TyKind::F32 => Some(16),
+                TyKind::F64 => Some(32),
+                _ => None,
+            }
+        };
+        let (av, aty, bv, bty) = match (rank(aty), rank(bty)) {
+            (Some(ra), Some(rb)) if ra < rb => (Expr::Cast { value: Box::new(av), to: bty }, bty, bv, bty),
+            (Some(ra), Some(rb)) if rb < ra => (av, aty, Expr::Cast { value: Box::new(bv), to: aty }, aty),
+            _ => (av, aty, bv, bty),
+        };
         let operand_ty = if aty != TyTable::BOOL { aty } else { bty };
         // Arithmetic and bit operations are on numbers. Text in one was
         // emitted as a multiply of a pointer — invalid LLVM, rejected by clang
@@ -7686,6 +7940,11 @@ impl<'a> FnLower<'a> {
                 if let TyKind::Record(rid) = *self.tt().kind(bty) {
                     let rec = self.cx.b.m.record(rid);
                     if let Some(idx) = rec.fields.iter().position(|f| f.name == *member) {
+                        if matches!(self.tt().kind(rec.fields[idx].ty), TyKind::Inline { .. }) {
+                            return Err(format!(
+                                "`{member}` is held in place — assign its elements or fields one by one"
+                            ));
+                        }
                         return Ok(Place::Field(Box::new(base), idx));
                     }
                 }
@@ -7719,6 +7978,13 @@ impl<'a> FnLower<'a> {
                 if self.cx.as_list(bty).is_some() {
                     let (data, i0) = self.checked_list_index(b, bty, i);
                     return Ok(Place::Index(Box::new(data), Box::new(i0)));
+                }
+                if let TyKind::Inline { elem, count } = *self.tt().kind(bty) {
+                    if matches!(self.tt().kind(elem), TyKind::Record(_)) {
+                        return Err("assign the fields of a nested record one by one".into());
+                    }
+                    let (b, i0) = self.checked_inline_index(b, count, i);
+                    return Ok(Place::Index(Box::new(b), Box::new(i0)));
                 }
                 let i0 = Expr::Bin(
                     BinOp::Sub,

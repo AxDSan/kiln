@@ -776,7 +776,9 @@ impl Parser {
             return Ok(TypeRef::Void);
         }
         let name = self.ident()?;
-        let mut ty = if self.peek() == &Tok::Lt {
+        let mut ty = if name == "delegate" && self.peek() == &Tok::Star {
+            self.fn_ptr_type()?
+        } else if self.peek() == &Tok::Lt {
             self.bump();
             let mut args = Vec::new();
             loop {
@@ -802,10 +804,43 @@ impl Parser {
                     self.bump();
                     ty = TypeRef::Array(Box::new(ty));
                 }
+                Tok::LBracket
+                    if matches!(self.peek_at(1), Tok::Int(..)) && self.peek_at(2) == &Tok::RBracket =>
+                {
+                    self.bump();
+                    let Tok::Int(n, _) = self.bump() else { unreachable!() };
+                    self.bump();
+                    ty = TypeRef::Fixed(Box::new(ty), n as u32);
+                }
                 _ => break,
             }
         }
         Ok(ty)
+    }
+
+    /// The rest of `delegate* unmanaged[Conv]<P1, P2, R>`, after `delegate`.
+    fn fn_ptr_type(&mut self) -> Result<TypeRef, ParseError> {
+        self.expect(&Tok::Star)?;
+        if matches!(self.peek(), Tok::Ident(w) if w == "unmanaged" || w == "managed") {
+            self.bump();
+        }
+        let mut conv = None;
+        if self.eat(&Tok::LBracket) {
+            conv = Some(self.ident()?);
+            self.expect(&Tok::RBracket)?;
+        }
+        self.expect(&Tok::Lt)?;
+        let mut tys = vec![self.type_ref()?];
+        while self.eat(&Tok::Comma) {
+            tys.push(self.type_ref()?);
+        }
+        self.close_generic()?;
+        let ret = tys.pop().expect("at least one type");
+        Ok(TypeRef::FnPtr {
+            conv,
+            params: tys,
+            ret: Box::new(ret),
+        })
     }
 
     /// Close a generic argument list, splitting a `>>` token into two `>`.
@@ -1688,6 +1723,8 @@ fn is_type_castable(ty: &TypeRef) -> bool {
                 | "string"
         ),
         TypeRef::Array(_) | TypeRef::Optional(_) | TypeRef::Generic(_, _) => true,
+        TypeRef::FnPtr { .. } => true,
+        TypeRef::Fixed(..) => false,
         TypeRef::Void => false,
     }
 }

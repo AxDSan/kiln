@@ -1,0 +1,73 @@
+// Calling a function whose address is only known at run time.
+//
+// `libplug.so` is not linked against and not declared: the program opens it with
+// `dlopen`, asks `dlsym` for an address by name, and calls what comes back. The
+// signature lives in the type — `delegate* unmanaged<int, int, int>` takes two
+// ints and returns one — because there is no declaration anywhere to carry it.
+//
+//   clang -shared -fPIC -o libplug.so examples/dll/plug.c
+//   kiln build examples/dll/plug.kiln -o plug && ./plug
+
+namespace Plug;
+
+// A table of function addresses, the shape a COM vtable has: four held in
+// place inside a C struct.
+[CLayout]
+public record Slots(delegate* unmanaged<int, int, int>[4] Fn);
+
+public static class Plug
+{
+    // The POSIX loader. `libdl.so.2` is spelled with its extension so it is
+    // used exactly as written.
+    [Dll("libdl.so.2", Entry = "dlopen")]
+    public static extern Ptr Dlopen(string path, int mode);
+
+    [Dll("libdl.so.2", Entry = "dlsym")]
+    public static extern Ptr Dlsym(Ptr handle, string symbol);
+
+    [Dll("libdl.so.2", Entry = "dlclose")]
+    public static extern int Dlclose(Ptr handle);
+
+    const int RtldNow = 2;
+
+    public static void Main()
+    {
+        Ptr lib = Dlopen("./libplug.so", RtldNow);
+        if (PtrIsNull(lib))
+        {
+            Console.WriteLine("libplug.so did not load");
+            return;
+        }
+
+        // A value in, a value out. The cast states the C prototype, because
+        // nothing else states it.
+        var add = (delegate* unmanaged<int, int, int>)Dlsym(lib, "add");
+        Console.WriteLine(add(5, 10));
+
+        // A C string out, copied into a `string` — the same marshalling a
+        // `[Dll]` method returning `string` does.
+        var name = (delegate* unmanaged<string>)Dlsym(lib, "name");
+        Console.WriteLine(name());
+
+        // No return value, so it is a statement: the plug-in writes through the cell.
+        Ptr cell = MemAlloc(4);
+        PtrWriteInt(cell, 0, 41);
+        ((delegate* unmanaged<Ptr, void>)Dlsym(lib, "bump"))(cell);
+        Console.WriteLine(PtrReadInt(cell, 0));
+        MemFree(cell);
+
+        // The address READ out of a table of pointers rather than held in a
+        // variable.
+        Ptr table = MemAlloc(8);
+        PtrWritePtr(table, 0, add);
+        Console.WriteLine(((delegate* unmanaged<int, int, int>)PtrReadPtr(table, 0))(20, 22));
+        MemFree(table);
+
+        // A slot of an inline array is a callee as it is: positions count from 1.
+        var vt = new Slots();
+        vt.Fn[4] = add;
+        Console.WriteLine(vt.Fn[4](2, 3));
+
+        Console.WriteLine(Dlclose(lib));
+    }
+}

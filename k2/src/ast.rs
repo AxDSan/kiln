@@ -206,8 +206,17 @@ pub enum TypeRef {
     Optional(Box<TypeRef>),
     /// `T[]`
     Array(Box<TypeRef>),
+    /// `T[16]` — sixteen `T`s held in place, in a `[CLayout]` record.
+    Fixed(Box<TypeRef>, u32),
     /// `List<T>`, `Dictionary<K,V>`, `Result<T>`, `Func<...>` etc.
     Generic(String, Vec<TypeRef>),
+    /// `delegate* unmanaged[Cdecl]<int, int, int>` — a C function's address.
+    /// The last type is the return type; `conv` is what the brackets name.
+    FnPtr {
+        conv: Option<String>,
+        params: Vec<TypeRef>,
+        ret: Box<TypeRef>,
+    },
     Void,
 }
 

@@ -1,0 +1,193 @@
+// The shapes a real Win32 header is full of, declared as `[CLayout]` records: a
+// struct nested by value, 16-bit `WORD` fields, a fixed inline array, and a
+// `float`. `structs.c` declares the same four in C and reports its own `sizeof`
+// and `offsetof` for each, so every number printed here is checked against the
+// C compiler's rather than against a table written by hand.
+//
+//   clang -shared -fPIC -o libstructs.so examples/dll/structs.c
+//   kiln build examples/dll/cstruct2.kiln -o cstruct2 && ./cstruct2
+
+namespace Cstruct2;
+
+[CLayout]
+public record Point(int X, int Y);
+
+// A `MSG`: the `Point` at the end sits inline, by value — a `[CLayout]` record
+// inside another is held in place, as a C struct member is.
+[CLayout]
+public record Msg(Ptr Hwnd, int Message, long Wparam, long Lparam, int Time, Point Pt);
+
+// `WNDCLASSEX`-shaped: two 16-bit fields between an int and a pointer, so the
+// padding around them is what a wrong width would move.
+[CLayout]
+public record WC(int Style, ushort ClsExtra, ushort WndExtra, string Name);
+
+// `PAINTSTRUCT`-shaped: `byte[16]` is sixteen bytes held in place.
+[CLayout]
+public record Blob(int N, byte[16] Bytes);
+
+[CLayout]
+public record FloatBox(float Value);
+
+public static class Cstruct2
+{
+    [Dll("structs", Entry = "structs_fill_msg")]
+    public static extern void FillMsg(Msg m);
+
+    [Dll("structs", Entry = "structs_move_point")]
+    public static extern void MovePoint(Point p, int dx, int dy);
+
+    [Dll("structs", Entry = "structs_paint_blob")]
+    public static extern void PaintBlob(Blob b, int value);
+
+    [Dll("structs", Entry = "structs_blob_byte")]
+    public static extern int BlobByte(Blob b, int index0);
+
+    [Dll("structs", Entry = "structs_set_float")]
+    public static extern void SetFloat(FloatBox f, double value);
+
+    [Dll("structs", Entry = "structs_get_float")]
+    public static extern double GetFloat(FloatBox f);
+
+    [Dll("structs", Entry = "structs_fill_wndclass")]
+    public static extern void FillWndclass(WC w);
+
+    [Dll("structs", Entry = "structs_msg_sizeof")]
+    public static extern long RefMsgSize();
+
+    [Dll("structs", Entry = "structs_msg_offset_pt")]
+    public static extern long RefMsgOffPt();
+
+    [Dll("structs", Entry = "structs_point_sizeof")]
+    public static extern long RefPointSize();
+
+    [Dll("structs", Entry = "structs_wndclass_sizeof")]
+    public static extern long RefWcSize();
+
+    [Dll("structs", Entry = "structs_wndclass_offset_name")]
+    public static extern long RefWcOffName();
+
+    [Dll("structs", Entry = "structs_blob_sizeof")]
+    public static extern long RefBlobSize();
+
+    [Dll("structs", Entry = "structs_blob_offset_bytes")]
+    public static extern long RefBlobOffBytes();
+
+    [Dll("structs", Entry = "structs_floatbox_sizeof")]
+    public static extern long RefFloatboxSize();
+
+    // A constant, and a static field seeded from it.
+    const int Start = 5;
+    static int seeded = Start;
+
+    public static void Main()
+    {
+        // --- a nested record by value ------------------------------------
+        var m = new Msg();
+        m.Pt.X = 11;
+        m.Pt.Y = 22;
+        Console.WriteLine(m.Pt.X);              // 11 — a nested field round-trips
+        Console.WriteLine(m.Pt.Y);              // 22
+
+        Console.WriteLine((long)Msg.Size);      // Kiln's layout
+        Console.WriteLine(RefMsgSize());        // clang's sizeof(SMsg) — the same number
+        Console.WriteLine((long)Point.Size);
+        Console.WriteLine(RefPointSize());
+
+        // C fills the whole struct through the pointer, including the nested POINT.
+        FillMsg(m);
+        Console.WriteLine(m.Pt.X);              // 300
+        Console.WriteLine(m.Pt.Y);              // 400
+        Console.WriteLine(m.Message);           // 15
+        Console.WriteLine(m.Wparam);            // 1000000000000
+
+        // A nested record converts to a pointer to itself: write through it,
+        // and the field inside the MSG moves.
+        Ptr msgBase = m;
+        Ptr ptAt = m.Pt;
+        if (PtrToInt(ptAt) - PtrToInt(msgBase) == RefMsgOffPt())
+            Console.WriteLine("pt-offset-ok");
+        else
+            Console.WriteLine("pt-offset-BUG");
+        PtrWriteInt(ptAt, 0, 777);
+        Console.WriteLine(m.Pt.X);              // 777
+
+        // A nested field passed where an extern declares that record: C gets the
+        // nested struct's own address, so it moves the POINT inside the MSG.
+        MovePoint(m.Pt, 3, 4);
+        Console.WriteLine(m.Pt.X);              // 780
+        Console.WriteLine(m.Pt.Y);              // 404
+
+        // --- 16-bit fields ------------------------------------------------
+        var w = new WC();
+        w.ClsExtra = 65535;
+        w.WndExtra = 258;
+        Console.WriteLine(w.ClsExtra);          // 65535 — read back unsigned
+        Console.WriteLine(w.WndExtra);          // 258
+        Console.WriteLine((long)WC.Size);
+        Console.WriteLine(RefWcSize());         // clang's sizeof(SWndClass)
+        FillWndclass(w);
+        Console.WriteLine(w.ClsExtra);          // 65535, written by C as a uint16_t
+        Console.WriteLine(w.WndExtra);          // 258
+        Console.WriteLine(w.Name);              // window
+        if (WC.OffsetOf("Name") == RefWcOffName())
+            Console.WriteLine("wc-name-offset-ok");
+        else
+            Console.WriteLine("wc-name-offset-BUG");
+
+        // --- a fixed inline array ---------------------------------------------
+        var b = new Blob();
+        b.N = 9;
+        foreach (var i in 1..16)
+            b.Bytes[i] = (byte)(i * 3);
+        Console.WriteLine(b.Bytes[1]);          // 3
+        Console.WriteLine(b.Bytes[16]);         // 48
+        // C reads index 0 where Kiln wrote position 1: the count starts at 1
+        // here and at 0 there, and the same byte answers both.
+        Console.WriteLine(BlobByte(b, 0));      // 3
+        Console.WriteLine(BlobByte(b, 15));     // 48
+        Console.WriteLine((long)Blob.Size);     // 4 + 16, padded
+        Console.WriteLine(RefBlobSize());       // clang's sizeof(SBlob)
+
+        // An inline array converts to a pointer to its first element.
+        Ptr bytesAt = b.Bytes;
+        Ptr blobAt = b;
+        if (PtrToInt(bytesAt) - PtrToInt(blobAt) == RefBlobOffBytes())
+            Console.WriteLine("bytes-offset-ok");
+        else
+            Console.WriteLine("bytes-offset-BUG");
+
+        // C memsets the member alone: every element changes, `N` does not.
+        PaintBlob(b, 77);
+        Console.WriteLine(b.Bytes[1]);          // 77
+        Console.WriteLine(b.Bytes[16]);         // 77
+        Console.WriteLine(b.N);                 // 9 — untouched
+
+        // A computed index reaches the same element a literal one does.
+        int k = 16;
+        b.Bytes[k] = 200;
+        Console.WriteLine(b.Bytes[16]);         // 200
+
+        // A `const` stands where a literal index does, and is bounds-checked
+        // the same way — the count is part of the type either way.
+        b.Bytes[Start] = 55;
+        Console.WriteLine(b.Bytes[5]);          // 55
+
+        // --- a float field ------------------------------------------------
+        var f = new FloatBox();
+        f.Value = 1.5f;
+        Console.WriteLine((double)f.Value);     // 1.5 — exact in binary
+        Console.WriteLine((long)FloatBox.Size);
+        Console.WriteLine(RefFloatboxSize());
+        SetFloat(f, 2.25);
+        Console.WriteLine((double)f.Value);     // 2.25, stored by C as a float
+        SetFloat(f, 0.5);
+        if (GetFloat(f) == f.Value)
+            Console.WriteLine("float-agrees");
+        else
+            Console.WriteLine("float-BUG");
+
+        // --- a static field seeded from a constant --------------------------
+        Console.WriteLine(seeded);              // 5
+    }
+}
