@@ -867,6 +867,7 @@ impl Parser {
                 StmtKind::Return(v)
             }
             Tok::Keyword(Kw::If) => return self.if_stmt(),
+            Tok::Keyword(Kw::Switch) => return self.switch_stmt(),
             Tok::Keyword(Kw::While) => {
                 self.bump();
                 self.expect(&Tok::LParen)?;
@@ -923,6 +924,55 @@ impl Parser {
         }
     }
 
+    fn switch_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let span = self.span();
+        self.expect(&Tok::Keyword(Kw::Switch))?;
+        self.expect(&Tok::LParen)?;
+        let subject = self.expr()?;
+        self.expect(&Tok::RParen)?;
+        self.expect(&Tok::LBrace)?;
+        let mut sections: Vec<SwitchSection> = Vec::new();
+        while self.peek() != &Tok::RBrace {
+            let mut labels = Vec::new();
+            loop {
+                if self.eat_kw(Kw::Default) {
+                    labels.push(SwitchPat::Discard);
+                } else if self.eat_kw(Kw::Case) {
+                    let pat = if self.peek() == &Tok::Ident("_".into()) {
+                        self.bump();
+                        SwitchPat::Discard
+                    } else if let Some((op, _)) = relational_pat(self.peek()) {
+                        self.bump();
+                        SwitchPat::Relational(op, self.expr()?)
+                    } else {
+                        SwitchPat::Const(self.expr()?)
+                    };
+                    labels.push(pat);
+                } else {
+                    break;
+                }
+                self.expect(&Tok::Colon)?;
+            }
+            if labels.is_empty() {
+                return self.err("expected `case` or `default` in a `switch`");
+            }
+            let mut body = Vec::new();
+            while !matches!(
+                self.peek(),
+                Tok::RBrace | Tok::Keyword(Kw::Case) | Tok::Keyword(Kw::Default) | Tok::Eof
+            ) {
+                body.push(self.stmt()?);
+            }
+            sections.push(SwitchSection { labels, body });
+        }
+        self.expect(&Tok::RBrace)?;
+        Ok(Stmt {
+            leading: Vec::new(),
+            kind: StmtKind::Switch { subject, sections },
+            span,
+        })
+    }
+
     fn if_stmt(&mut self) -> Result<Stmt, ParseError> {
         let span = self.span();
         self.expect(&Tok::Keyword(Kw::If))?;
@@ -953,6 +1003,9 @@ impl Parser {
         let init = if self.peek() == &Tok::Semi {
             self.bump();
             None
+        } else if let Some(decl) = self.try_local_decl(self.span())? {
+            // `for (int i = 0; …)` — the declaration takes its own `;`.
+            Some(decl)
         } else {
             let s = self.simple_stmt()?;
             self.expect(&Tok::Semi)?;

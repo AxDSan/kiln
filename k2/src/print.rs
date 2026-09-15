@@ -464,6 +464,24 @@ fn stmt(o: &mut Out, s: &Stmt) {
                 break;
             }
         }
+        StmtKind::Switch { subject, sections } => {
+            o.open(&format!("switch ({})", expr(subject)));
+            for sec in sections {
+                for l in &sec.labels {
+                    o.line(&match l {
+                        SwitchPat::Discard => "default:".to_string(),
+                        SwitchPat::Const(c) => format!("case {}:", expr(c)),
+                        SwitchPat::Relational(op, c) => format!("case {} {}:", bin_sym(*op), expr(c)),
+                    });
+                }
+                o.depth += 1;
+                for s in &sec.body {
+                    stmt(o, s);
+                }
+                o.depth -= 1;
+            }
+            o.close();
+        }
         StmtKind::While { cond, body } => {
             o.open(&format!("while ({})", expr(cond)));
             for s in body {

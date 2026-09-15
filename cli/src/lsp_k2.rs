@@ -405,7 +405,7 @@ fn keyword_doc(w: &str) -> Option<&'static str> {
         "interface" => "a shape two types can share — there is no inheritance",
         "namespace" => "the file's namespace",
         "using" => "load a library: `using Kiln.File;` gives `File.ReadText`",
-        "switch" => "a switch expression: each arm is a pattern and a value",
+        "switch" => "a switch statement (`case`/`default` sections, no fall-through) or a switch expression (`x switch { pattern => value }`)",
         "foreach" => "iterate a range or a list; each turn binds its own variable",
         "partial" => "this declaration is one half; the other half is elsewhere",
         "extern" => "declared here, defined elsewhere — see `[Dll]`",

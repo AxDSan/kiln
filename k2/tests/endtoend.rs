@@ -2046,3 +2046,100 @@ Console.WriteLine($"{empty.Count}");
     assert!(formatted.contains(r#"new Dictionary<string, int> { ["Ada"] = 36, ["Alan"] = 41 }"#), "{formatted}");
     assert_eq!(run_k2(&formatted), "Ada 36\nAlan 41\n0\n");
 }
+
+#[test]
+fn a_switch_statement_selects_a_section() {
+    let src = r#"
+namespace Sw;
+
+public enum Colour { Red, Green, Blue }
+
+public static class P
+{
+    static string Kind(int n)
+    {
+        switch (n)
+        {
+            case 0:
+                return "zero";
+            case 1:
+            case 2:
+                return "small";
+            case >= 100:
+                return "huge";
+            default:
+                return "other";
+        }
+    }
+
+    public static void Main()
+    {
+        for (int i = 0; i < 6; i++)
+        {
+            switch (i % 3)
+            {
+                case 0:
+                    if (i == 3)
+                    {
+                        Console.WriteLine("three, skipping");
+                        continue;
+                    }
+                    Console.WriteLine($"{i} fizz");
+                    break;
+                case 1:
+                    Console.WriteLine($"{i} one");
+                    break;
+                default:
+                    Console.WriteLine($"{i} two");
+                    break;
+            }
+            Console.WriteLine($"after {i}");
+        }
+        Console.WriteLine($"{Kind(0)} {Kind(2)} {Kind(500)} {Kind(7)}");
+        var name = "bob";
+        switch (name)
+        {
+            case "alice":
+                Console.WriteLine("hi alice");
+                break;
+            case "bob":
+                Console.WriteLine("hi bob");
+                break;
+            default:
+                break;
+        }
+        var c = Colour.Green;
+        switch (c)
+        {
+            case Colour.Red: Console.WriteLine("red"); break;
+            case Colour.Green: Console.WriteLine("green"); break;
+            default: Console.WriteLine("blue"); break;
+        }
+    }
+}
+"#;
+    assert_eq!(
+        run_k2(src),
+        "0 fizz\nafter 0\n1 one\nafter 1\n2 two\nafter 2\nthree, skipping\n4 one\nafter 4\n5 two\nafter 5\nzero small huge other\nhi bob\ngreen\n"
+    );
+}
+
+#[test]
+fn a_switch_section_that_falls_through_is_a_compile_error() {
+    let fall = r#"
+namespace Sw2;
+public static class P { public static void Main() {
+    switch (1) { case 1: Console.WriteLine("a"); case 2: break; }
+} }
+"#;
+    let err = kiln_k2::compile_to_llvm(fall).unwrap_err();
+    assert!(err.contains("fall through"), "got: {err}");
+    let cont = r#"
+namespace Sw3;
+public static class P { public static void Main() {
+    switch (1) { case 1: continue; default: break; }
+} }
+"#;
+    let err = kiln_k2::compile_to_llvm(cont).unwrap_err();
+    assert!(err.contains("inside a loop"), "got: {err}");
+}

@@ -1690,6 +1690,9 @@ struct FnLower<'a> {
     /// The step of each enclosing loop (a `for`'s increment, a `foreach`'s
     /// counter bump). `continue` must run it, or the loop never advances.
     loop_steps: Vec<Vec<Stmt>>,
+    /// Each enclosing `switch` statement: the `loop_frames` depth it pushed,
+    /// and the flag a `continue` inside it sets.
+    switch_frames: Vec<(usize, LocalId)>,
     /// `T?` locals proven non-null by an enclosing `if`, so reading one yields
     /// the `T` rather than the optional.
     narrowed: std::collections::HashSet<String>,
@@ -1708,6 +1711,7 @@ impl<'a> FnLower<'a> {
             defers: vec![Vec::new()],
             loop_frames: Vec::new(),
             loop_steps: Vec::new(),
+            switch_frames: Vec::new(),
             narrowed: std::collections::HashSet::new(),
         }
     }
@@ -2096,6 +2100,9 @@ impl<'a> FnLower<'a> {
                 Some(v) => self.lower_foreach_dict(var, v, coll, body)?,
                 None => self.lower_foreach(var, coll, body)?,
             },
+            ast::StmtKind::Switch { subject, sections } => {
+                self.switch_stmt(subject, sections)?;
+            }
             ast::StmtKind::Break => {
                 let floor = self.loop_frames.last().copied().unwrap_or(0);
                 self.emit_defers_to(floor);
@@ -2104,6 +2111,22 @@ impl<'a> FnLower<'a> {
             ast::StmtKind::Continue => {
                 let floor = self.loop_frames.last().copied().unwrap_or(0);
                 self.emit_defers_to(floor);
+                // Inside a `switch`, which is lowered as a loop that runs once,
+                // `continue` means the enclosing loop: leave the switch with a
+                // flag set, and the code after it continues for real.
+                if let Some(&(depth, flag)) = self.switch_frames.last() {
+                    if self.loop_frames.len() == self.switch_frames.len() {
+                        return Err("`continue` is only allowed inside a loop".into());
+                    }
+                    if depth == self.loop_frames.len() {
+                        self.push(Stmt::Assign {
+                            place: Place::Local(flag),
+                            value: Expr::Bool(true),
+                        });
+                        self.push(Stmt::Break);
+                        return Ok(());
+                    }
+                }
                 // The step runs on `continue` too — otherwise a counted loop
                 // that continues never advances.
                 if let Some(step) = self.loop_steps.last().cloned() {
@@ -6027,6 +6050,134 @@ impl<'a> FnLower<'a> {
         Ok(r?.1)
     }
 
+    /// A `switch` statement: the subject is held once and the sections become an
+    /// if-chain inside a loop that runs once, so `break` leaves the switch.
+    ///
+    /// As in C#, control may not fall from one section into the next: a
+    /// section with statements ends in `break`, `return` or `continue`.
+    fn switch_stmt(
+        &mut self,
+        subject: &ast::Expr,
+        sections: &[ast::SwitchSection],
+    ) -> Result<(), String> {
+        for (i, sec) in sections.iter().enumerate() {
+            let ends = matches!(
+                sec.body.last().map(|s| &s.kind),
+                Some(ast::StmtKind::Break | ast::StmtKind::Return(_) | ast::StmtKind::Continue)
+            );
+            if !ends {
+                let what = if sec.body.is_empty() && i + 1 == sections.len() {
+                    "the last section of a `switch` has no statements"
+                } else {
+                    "control cannot fall through from one `case` to the next — end the section with `break`, `return` or `continue`"
+                };
+                return Err(what.into());
+            }
+        }
+        if sections.iter().flat_map(|s| &s.labels).filter(|l| matches!(l, ast::SwitchPat::Discard)).count() > 1 {
+            return Err("a `switch` has more than one `default`".into());
+        }
+        let (subj, sty) = self.expr(subject, None)?;
+        let held = self.new_local("$switch", sty);
+        self.push(Stmt::Let { local: held, value: subj });
+        let flag = self.new_local("$switchcontinue", TyTable::BOOL);
+        self.push(Stmt::Let { local: flag, value: Expr::Bool(false) });
+
+        self.loop_frames.push(self.defers.len());
+        self.switch_frames.push((self.loop_frames.len(), flag));
+        let result = (|| -> Result<Vec<Stmt>, String> {
+            // Conditions and bodies, in source order; `default` last.
+            let mut arms: Vec<(Option<Vec<Stmt>>, Option<Expr>, Vec<Stmt>)> = Vec::new();
+            let mut default_body: Option<Vec<Stmt>> = None;
+            for sec in sections {
+                let body = self.lower_body(&sec.body)?;
+                if sec.labels.iter().any(|l| matches!(l, ast::SwitchPat::Discard)) {
+                    default_body = Some(body);
+                    continue;
+                }
+                self.blocks.push(Vec::new());
+                let mut cond: Option<Expr> = None;
+                let mut err = None;
+                for l in &sec.labels {
+                    let (c, op) = match l {
+                        ast::SwitchPat::Const(c) => (c, BinOp::Eq),
+                        ast::SwitchPat::Relational(op, c) => (
+                            c,
+                            match op {
+                                ast::BinOp::Lt => BinOp::Lt,
+                                ast::BinOp::Le => BinOp::Le,
+                                ast::BinOp::Gt => BinOp::Gt,
+                                _ => BinOp::Ge,
+                            },
+                        ),
+                        ast::SwitchPat::Discard => unreachable!(),
+                    };
+                    match self.expr(c, Some(sty)) {
+                        Ok((cv, cty)) => {
+                            let test = if sty == TyTable::STR && cty == TyTable::STR {
+                                let order = Expr::Call(Box::new(Call::Dll {
+                                    library: "c".into(),
+                                    symbol: "strcmp".into(),
+                                    conv: CallConv::Cdecl,
+                                    args: vec![Expr::Local(held), cv],
+                                    arg_tys: vec![TyTable::STR, TyTable::STR],
+                                    ret: TyTable::I32,
+                                    varargs: false,
+                                }));
+                                Expr::Bin(op, Box::new(order), Box::new(Expr::Int(0, TyTable::I32)), TyTable::I32)
+                            } else {
+                                Expr::Bin(op, Box::new(Expr::Local(held)), Box::new(cv), sty)
+                            };
+                            cond = Some(match cond.take() {
+                                None => test,
+                                Some(prev) => Expr::Bin(BinOp::Or, Box::new(prev), Box::new(test), TyTable::BOOL),
+                            });
+                        }
+                        Err(e) => {
+                            err = Some(e);
+                            break;
+                        }
+                    }
+                }
+                let pre = self.blocks.pop().unwrap();
+                if let Some(e) = err {
+                    return Err(e);
+                }
+                arms.push((Some(pre), cond, body));
+            }
+            // Build the chain from the back. A label's setup statements (a
+            // constant that is a call, say) run before its test.
+            let mut chain = default_body.unwrap_or_default();
+            for (pre, cond, body) in arms.into_iter().rev() {
+                let mut stmts = pre.unwrap_or_default();
+                stmts.push(Stmt::If {
+                    cond: cond.expect("a case has a label"),
+                    then: body,
+                    els: std::mem::take(&mut chain),
+                });
+                chain = stmts;
+            }
+            chain.push(Stmt::Break);
+            Ok(chain)
+        })();
+        self.switch_frames.pop();
+        self.loop_frames.pop();
+        let body = result?;
+        self.push(Stmt::Loop { body });
+        // A `continue` inside the switch continues the enclosing loop now.
+        self.blocks.push(Vec::new());
+        let cont = self.stmt(&ast::Stmt {
+            kind: ast::StmtKind::Continue,
+            leading: Vec::new(),
+            span: subject.span,
+        });
+        let then = self.blocks.pop().unwrap();
+        if cont.is_ok() && !self.loop_frames.is_empty() {
+            self.push(Stmt::If { cond: Expr::Local(flag), then, els: vec![] });
+        }
+        Ok(())
+    }
+
     /// A `switch` expression: the subject is held once, then the arms become an
     /// if-chain assigning into one temporary.
     fn switch(
@@ -7774,6 +7925,19 @@ fn collect_lambdas_stmt(s: &ast::Stmt, out: &mut Vec<ast::Lambda>) {
                 collect_lambdas_stmt(x, out);
             }
         }
+        S::Switch { subject, sections } => {
+            collect_lambdas_expr(subject, out);
+            for sec in sections {
+                for l in &sec.labels {
+                    if let ast::SwitchPat::Const(c) | ast::SwitchPat::Relational(_, c) = l {
+                        collect_lambdas_expr(c, out);
+                    }
+                }
+                for x in &sec.body {
+                    collect_lambdas_stmt(x, out);
+                }
+            }
+        }
         S::Defer(d) => collect_lambdas_stmt(d, out),
         S::Block(b) => {
             for x in b {
@@ -7910,6 +8074,19 @@ fn collect_idents_stmt(s: &ast::Stmt, out: &mut Vec<String>) {
             collect_idents_expr(coll, out);
             for x in body {
                 collect_idents_stmt(x, out);
+            }
+        }
+        S::Switch { subject, sections } => {
+            collect_idents_expr(subject, out);
+            for sec in sections {
+                for l in &sec.labels {
+                    if let ast::SwitchPat::Const(c) | ast::SwitchPat::Relational(_, c) = l {
+                        collect_idents_expr(c, out);
+                    }
+                }
+                for x in &sec.body {
+                    collect_idents_stmt(x, out);
+                }
             }
         }
         S::Defer(d) => collect_idents_stmt(d, out),

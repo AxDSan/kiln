@@ -261,6 +261,11 @@ pub enum StmtKind {
         coll: Expr,
         body: Vec<Stmt>,
     },
+    /// `switch (x) { case 1: case 2: …; break; default: …; break; }`
+    Switch {
+        subject: Expr,
+        sections: Vec<SwitchSection>,
+    },
     Break,
     Continue,
     Defer(Box<Stmt>),
@@ -325,6 +330,14 @@ pub enum ExprKind {
     /// A collection expression: `[]`, `[a, b, c]`. Target-typed — today that
     /// means an array, which is what a command taking a list of values wants.
     Collection(Vec<Expr>),
+}
+
+/// One `case …:` group of a `switch` statement: its labels (`Discard` is
+/// `default`) and the statements they share.
+#[derive(Clone, Debug)]
+pub struct SwitchSection {
+    pub labels: Vec<SwitchPat>,
+    pub body: Vec<Stmt>,
 }
 
 #[derive(Clone, Debug)]
