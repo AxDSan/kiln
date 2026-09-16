@@ -91,18 +91,19 @@ what `--release` is for.
 - **Null flow narrows less than it could.** `x != null` narrows, and `x!` and
   `x?.` work, but the proof does not carry through `&&`, through an early
   `return`, or through an `is T v` pattern.
-- **A generic type argument is refused unless the compiler knows the type.**
-  `List<T>`, `Dictionary<K,V>` and `HashSet<T>` are built in, and a generic type
-  a program writes takes its `where` constraints — but a program cannot yet pass
-  a type it wrote as another generic type's argument.
 - **A format specifier is refused, not ignored.** `$"{x:03}"` is a compile
   error; pad or round the value with a command before interpolating it.
-- **A run-time event handler takes no event arguments** — a grid's row, a key's
-  code. A handler that needs them is wired to a method group that reads the
+- **A run-time event handler takes the grid's row and nothing else.** A method
+  wired to a grid's `Select` or `Activate` receives the row; a key's code and the
+  other components' event arguments do not cross yet, so such a handler reads the
   component's state instead.
-- **A kit written as a `.kdecl` declaration bundle is still Kiln 1.x.** Kiln 2
-  reaches its commands; the structs and constants it declares do not cross yet,
-  so the `win` kit's guide is written in 1.x syntax.
+- **A declaration has one name.** `int a = 2, b = 3;` is refused; write two
+  declarations.
+- **A call goes through a name, not an index.** `handlers[2](4)` is refused;
+  copy the element into a local and call that.
+- **A unit file carries code, not forms.** A form declared in a unit is not
+  built into the program, and a breakpoint set in a unit file does not resolve —
+  stepping into the unit does, and stops on the unit's own lines.
 - **`kiln fmt` moves a comment written at the end of a line** above the next
   construct, because a comment attaches to the construct that follows it, and it
   normalises blank lines rather than preserving them.
