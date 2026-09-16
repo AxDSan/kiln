@@ -109,6 +109,24 @@ fn serve() -> Result<(), Box<dyn Error + Sync + Send>> {
         references_provider: Some(OneOf::Left(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
         document_formatting_provider: Some(OneOf::Left(true)),
+        // Painting from the compiler's own lexer, for a K2 file: an editor's
+        // guess at what is a keyword or a comment cannot then disagree with it.
+        semantic_tokens_provider: Some(
+            lsp_types::SemanticTokensServerCapabilities::SemanticTokensOptions(
+                lsp_types::SemanticTokensOptions {
+                    legend: lsp_types::SemanticTokensLegend {
+                        token_types: crate::lsp_k2::SEMANTIC_LEGEND
+                            .iter()
+                            .map(|t| lsp_types::SemanticTokenType::new(t))
+                            .collect(),
+                        token_modifiers: Vec::new(),
+                    },
+                    full: Some(lsp_types::SemanticTokensFullOptions::Bool(true)),
+                    range: None,
+                    work_done_progress_options: Default::default(),
+                },
+            ),
+        ),
         ..Default::default()
     })?;
 
@@ -213,6 +231,7 @@ impl Server {
             References::METHOD => self.on_references(req.params),
             DocumentSymbolRequest::METHOD => self.on_document_symbol(req.params),
             Formatting::METHOD => self.on_formatting(req.params),
+            "textDocument/semanticTokens/full" => self.on_semantic_tokens(req.params),
             _ => {
                 let resp = Response::new_err(
                     id,
@@ -622,6 +641,28 @@ impl Server {
             return None;
         }
         serde_json::to_value(crate::lsp_k2::formatting(&src)?).ok()
+    }
+
+    /// The whole document's semantic tokens, in the protocol's relative
+    /// encoding: each token's line and start as a delta from the one before.
+    fn on_semantic_tokens(&mut self, params: serde_json::Value) -> Option<serde_json::Value> {
+        let uri: Uri = serde_json::from_value(params.get("textDocument")?.get("uri")?.clone()).ok()?;
+        let src = self.docs.get(&uri)?.clone();
+        if !crate::lsp_k2::is_k2(&src) {
+            return None;
+        }
+        let mut toks = crate::lsp_k2::semantic_tokens(&src);
+        toks.sort_by_key(|t| (t.line, t.col));
+        let mut data = Vec::with_capacity(toks.len() * 5);
+        let (mut pl, mut pc) = (0usize, 0usize);
+        for t in toks {
+            let dl = t.line - pl;
+            let dc = if dl == 0 { t.col - pc } else { t.col };
+            data.extend([dl as u32, dc as u32, t.len as u32, t.kind, 0]);
+            pl = t.line;
+            pc = t.col;
+        }
+        Some(serde_json::json!({ "data": data }))
     }
 
     fn on_document_symbol(&mut self, params: serde_json::Value) -> Option<serde_json::Value> {

@@ -87,6 +87,18 @@ static void test_highlight() {
     check("1.x: `#` opens a comment",
           has(highlight_line("# a note"), "<span class='c'>"));
 
+    // Painting from the server's tokens: each stretch gets its legend's class
+    // and the text between them stays plain and intact.
+    {
+        const std::vector<kiln::designer::SemToken> toks = {{0, 3, 0}, {4, 1, 6}, {8, 5, 4}, {14, 2, 2}};
+        const std::string painted = kiln::designer::paint_line("var P = Twice(21);", toks);
+        check("semantic: a keyword token paints as a keyword",
+              has(painted, "<span class='k'>var</span>"));
+        check("semantic: a type token paints as a type", has(painted, "<span class='t'>P</span>"));
+        check("semantic: a call paints as a call", has(painted, "<span class='m'>Twice</span>"));
+        check("semantic: the text between tokens survives", has(painted, "21</span>);"));
+    }
+
     // Kiln 2.
     check("K2: `namespace` is a keyword",
           has(highlight_line("namespace Counter;", true), "<span class='k'>namespace</span>"));
@@ -846,6 +858,16 @@ static void test_kiln2_form(const std::string& kiln, const std::string& designer
     // that did not load has nothing to select, and the Events tab is where the
     // wiring shows. `Click += OnAdd` must reach the designer as the same
     // `click`/`on_add` pair a 1.x form gives, since that is all it knows.
+    // The code pane is painted by the language server's semantic tokens, not
+    // only by Studio's own tokenizer: the answer arrives and covers the file.
+    {
+        const std::string sem = session(designer, kiln, form, "view:code;waitsem");
+        size_t lines = 0, tokens = 0;
+        if (const size_t at = sem.find("semantic: "); at != std::string::npos)
+            std::sscanf(sem.c_str() + at, "semantic: %zu lines, %zu tokens", &lines, &tokens);
+        check("the server paints a K2 file (semantic tokens arrive)", lines > 0 && tokens > 10);
+    }
+
     const std::string out = session(designer, kiln, form, "select:add;click:segevents;events");
     check("a K2 form loads at all", !has(out, "cannot load"));
     check("a K2 handler reaches the Events tab", has(out, "click=on_add"));

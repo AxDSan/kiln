@@ -298,18 +298,18 @@ clang and checks stdout):
   made in a loop holds that turn's value (C#'s post-5.0 rule), while a write
   within the turn is still shared. `Action` with no type arguments as well
 
+- Studio paints a K2 file from the language server's semantic tokens — the
+  compiler's own lexer decides keywords, types, calls and members
+
 **Not yet built** (next phases, in rough order):
 
 1. Richer null flow: `x != null` narrows, and `x!` and `x?.` are built, but
    narrowing through `&&`, through an early `return` and through an `is T v`
    pattern is not.
-2. Studio's code pane highlights K2 from its own line tokenizer rather than
-   from the language server's semantic tokens — the shapes are right, but the
-   toolchain is not the one deciding them.
-3. `List<T>` is K2's own structure, converted to and from a runtime array at the
+2. `List<T>` is K2's own structure, converted to and from a runtime array at the
    command boundary. Re-platforming it onto `Kiln_Array` buys nothing now that
    allocation is collected.
-4. One `k2` crate holds syntax + lowering; it splits into `k2-syntax`/
+3. One `k2` crate holds syntax + lowering; it splits into `k2-syntax`/
    `k2-sema`/`k2-lower` as `k2-sema` grows.
 
 ## Milestone: the RAD half runs
@@ -338,6 +338,11 @@ record, a `List<T>`, a `Select` lambda and a `switch` over an enum.
   which is what a shipped program gets.
 - **One `k2` crate** holds syntax + lowering; splits into `k2-syntax`/`k2-sema`/
   `k2-lower` as `k2-sema` grows (it is currently folded into the lowerer).
+- **`Where`/`Select`/`Any`/`First`/`OrderBy` are compiler builtins, not K2
+  source.** Phase 5's exit (`KitFor`/`WeaponFor` compile and run) is met; moving
+  them into a K2 prelude needs extension methods, lambda-argument inference in
+  generic instantiation (`unify` does not reach `Func`), string ordering, and a
+  place to compile the prelude once.
 - Comments are carried as *leading* trivia, so one written at the end of a line
   moves above the next construct. Blank lines between constructs are
   normalised rather than preserved — the printer puts one between components

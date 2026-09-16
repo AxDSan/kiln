@@ -7,6 +7,7 @@
 #ifndef KILN_DESIGNER_HIGHLIGHT_H
 #define KILN_DESIGNER_HIGHLIGHT_H
 
+#include <algorithm>
 #include <cctype>
 #include <string>
 #include <vector>
@@ -159,6 +160,38 @@ inline std::string highlight_line(const std::string& line, bool k2 = false) {
         out += escape_code(std::string(1, c));
         i++;
     }
+    return out;
+}
+
+/// One stretch of a line the language server painted: a 0-based byte column,
+/// a length, and the legend index (`cli/src/lsp_k2.rs`'s `SEMANTIC_LEGEND`:
+/// keyword, string, number, comment, function, property, type).
+struct SemToken {
+    int col = 0;
+    int len = 0;
+    int kind = 0;
+};
+
+/// A line painted from the server's tokens. What the compiler's lexer calls a
+/// keyword or a comment is what is painted as one; the text between tokens is
+/// plain. Tokens are in column order and do not overlap.
+inline std::string paint_line(const std::string& line, const std::vector<SemToken>& toks) {
+    static const char* cls[] = {"k", "s", "n", "c", "m", "i", "t"};
+    std::string out;
+    size_t at = 0;
+    for (const SemToken& t : toks) {
+        if (t.col < 0 || (size_t)t.col < at || (size_t)t.col >= line.size()) continue;
+        const size_t end = std::min(line.size(), (size_t)(t.col + t.len));
+        out += escape_code(line.substr(at, (size_t)t.col - at));
+        const char* c = t.kind >= 0 && t.kind < 7 ? cls[t.kind] : nullptr;
+        if (c)
+            out += "<span class='" + std::string(c) + "'>" +
+                   escape_code(line.substr((size_t)t.col, end - (size_t)t.col)) + "</span>";
+        else
+            out += escape_code(line.substr((size_t)t.col, end - (size_t)t.col));
+        at = end;
+    }
+    out += escape_code(line.substr(std::min(at, line.size())));
     return out;
 }
 

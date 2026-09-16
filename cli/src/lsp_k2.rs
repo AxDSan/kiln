@@ -689,3 +689,144 @@ pub fn signature(src: &str, caret_line: usize, name: &str) -> Option<String> {
         .find(|(n, _, what)| n == name && *what == "method")
         .map(|(_, sig, _)| sig.clone())
 }
+
+/// The token types a K2 file's semantic tokens use, in legend order. The index
+/// is what a token carries on the wire.
+pub const SEMANTIC_LEGEND: &[&str] =
+    &["keyword", "string", "number", "comment", "function", "property", "type"];
+
+/// One painted stretch of a line: 0-based line and column, a length, and an
+/// index into `SEMANTIC_LEGEND`. Columns count bytes, as the lexer does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SemanticToken {
+    pub line: usize,
+    pub col: usize,
+    pub len: usize,
+    pub kind: u32,
+}
+
+/// How a K2 file is painted, decided by the lexer the compiler uses — so an
+/// editor cannot colour a word as a keyword that the language reads as a name,
+/// or miss a comment the language skips. A name is a type when the file
+/// declares a type by it (or it is one of the collections the language knows),
+/// a function when a call follows it, and a property after a `.`.
+///
+/// A file that does not lex yields nothing, and the editor keeps its own
+/// painting until it does.
+pub fn semantic_tokens(src: &str) -> Vec<SemanticToken> {
+    use kiln_k2::lexer::{Kw, Tok};
+    let Ok(toks) = kiln_k2::lexer::lex(src) else {
+        return Vec::new();
+    };
+    let mut types: std::collections::HashSet<String> = ["List", "Dictionary", "HashSet", "Result", "Bytes", "Ptr", "Func", "Action", "Console"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    for w in toks.windows(2) {
+        if let (
+            Tok::Keyword(Kw::Record | Kw::Class | Kw::Struct | Kw::Enum | Kw::Interface | Kw::Form),
+            Tok::Ident(n),
+        ) = (&w[0].tok, &w[1].tok)
+        {
+            types.insert(n.clone());
+        }
+    }
+    // A name declaring another — `Grid table {`, `Conn c = …`, `Point p;` — is a
+    // type in that position, whether the file declares it or a library does.
+    let mut declaring = std::collections::HashSet::new();
+    for (k, w) in toks.windows(3).enumerate() {
+        if let (Tok::Ident(_), Tok::Ident(_), Tok::LBrace | Tok::Eq | Tok::Semi) =
+            (&w[0].tok, &w[1].tok, &w[2].tok)
+        {
+            declaring.insert(k);
+        }
+    }
+
+    let lines: Vec<&str> = src.split('\n').collect();
+    let mut out = Vec::new();
+    let mut prev_end = (1usize, 1usize); // 1-based line, col just past the last token
+
+    // Comments sit in the gaps the lexer skipped: between `from` and `to`.
+    let comments = |from: (usize, usize), to: (usize, usize), out: &mut Vec<SemanticToken>| {
+        let (mut line, mut col) = from;
+        while line < to.0 || (line == to.0 && col < to.1) {
+            let Some(text) = lines.get(line - 1) else { break };
+            let bytes = text.as_bytes();
+            let end = if line == to.0 { (to.1 - 1).min(bytes.len()) } else { bytes.len() };
+            let mut i = col - 1;
+            while i < end && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'\r') {
+                i += 1;
+            }
+            if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'/' {
+                let len = bytes.len() - i - usize::from(bytes.last() == Some(&b'\r'));
+                out.push(SemanticToken { line: line - 1, col: i, len, kind: 3 });
+                line += 1;
+                col = 1;
+                continue;
+            }
+            if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+                // To the closing `*/`, painted a line at a time.
+                let mut l = line;
+                let mut start = i;
+                loop {
+                    let t = lines.get(l - 1).map(|s| s.as_bytes()).unwrap_or(&[]);
+                    let close = t[start.min(t.len())..]
+                        .windows(2)
+                        .position(|p| p == b"*/")
+                        .map(|p| start + p + 2);
+                    let stop = close.unwrap_or(t.len());
+                    if stop > start {
+                        out.push(SemanticToken { line: l - 1, col: start, len: stop - start, kind: 3 });
+                    }
+                    if let Some(c) = close {
+                        line = l;
+                        col = c + 1;
+                        break;
+                    }
+                    l += 1;
+                    start = 0;
+                    if l > lines.len() {
+                        line = l;
+                        col = 1;
+                        break;
+                    }
+                }
+                continue;
+            }
+            if i < end {
+                col = i + 2;
+            } else {
+                line += 1;
+                col = 1;
+            }
+        }
+    };
+
+    for (k, t) in toks.iter().enumerate() {
+        let (line, col, end_col) = (t.span.line, t.span.col, t.span.end_col);
+        comments(prev_end, (line, col), &mut out);
+        if matches!(t.tok, Tok::Eof) {
+            break;
+        }
+        prev_end = (line, end_col.max(col));
+        let len = end_col.saturating_sub(col);
+        if len == 0 {
+            continue;
+        }
+        let next = toks.get(k + 1).map(|n| &n.tok);
+        let after_dot = k > 0 && matches!(toks[k - 1].tok, Tok::Dot | Tok::QuestionDot);
+        let kind = match &t.tok {
+            Tok::Keyword(_) => Some(0),
+            Tok::Str(_) | Tok::InterpStr(_) | Tok::Char(_) => Some(1),
+            Tok::Int(..) | Tok::Float(..) => Some(2),
+            Tok::Ident(n) if types.contains(n) || declaring.contains(&k) => Some(6),
+            Tok::Ident(_) if matches!(next, Some(Tok::LParen)) => Some(4),
+            Tok::Ident(_) if after_dot => Some(5),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            out.push(SemanticToken { line: line - 1, col: col - 1, len, kind });
+        }
+    }
+    out
+}

@@ -219,6 +219,10 @@ public:
     int completion(int line, int character) {
         return request("textDocument/completion", at(line, character));
     }
+    int semantic_tokens() {
+        return request("textDocument/semanticTokens/full",
+                       "{\"textDocument\":{\"uri\":\"" + json::escape(uri_) + "\"}}");
+    }
     int document_symbols() {
         return request("textDocument/documentSymbol",
                        "{\"textDocument\":{\"uri\":\"" + json::escape(uri_) + "\"}}");

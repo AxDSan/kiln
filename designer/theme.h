@@ -111,6 +111,7 @@ inline std::string SYN_STRING  = "#9a6700";
 inline std::string SYN_IDENT   = "#0e7490";
 inline std::string SYN_COMMENT = "#656d76";
 inline std::string SYN_NUMBER  = "#0550ae";
+inline std::string SYN_TYPE    = "#953800";
 
 // Metrics
 constexpr int TOOLBOX_W  = 220;
@@ -182,6 +183,7 @@ inline void set_palette(bool dark) {
     SYN_IDENT = dark ? "#7ee787" : "#0e7490";
     SYN_COMMENT = dark ? "#8b949e" : "#656d76";
     SYN_NUMBER = dark ? "#79c0ff" : "#0550ae";
+    SYN_TYPE = dark ? "#f0883e" : "#953800";
 }
 
 /// Is the dark palette in force? Derived from a colour rather than kept in a

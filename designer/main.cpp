@@ -346,6 +346,14 @@ struct Designer {
     /// file, which is never wrong.
     std::vector<kiln::lsp::Symbol> symbols;
     int symbol_request = 0;
+    /// Semantic tokens for a Kiln 2 file: the request in flight, the lines it
+    /// was asked for, and the answer per line. A line is painted from its
+    /// tokens only while its text is still what they were computed for; an
+    /// edited line is painted locally until the next answer.
+    int sem_request = 0;
+    std::vector<std::string> sem_pending;
+    std::vector<std::string> sem_lines;
+    std::vector<std::vector<kiln::designer::SemToken>> sem_toks;
     bool symbols_stale = true;
     /// What the two document tabs currently say, so a frame that changes
     /// nothing rewrites nothing.
@@ -1365,7 +1373,7 @@ std::string build_styles(const std::string& family, const std::string& mono,
     
     s << ".k{color:" << SYN_KEYWORD << "}.m{color:" << SYN_METHOD << "}.s{color:" << SYN_STRING
       << "}.i{color:" << SYN_IDENT << "}.c{color:" << SYN_COMMENT << ";font-style:italic}.n{color:"
-      << SYN_NUMBER << "}";
+      << SYN_NUMBER << "}.t{color:" << SYN_TYPE << "}";
     // The console's two layers share one box, sized by size_output_pane() to
     // a whole number of rows so the textarea's furthest scroll is a whole
     // number of rows too — the layer under it can then never be half a line
@@ -2316,6 +2324,15 @@ void rebuild_inspector() {
 
 /// Show the source of the subroutine wired to the selection, or the whole file
 /// when nothing is selected.
+/// A line of the module, painted from the language server's tokens when they
+/// were computed for exactly this text, and by the local tokenizer otherwise —
+/// a 1.x file, the moment before the first answer, or a line being typed.
+std::string paint_code_line(size_t i, const std::string& line) {
+    if (g.model.is_k2 && i < g.sem_lines.size() && g.sem_lines[i] == line)
+        return kiln::designer::paint_line(line, g.sem_toks[i]);
+    return kiln::designer::highlight_line(line, g.model.is_k2);
+}
+
 void rebuild_code() {
     Rml::Element* code = by_id("code");
     if (!code) return;
@@ -2351,7 +2368,7 @@ void rebuild_code() {
         char num[16];
         std::snprintf(num, sizeof num, "%4zu", i + 1);
         html += "<div class='cl'><span class='ln'>" + std::string(num) + "</span>" +
-                highlight_line(lines[i], g.model.is_k2) + "</div>";
+                paint_code_line(i, lines[i]) + "</div>";
     }
     if (Rml::Element* head = code->GetParentNode()->GetChild(0)) {
         // Named a preview because it is one: it is syntax-highlighted and
@@ -2502,8 +2519,7 @@ void refresh_highlight() {
                                 : bad                        ? "<div class='badline'>"
                                                              : "<div>";
         html += std::string(row_class) + shift +
-                (lines[i].empty() ? std::string("&nbsp;")
-                                 : highlight_line(lines[i], g.model.is_k2)) +
+                (lines[i].empty() ? std::string("&nbsp;") : paint_code_line(i, lines[i])) +
                 bars +
                 "</span></div>";
     }
@@ -4622,7 +4638,7 @@ void poll_answers() {
         // A server that has gone leaves no answers to wait for — and no
         // symbols to ask for: a flag left waiting for it keeps the frame
         // loop awake, since idle() counts it as an answer on its way.
-        g.hover_request = g.def_request = g.refs_request = g.symbol_request = 0;
+        g.hover_request = g.def_request = g.refs_request = g.symbol_request = g.sem_request = 0;
         g.symbols_stale = false;
         return;
     }
@@ -4657,9 +4673,41 @@ void poll_answers() {
         g.symbols = kiln::lsp::read_symbols(v);
         update_tabs();
     }
+    if (g.sem_request && g.lsp.take_response(g.sem_request, v)) {
+        g.sem_request = 0;
+        // The protocol's relative encoding: each token's line, and its column
+        // on the same line, as a delta from the token before.
+        g.sem_lines = std::move(g.sem_pending);
+        g.sem_toks.assign(g.sem_lines.size(), {});
+        const kiln::json::Value& data = v["data"];
+        int line = 0, col = 0;
+        for (size_t i = 0; i + 4 < data.size(); i += 5) {
+            const int dl = data.at(i).num(0);
+            const int dc = data.at(i + 1).num(0);
+            line += dl;
+            col = dl == 0 ? col + dc : dc;
+            if (line < 0 || (size_t)line >= g.sem_toks.size()) continue;
+            g.sem_toks[(size_t)line].push_back({col, data.at(i + 2).num(0), data.at(i + 3).num(0)});
+        }
+        refresh_highlight();
+    }
     if (g.symbols_stale && !g.symbol_request) {
         g.symbols_stale = false;
         g.symbol_request = g.lsp.document_symbols();
+        // The same moment the outline goes stale is the moment the painting
+        // does: ask for both against the text the server now has.
+        if (g.model.is_k2 && !g.sem_request) {
+            const std::string text = code_editor() ? std::string(code_editor()->GetValue()) : g.model_text;
+            g.sem_pending.clear();
+            size_t start = 0;
+            while (start <= text.size()) {
+                const size_t nl = text.find('\n', start);
+                g.sem_pending.push_back(text.substr(start, nl == std::string::npos ? std::string::npos : nl - start));
+                if (nl == std::string::npos) break;
+                start = nl + 1;
+            }
+            g.sem_request = g.lsp.semantic_tokens();
+        }
     }
     if (g.complete_request && g.lsp.take_response(g.complete_request, v)) {
         g.complete_request = 0;
@@ -7421,6 +7469,20 @@ void run_script(const char* script) {
                     std::fflush(stdout);
                 }
             }
+            else if (verb == "waitsem") {
+                // Pump until the server's semantic tokens have arrived and
+                // painted the editor; report how many lines and tokens came.
+                for (int i = 0; i < 300 && g.sem_lines.empty(); i++) {
+                    g.lsp.poll();
+                    poll_answers();
+                    usleep(20000);
+                }
+                size_t n = 0;
+                for (const auto& t : g.sem_toks) n += t.size();
+                std::printf("semantic: %zu lines, %zu tokens\n", g.sem_lines.size(), n);
+                refresh_highlight();
+                g.context->Update();
+            }
             else if (verb == "waitdiag") {
                 // Pump the language server the way the frame loop does, so a
                 // scripted session can wait for diagnostics to arrive.
@@ -8420,6 +8482,7 @@ int main(int argc, char** argv) {
     auto idle = [] {
         const bool awaiting = g.hover_request || g.def_request || g.refs_request ||
                               g.complete_request || g.symbol_request || g.symbols_stale ||
+                              g.sem_request ||
                               (g.view == "code" && g.hover_x >= 0 && !g.hover_asked);
         return g.running_app <= 0 && g.build_pid <= 0 && !awaiting;
     };

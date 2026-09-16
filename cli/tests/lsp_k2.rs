@@ -309,3 +309,38 @@ fn signature_help_shows_a_k2_method() {
     assert!(sig["label"].as_str().unwrap_or("").contains("int Add(int a, int b)"), "{reply}");
     assert_eq!(reply["result"]["activeParameter"], 1, "{reply}");
 }
+
+/// Phase 8: a K2 file is painted by the compiler's own lexer. The legend is
+/// keyword, string, number, comment, function, property, type; tokens come in
+/// the protocol's relative encoding. A `//` inside a string is not a comment,
+/// and a word in a comment is not a keyword.
+#[test]
+fn a_k2_file_has_semantic_tokens_from_the_lexer() {
+    let src = "namespace S; // if this were code\npublic record Point(int X);\npublic static class P\n{\n    public static void Main()\n    {\n        Point p = new Point(1);\n        Console.WriteLine(\"a // b\" + p.X);\n    }\n}\n";
+    let reply = ask(src, 7, "textDocument/semanticTokens/full", serde_json::json!({}));
+    let data: Vec<u64> = reply["result"]["data"]
+        .as_array()
+        .expect("semantic token data")
+        .iter()
+        .map(|v| v.as_u64().unwrap())
+        .collect();
+    // Decode to absolute (line, col, len, kind).
+    let lines: Vec<&str> = src.split('\n').collect();
+    let (mut line, mut col) = (0u64, 0u64);
+    let mut toks = Vec::new();
+    for c in data.chunks(5) {
+        line += c[0];
+        col = if c[0] == 0 { col + c[1] } else { c[1] };
+        let text = &lines[line as usize][col as usize..(col + c[2]) as usize];
+        toks.push((text.to_string(), c[3]));
+    }
+    let kind_of = |t: &str| toks.iter().find(|(s, _)| s == t).map(|(_, k)| *k);
+    assert_eq!(kind_of("namespace"), Some(0), "{toks:?}");
+    assert_eq!(kind_of("// if this were code"), Some(3), "{toks:?}");
+    assert_eq!(kind_of("\"a // b\""), Some(1), "{toks:?}");
+    assert_eq!(kind_of("1"), Some(2), "{toks:?}");
+    assert_eq!(kind_of("WriteLine"), Some(4), "{toks:?}");
+    assert_eq!(kind_of("X"), Some(5), "{toks:?}");
+    assert_eq!(kind_of("Point"), Some(6), "{toks:?}");
+    assert!(!toks.iter().any(|(s, _)| s == "if"), "a word in a comment was painted: {toks:?}");
+}
