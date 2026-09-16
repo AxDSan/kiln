@@ -19,7 +19,6 @@ pub fn emit(m: &Module) -> String {
         m,
         strings: Vec::new(),
         externs: BTreeSet::new(),
-        needs_gc: false,
         extra_globals: Vec::new(),
         debug: m
             .source
@@ -39,7 +38,6 @@ struct Emit<'a> {
     m: &'a Module,
     strings: Vec<String>,
     externs: BTreeSet<String>,
-    needs_gc: bool,
     /// Globals the emitter itself needs — a lazily resolved function's cache.
     extra_globals: Vec<String>,
     /// Present when the module names the file it came from.
@@ -49,6 +47,30 @@ struct Emit<'a> {
 impl Emit<'_> {
     fn ty(&self) -> &TyTable {
         &self.m.types
+    }
+
+    /// The module variables the collector must treat as roots, sorted so the
+    /// table and the call agree and the generated IR is stable between builds.
+    ///
+    /// A string, a list or a record held only in a module variable is
+    /// reachable from nowhere else — no stack frame holds it between the
+    /// functions that touch it — so without this table the first collection
+    /// frees it. Handed over only in an executable, and only when the collector
+    /// is linked: a library has no moment before its host could allocate, and
+    /// the libc-only path never collects at all, which is 1.x's rule too.
+    fn gc_roots(&self) -> Vec<&str> {
+        if self.m.entry.is_none() || self.m.allocator != Allocator::Runtime {
+            return Vec::new();
+        }
+        let mut names: Vec<&str> = self
+            .m
+            .globals
+            .iter()
+            .filter(|g| g.is_gc_root)
+            .map(|g| g.name.as_str())
+            .collect();
+        names.sort_unstable();
+        names
     }
 
     // ─── module assembly ────────────────────────────────────────────────────
@@ -102,6 +124,20 @@ impl Emit<'_> {
             out.push('\n');
         }
 
+        // The collector's root table: the addresses of the pointer-typed module
+        // variables, so a collection cannot free what only a global names.
+        let roots = self.gc_roots();
+        if !roots.is_empty() {
+            let items: Vec<String> = roots.iter().map(|r| format!("ptr @{r}")).collect();
+            writeln!(
+                out,
+                "@kn_gc_roots = internal global [{} x ptr] [{}]\n",
+                roots.len(),
+                items.join(", ")
+            )
+            .unwrap();
+        }
+
         // String constants.
         for (i, s) in self.strings.iter().enumerate() {
             let bytes = s.len() + 1;
@@ -120,10 +156,10 @@ impl Emit<'_> {
         for d in &self.externs {
             writeln!(out, "{d}").unwrap();
         }
-        if self.needs_gc {
+        if !roots.is_empty() {
             writeln!(out, "declare void @kn_gc_set_roots(ptr, i32)").unwrap();
         }
-        if !self.externs.is_empty() || self.needs_gc {
+        if !self.externs.is_empty() || !roots.is_empty() {
             out.push('\n');
         }
 
@@ -144,6 +180,18 @@ impl Emit<'_> {
         let mut out = String::new();
         writeln!(out, "define i32 @ECodeStart() {{").unwrap();
         writeln!(out, "entry:").unwrap();
+        // The collector's roots, before anything can allocate: a static
+        // field's initial value runs inside the module entry function and may
+        // itself allocate.
+        let roots = self.gc_roots();
+        if !roots.is_empty() {
+            writeln!(
+                out,
+                "  call void @kn_gc_set_roots(ptr @kn_gc_roots, i32 {})",
+                roots.len()
+            )
+            .unwrap();
+        }
         // Call the module entry function, discard/forward its result.
         if f.ret == TyTable::VOID {
             writeln!(out, "  call void @{}()", f.symbol).unwrap();

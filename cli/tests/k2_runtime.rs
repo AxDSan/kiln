@@ -110,6 +110,70 @@ public static class P
 }
 
 #[test]
+fn a_collection_held_in_a_module_variable_survives_a_collection() {
+    // A module variable is the one place a value is reachable from nowhere
+    // else: no stack frame holds it between the methods that touch it, so the
+    // collector only keeps it if the program hands over its address — the root
+    // table. Without it the list below is swept and what is read afterwards is
+    // a freed block.
+    //
+    // The deep recursion is the point of the test rather than decoration: the
+    // collector also scans the stack conservatively, and a stale copy of the
+    // pointer left in a frame or a callee-saved register would keep the list
+    // alive by luck and hide the bug. Recursing afterwards overwrites that
+    // region, so what survives survives because it was rooted.
+    let src = "\
+namespace RootGc;
+public static class P
+{
+    [Dll(\"runtime\", Entry = \"kn_gc_collect\")]
+    public static extern long Collect();
+
+    static List<int> kept;
+
+    static void Fill()
+    {
+        var xs = new List<int>();
+        foreach (var i in 1..200)
+            xs.Add(i * 3);
+        kept = xs;
+    }
+
+    static long Churn(int depth)
+    {
+        var junk = new List<int>();
+        foreach (var j in 1..400)
+            junk.Add(j);
+        if (depth > 1)
+            return Churn(depth - 1) + junk.Count;
+        return junk.Count;
+    }
+
+    public static void Main()
+    {
+        Fill();
+
+        // Overwrite whatever the stack still held from `Fill`, then collect.
+        Churn(80);
+        Collect();
+        Collect();
+
+        // And again, so no copy from before the collection can be read back.
+        Churn(80);
+        Collect();
+
+        Console.WriteLine($\"{kept.Count} {kept[1]} {kept[200]}\");
+    }
+}
+";
+    let out = build_and_run("rootgc", src);
+    assert_eq!(
+        out, "200 3 600\n",
+        "a collection held in a module variable did not survive collection:\n{out}"
+    );
+}
+
+#[test]
 fn the_standard_library_is_reachable() {
     // `using Kiln.File;` loads the file library, and `File.ReadText(p)` resolves
     // to its `file_read_text` command — the spec's naming rule, reversed at the
