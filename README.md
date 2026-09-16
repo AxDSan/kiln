@@ -57,8 +57,8 @@ Download a release, unpack it anywhere, and run it — there is no installer and
 nothing to configure:
 
 ```sh
-tar xzf kiln-2.0.0-linux-x86_64.tar.gz
-cd kiln-2.0.0-linux-x86_64
+tar xzf kiln-2.1.0-linux-x86_64.tar.gz
+cd kiln-2.1.0-linux-x86_64
 bin/kiln-studio
 ```
 
@@ -162,7 +162,8 @@ nothing to link. A program that registers a window class, pumps a message loop,
 reads its own memory through `ReadProcessMemory` or writes the registry does it
 with that one kit as its only foreign declaration. It is Windows-only,
 cross-built from Linux with `--os windows`, and tested by running under wine.
-Its guide is written for Kiln 1.x syntax. See the
+A Kiln 2 program reaches it with `using Kiln.Win;`; the guide's samples are
+still Kiln 1.x. See the
 [`win` kit guide](https://axdsan.github.io/kiln/win-kit.html).
 
 ## Editing
@@ -264,7 +265,7 @@ what the major number is for.
 
 ## Status
 
-Kiln is 2.0 and still narrow — the version says the interface has settled, not
+Kiln is 2.x and still narrow — the version says the interface has settled, not
 that the map is filled in:
 
 - **Linux x86-64, plus a Windows cross build — 64-bit and 32-bit.**

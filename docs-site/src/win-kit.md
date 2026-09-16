@@ -2,7 +2,9 @@
 
 > **The samples on this page are Kiln 1.x.** Kiln 1.x still builds, so they run
 > as written. [Kiln 2](./kiln-2.md) is the current language, and it calls the
-> same libraries and components with different syntax.
+> same libraries and components with different syntax. A Kiln 2 program reaches
+> this kit with `using Kiln.Win;` — its records, constants and functions by the
+> same names.
 
 `use win` is the Win32 API. One line at the top of a module, and a program has
 `CreateWindowExA`, `WNDCLASSEXA`, `WM_PAINT`, `ReadProcessMemory`,
