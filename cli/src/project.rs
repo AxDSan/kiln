@@ -48,6 +48,21 @@ pub fn is_project_path(p: &Path) -> bool {
     p.is_dir() || p.extension().and_then(|e| e.to_str()) == Some("kproj")
 }
 
+/// The project a `.kiln` file is the entry of, if it is in one.
+///
+/// Only when the project's own `main:` names this very file: a stray project
+/// file in the same directory describes some other program, and reading its
+/// `target:` would build this one as something it is not.
+pub fn beside(entry: &Path) -> Option<Project> {
+    let dir = entry.parent().filter(|d| !d.as_os_str().is_empty())?;
+    let p = load(&dir.join(FILE_NAME)).ok()?;
+    let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    };
+    same(&p.main, entry).then_some(p)
+}
+
 /// The project file for a path that names a project or its directory.
 pub fn locate(p: &Path) -> Result<PathBuf, String> {
     if p.is_dir() {

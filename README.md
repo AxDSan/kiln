@@ -4,10 +4,8 @@
 
 **Draw an app. Wire an event. Ship a native binary.**
 
-An open implementation of **Easy Programming Language** (易语言, EPL) — the
-visual, RAD-first way of building desktop software — rebuilt as open source,
-English-first and cross-platform, with a compiler that produces clean native
-executables: no runtime to install, nothing to unpack.
+A C#-shaped language that compiles to native code — no runtime to install, no
+.NET, nothing to unpack — and a form you draw is the source.
 
 **[Documentation](https://axdsan.github.io/kiln/)** · [Quick start](#quick-start) ·
 [Build targets](#one-project-every-artifact) · [Editor support](#editor-support) ·
@@ -21,42 +19,33 @@ executables: no runtime to install, nothing to unpack.
 ## What it is
 
 Kiln is an IDE and a compiler that belong together. You lay a form out
-visually, set properties in an inspector, wire a button's click to a
-subroutine, and press **Run** — and what comes out the other side is an
-ordinary native binary you can hand to someone.
+visually, set properties in an inspector, wire a button's click to a method,
+and press **Run** — and what comes out the other side is an ordinary native
+binary you can hand to someone.
 
-That is the idea Easy Programming Language got right, and this is an open
-implementation of it: the same RAD-first way of working — draw the window,
-wire the events, build a real executable — without a proprietary toolchain,
-and readable to anyone who does not speak Chinese.
+Kiln 2 reads like C#: braces, `namespace`, `var`, classes and records with
+methods, interfaces, generics, lambdas, `List<T>` and `Dictionary<K,V>`,
+`$"…"` interpolation, and `T?` for a value that may be absent. It compiles
+ahead of time to a native binary — no virtual machine, no reflection, no
+metadata in the binary. Positions count from 1; byte offsets count from 0.
+A form is a `partial form`: Studio owns one half, you write the other.
 
-**On compatibility:** Kiln is a fresh, open implementation of the idea, not
-a drop-in replacement. It does not read or run existing EPL programs, and its
-keywords are English rather than Chinese. What it takes from EPL is the model:
-a visual designer over a component library, event-driven code, and a compiler
-that emits standalone native binaries.
+```k2
+namespace Hello;
 
-The language is English-first and deliberately small: one uniform call syntax,
-no pointers or manual memory management in everyday code, no ceremony. Assignment is a
-statement rather than an expression, so `if x = 5` cannot silently assign.
-It has `int`, `int64`, `double`, `bool` and `text`; arrays, `bytes`, records
-and dictionaries; subroutines with parameters and return values; and every
-position counts from 1, so `0` is free to mean *not found*. A command that
-fails returns a sentinel and leaves the reason in an error slot — there are
-no exceptions.
-
-Small does not mean bare. A loop reads `for each x in xs` or `for i in 1..10`,
-a string carries its values inline — `"x is {x}"` — and there is `match` with
-`when`, slicing (`s[1..5]`), collection literals, `enum`, module constants,
-named arguments, `let` inference, compound assignment, `defer`, and `check`
-and `otherwise` for the two things that happen to a call that can fail.
-
+public static class Program
+{
+    public static void Main()
+    {
+        List<string> names = ["ada", "grace"];
+        foreach (var n in names)
+            Console.WriteLine($"hello, {n}");
+    }
+}
 ```
-let names = ["ada", "grace"]
-for each n in names
-  call print_text("hello, {n}")
-end
-```
+
+Kiln 1.x programs still build, with a deprecation note (`--1x` silences it),
+and `kiln migrate` converts one to Kiln 2.
 
 <div align="center">
 <img src="assets/screenshot-designer.png" alt="The Kiln Studio visual designer" width="860">
@@ -68,8 +57,8 @@ Download a release, unpack it anywhere, and run it — there is no installer and
 nothing to configure:
 
 ```sh
-tar xzf kiln-1.3.1-linux-x86_64.tar.gz
-cd kiln-1.3.1-linux-x86_64
+tar xzf kiln-2.0.0-linux-x86_64.tar.gz
+cd kiln-2.0.0-linux-x86_64
 bin/kiln-studio
 ```
 
@@ -254,31 +243,27 @@ model rather than something added later.
 
 ## Versioning
 
-1.0.0 is where the name changed, and with it the binary, the file extensions
-and the C ABI — every project written against OpenEPL breaks. That is what the
-major number is for, and it is the whole reason this is 1.0.0 rather than
-0.12.0.
+**2.0.0 is Kiln 2.** The language changed shape — C#-style syntax, generics,
+lambdas, `T?` — and the C ABI moved to version 5 (event handlers carry an
+environment pointer). Both invalidate source that compiled under 1.x, which is
+what the major number is for.
 
-From here the promise is ordinary semver, and it is about *your programs*:
-
-- **1.x will not break a program that compiles today.** New commands, new
-  components and new targets arrive in minor releases; a language or ABI change
-  that invalidates working source waits for 2.0. 1.2.0 adds the 32-bit Windows
-  target (`--arch x86`) and nothing else that a 1.1.0 program can see: the same
-  source builds the same x86-64 binary it did, byte for byte. 1.3.0 adds the
-  `xml` and `encoding` kits and a second, asynchronous way to run a database
-  statement: new commands, no language change, and no structure in the ABI moved
-  or changed value, so a 1.2.0 program compiles unchanged. 1.3.1 changes no code
-  at all — only the writing and the handbook inside the bundle — so the same
-  source builds the same binary it did.
+- **A 1.x program still builds.** `kiln build` detects it, builds it and says
+  it is deprecated; `--1x` builds it quietly, and `kiln migrate` converts it.
+- **Every target is Kiln 2's now.** Console and GUI programs, `sharedlib` and
+  `staticlib` libraries with their C header, and the Windows x64/x86 cross
+  builds all build from Kiln 2 source; the same targets still build from 1.x
+  source while it is supported.
+- **2.x will not break a Kiln 2 program that compiles today.** New commands,
+  components and targets arrive in minor releases.
 - **`Kiln_*` ABI structures grow at the end only**, and `KILN_ABI_VERSION` says
-  when they have. A library compiled against ABI 4 keeps loading.
+  when they have. A library must be rebuilt against ABI 5.
 - **What is not yet built is not a promise.** The Status section below is the
   honest list, and a limitation disappearing is a minor release, not a major.
 
 ## Status
 
-Kiln is 1.0 and still narrow — the version says the interface has settled, not
+Kiln is 2.0 and still narrow — the version says the interface has settled, not
 that the map is filled in:
 
 - **Linux x86-64, plus a Windows cross build — 64-bit and 32-bit.**

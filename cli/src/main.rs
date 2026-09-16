@@ -383,6 +383,15 @@ fn parse_io(rest: &[String]) -> Result<Io, String> {
         io.target = io.target.or(p.target);
         let dir = p.file.parent().unwrap_or(Path::new(".")).to_path_buf();
         io.project_output = Some(dir.join(&p.name));
+    } else if io.target.is_none() {
+        // The entry file of a project, named directly. A Kiln 2 program does
+        // not say in its source what it is being built as — a library says so
+        // in the project file — so `kiln build main.kiln` inside a project has
+        // to read it, or it builds a program from a library's source and the
+        // link fails on a missing entry point.
+        if let Some(p) = project::beside(&io.input) {
+            io.target = p.target;
+        }
     }
     Ok(io)
 }
