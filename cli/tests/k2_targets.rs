@@ -9,7 +9,7 @@ fn repo() -> PathBuf {
 }
 
 fn scratch(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("k2-targets-{}-{name}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("k2-targets-{name}"));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d

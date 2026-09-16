@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn tmp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("k2-rt-{}", std::process::id()));
+    let d = std::env::temp_dir().join("k2-rt");
     std::fs::create_dir_all(&d).unwrap();
     d.join(name)
 }
@@ -1081,7 +1081,7 @@ fn the_starter_inventory_runs_against_mariadb() {
 /// for is linked, and a `using` that names no file is left alone.
 #[test]
 fn a_program_is_assembled_from_the_units_it_names() {
-    let dir = std::env::temp_dir().join(format!("k2-units-{}", std::process::id()));
+    let dir = std::env::temp_dir().join("k2-units");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("main.kiln"),
@@ -1113,7 +1113,7 @@ fn a_program_is_assembled_from_the_units_it_names() {
 /// and an empty `{}` module variable is created with its declared value type.
 #[test]
 fn migrate_keeps_units_inline_arrays_and_dictionary_types() {
-    let dir = std::env::temp_dir().join(format!("k2-migrate-{}", std::process::id()));
+    let dir = std::env::temp_dir().join("k2-migrate");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("helpers.kiln"), "unit helpers\n\nsub twice(n: int): int\n  return n * 2\nend\n").unwrap();
     let main = dir.join("main.kiln");

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn tmp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("k2-gaps-{}", std::process::id()));
+    let d = std::env::temp_dir().join("k2-gaps");
     std::fs::create_dir_all(&d).unwrap();
     d.join(name)
 }

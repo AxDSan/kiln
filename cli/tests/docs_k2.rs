@@ -59,7 +59,7 @@ fn every_documented_k2_sample_compiles() {
         found.len()
     );
 
-    let work = std::env::temp_dir().join(format!("k2-docs-{}", std::process::id()));
+    let work = std::env::temp_dir().join("k2-docs");
     std::fs::create_dir_all(&work).unwrap();
 
     let mut failures = Vec::new();
@@ -149,7 +149,7 @@ fn the_migration_guide_shows_what_the_tool_actually_produces() {
         "the guide has lost its worked example"
     );
 
-    let work = std::env::temp_dir().join(format!("k2-migrate-doc-{}", std::process::id()));
+    let work = std::env::temp_dir().join("k2-migrate-doc");
     std::fs::create_dir_all(&work).unwrap();
     let src = work.join("before.kiln");
     std::fs::write(&src, &before[0]).unwrap();
