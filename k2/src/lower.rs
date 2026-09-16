@@ -2114,10 +2114,11 @@ impl<'a> FnLower<'a> {
                     Some(t) => Some(self.cx.resolve(t)?),
                     None => None,
                 };
-                let (val, vty) = self.expr(value, hint)?;
+                let (mut val, mut vty) = self.expr(value, hint)?;
                 if let Some(h) = hint {
-                    self.check_fits(vty, h, &format!("`{name}`"))?;
+                    (val, vty) = self.settle(val, vty, h, &format!("`{name}`"))?;
                 }
+                let _ = vty;
                 let lty = hint.unwrap_or(vty);
                 self.declare_var(name, lty, val)?;
             }
@@ -2230,7 +2231,7 @@ impl<'a> FnLower<'a> {
                     None => self.place_ty(target)?,
                 };
                 let (rhs, rty) = self.expr(value, Some(pty))?;
-                self.check_fits(rty, pty, "this assignment")?;
+                let (rhs, rty) = self.settle(rhs, rty, pty, "this assignment")?;
                 // A number stored where a number of another width lives is
                 // converted — a `bool` into a C `BOOL` field, an `int` into a
                 // `long`.
@@ -2298,7 +2299,7 @@ impl<'a> FnLower<'a> {
                 Some(e) => {
                     let (val, vty) = self.expr(e, Some(self.ret))?;
                     let want = self.ret;
-                    self.check_fits(vty, want, "`return`")?;
+                    let (val, vty) = self.settle(val, vty, want, "`return`")?;
                     // A number returned where a number of another width is
                     // declared is converted: `long Calls() => count;`.
                     let is_num = |t: TyId| {
@@ -3794,7 +3795,7 @@ impl<'a> FnLower<'a> {
                     let mut kargs = Vec::new();
                     for (i, (a, pty)) in args.iter().zip(params.iter()).enumerate() {
                         let (v, vty) = self.expr(a, Some(*pty))?;
-                        self.check_fits(vty, *pty, &format!("argument {}", i + 1))?;
+                        let (v, _) = self.settle(v, vty, *pty, &format!("argument {}", i + 1))?;
                         kargs.push(v);
                     }
                     return Ok((
@@ -7389,6 +7390,24 @@ impl<'a> FnLower<'a> {
     }
 
     /// `fits`, as an error naming what was wanted and what was given.
+    /// Check a value against the type a place wants, and settle a `T?` into a
+    /// `T` the way an argument is: its value, or a stop naming `what` when it
+    /// has none. Every place a value is stored — a local, an assignment, a
+    /// `return`, a field — follows the one rule; before, only arguments did, and
+    /// the others stored the `{value, present}` pair into a plain slot, which
+    /// clang refused.
+    fn settle(&mut self, v: Expr, vty: TyId, want: TyId, what: &str) -> Result<(Expr, TyId), String> {
+        self.check_fits(vty, want, what)?;
+        let want_optional = matches!(self.tt().kind(want), TyKind::Optional(_));
+        match *self.tt().kind(vty) {
+            TyKind::Optional(inner) if !want_optional => {
+                let v = self.present_or_stop(v, vty, what)?;
+                Ok((v, inner))
+            }
+            _ => Ok((v, vty)),
+        }
+    }
+
     fn check_fits(&self, from: TyId, to: TyId, what: &str) -> Result<(), String> {
         if self.fits(from, to) {
             return Ok(());
@@ -8418,7 +8437,7 @@ impl<'a> FnLower<'a> {
             for (i, (a, (fname, fty))) in args.iter().zip(field_tys.iter()).enumerate() {
                 let (v, vty) = self.expr(a, Some(*fty))?;
                 let _ = i;
-                self.check_fits(vty, *fty, &format!("field `{fname}`"))?;
+                let (v, _) = self.settle(v, vty, *fty, &format!("field `{fname}`"))?;
                 values.push(v);
             }
         } else {

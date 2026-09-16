@@ -671,3 +671,37 @@ public static class P
     );
     assert_eq!(out, "1 0 5 true false 2\n");
 }
+
+#[test]
+fn an_optional_stored_where_a_plain_value_is_wanted_is_its_value_or_a_stop() {
+    // The rule arguments always had, now for locals, assignments, returns and
+    // fields too: they stored the `{value, present}` pair into a plain slot,
+    // which clang refused.
+    let out = build_and_run(
+        "settle",
+        r#"
+namespace Settle;
+
+public record Conn(int A);
+public record Holder(Conn C);
+
+public static class P
+{
+    static Dictionary<string, Conn> d = new Dictionary<string, Conn>();
+
+    static Conn Find(string k) => d.Get(k);
+
+    public static void Main()
+    {
+        d["x"] = new Conn(7);
+        Conn c = d.Get("x");
+        Conn e = new Conn(0);
+        e = d.Get("x");
+        var h = new Holder(d.Get("x"));
+        Console.WriteLine($"{c.A} {e.A} {Find("x").A} {h.C.A}");
+    }
+}
+"#,
+    );
+    assert_eq!(out, "7 7 7 7\n");
+}
