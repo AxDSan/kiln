@@ -246,8 +246,9 @@ public static class P
 }
 ```
 
-A constraint is checked when the type argument is chosen: passing a type that
-does not implement `INamed` to `Show` is a compile error naming both.
+A constraint is checked when the type argument is chosen: `where T : INamed`,
+`where T : class` and `where T : new()` are all enforced, and a type argument
+that does not satisfy one is a compile error naming both.
 
 ## When something fails
 
@@ -497,8 +498,6 @@ Kiln 2 is not finished, and it is worth knowing where the edges are:
 
 - It builds for the machine it runs on and cross-builds for Windows, 64-bit and
   32-bit (`--os windows --arch x86`).
-- Non-interface generic constraints (`where T : class`, `new()`) parse and are
-  ignored.
 - Studio opens, edits and saves a Kiln 2 form; its code pane highlights Kiln 2
   from its own tokenizer rather than from the language server.
 - `kiln fmt` puts a comment written at the end of a line above the next
