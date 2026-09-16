@@ -389,36 +389,65 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                 .collect();
             for (i, name, ty, arg, line) in described {
                 // A record is described by its fields, so a debugger prints it
-                // as `{W = 3, H = 4}` rather than as an address.
-                let record: Option<(String, u64, Vec<(String, String, u32, &'static str, u64)>)> =
-                    match *self.tt().kind(ty) {
-                        TyKind::Record(rid) => {
-                            let rec = self.e.m.record(rid);
-                            match &rec.layout {
-                                Layout::C { size, offsets, .. } => {
-                                    let members = rec
-                                        .fields
-                                        .iter()
-                                        .zip(offsets.iter())
-                                        .map(|(f, off)| {
-                                            let (tn, bits, enc) = describe_ty(self.tt(), f.ty);
-                                            (f.name.clone(), tn, bits, enc, *off as u64 * 8)
-                                        })
-                                        .collect();
-                                    Some((rec.name.clone(), *size as u64 * 8, members))
-                                }
-                                Layout::Managed => None,
+                // as `{W = 3, H = 4}` rather than as an address. The third
+                // element says whether the value is held behind a pointer (a
+                // record) or in the slot itself (an optional).
+                let described_shape: Option<(
+                    String,
+                    u64,
+                    bool,
+                    Vec<(String, String, u32, &'static str, u64)>,
+                )> = match *self.tt().kind(ty) {
+                    TyKind::Record(rid) => {
+                        let rec = self.e.m.record(rid);
+                        match &rec.layout {
+                            Layout::C { size, offsets, .. } => {
+                                let members = rec
+                                    .fields
+                                    .iter()
+                                    .zip(offsets.iter())
+                                    .map(|(f, off)| {
+                                        let (tn, bits, enc) = describe_ty(self.tt(), f.ty);
+                                        (f.name.clone(), tn, bits, enc, *off as u64 * 8)
+                                    })
+                                    .collect();
+                                Some((rec.name.clone(), *size as u64 * 8, true, members))
                             }
+                            Layout::Managed => None,
                         }
-                        _ => None,
-                    };
+                    }
+                    // `T?` is `{ value, present }` held in the slot, not behind
+                    // a pointer. Describing it as a flat struct is what lets a
+                    // debugger tell an absent value from a zero and read the
+                    // value it does hold; without it the slot is one unnamed
+                    // pointer, which is also how a `string` is described, so an
+                    // `int?` read as an address and a `string?` as text.
+                    TyKind::Optional(inner) => {
+                        let present_at = size_bytes(self.tt(), inner);
+                        let (vtn, vbits, venc) = optional_value_desc(self.tt(), inner);
+                        let members = vec![
+                            ("value".to_string(), vtn, vbits, venc, 0u64),
+                            (
+                                "present".to_string(),
+                                "bool".to_string(),
+                                8u32,
+                                "DW_ATE_boolean",
+                                present_at * 8,
+                            ),
+                        ];
+                        let name = format!("$Opt<{},{}>", self.tt().llvm(inner), venc);
+                        let total = size_bytes(self.tt(), ty);
+                        Some((name, total * 8, false, members))
+                    }
+                    _ => None,
+                };
                 let (tname, bits, enc) = describe_ty(self.tt(), ty);
                 let (var, loc) = {
                     let Some(d) = self.e.debug.as_mut() else {
                         break;
                     };
-                    let tn = match record {
-                        Some((rname, size_bits, members)) => {
+                    let tn = match described_shape {
+                        Some((rname, size_bits, by_pointer, members)) => {
                             let described_members: Vec<(String, usize, u64, u64)> = members
                                 .into_iter()
                                 .map(|(mname, tn, mbits, menc, off)| {
@@ -427,7 +456,11 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                                 })
                                 .collect();
                             let composite = d.record_type(&rname, size_bits, &described_members);
-                            d.pointer_to(composite)
+                            if by_pointer {
+                                d.pointer_to(composite)
+                            } else {
+                                composite
+                            }
                         }
                         None => d.basic_type(&tname, bits, enc),
                     };
@@ -1594,6 +1627,90 @@ impl<'a, 'b> FnEmit<'a, 'b> {
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────
+
+/// How an optional's stored value is described to a debugger.
+///
+/// A `string` is an unnamed pointer, and walking the characters is the only
+/// true reading of one, so it keeps that description. Every other pointer-like
+/// inner type — a record, a list, a dictionary, a raw `ptr` — would be read as
+/// text under the same unnamed-pointer rule, so it is given the `ptr` name the
+/// reader already shows as an address. A scalar keeps its own name and width.
+fn optional_value_desc(tt: &TyTable, inner: TyId) -> (String, u32, &'static str) {
+    match tt.kind(inner) {
+        TyKind::Str => ("ptr".into(), 64, "pointer"),
+        _ if tt.is_pointer(inner) => ("ptr".into(), (tt.ptr_bytes() * 8) as u32, "DW_ATE_unsigned"),
+        _ => describe_ty(tt, inner),
+    }
+}
+
+/// How many bytes a value of this type occupies, as LLVM lays it out.
+///
+/// Only the debug emitter needs this, and only to put an optional's `present`
+/// bit where the `{ value, i1 }` the emitter writes actually holds it. The
+/// widths are the ones `llvm` spells, measured the way a struct element is:
+/// the `i1` follows the value with no padding of its own.
+fn size_bytes(tt: &TyTable, ty: TyId) -> u64 {
+    match tt.kind(ty) {
+        TyKind::Bool | TyKind::I8 | TyKind::U8 => 1,
+        TyKind::I16 | TyKind::U16 => 2,
+        TyKind::I32 | TyKind::U32 | TyKind::Char | TyKind::F32 => 4,
+        TyKind::I64 | TyKind::U64 | TyKind::Nint | TyKind::Nuint | TyKind::F64 => 8,
+        TyKind::Str
+        | TyKind::Bytes
+        | TyKind::Ptr
+        | TyKind::Array(_)
+        | TyKind::Dict(..)
+        | TyKind::Set(_)
+        | TyKind::Record(_)
+        | TyKind::CFunc { .. } => tt.ptr_bytes(),
+        TyKind::Func { .. } => tt.ptr_bytes() * 2,
+        TyKind::Inline { elem, count } => {
+            let one = size_bytes(tt, *elem);
+            if *count == 0 {
+                one
+            } else {
+                one * u64::from(*count)
+            }
+        }
+        TyKind::Optional(inner) => {
+            align_up(size_bytes(tt, *inner) + 1, align_bytes(tt, *inner))
+        }
+        TyKind::Tuple(elems) => {
+            let mut offset = 0;
+            let mut alignment = 1;
+            for e in elems {
+                let a = align_bytes(tt, *e).max(1);
+                alignment = alignment.max(a);
+                offset = align_up(offset, a) + size_bytes(tt, *e);
+            }
+            align_up(offset, alignment)
+        }
+        TyKind::Void => 0,
+    }
+}
+
+/// The ABI alignment of a value of this type: the largest power of two a
+/// struct element of it is placed at. Pointer-like values align to a pointer;
+/// a tuple to its widest member.
+fn align_bytes(tt: &TyTable, ty: TyId) -> u64 {
+    match tt.kind(ty) {
+        TyKind::Bool | TyKind::I8 | TyKind::U8 => 1,
+        TyKind::I16 | TyKind::U16 => 2,
+        TyKind::I32 | TyKind::U32 | TyKind::Char | TyKind::F32 => 4,
+        TyKind::I64 | TyKind::U64 | TyKind::Nint | TyKind::Nuint | TyKind::F64 => 8,
+        TyKind::Optional(inner) => align_bytes(tt, *inner),
+        TyKind::Tuple(elems) => elems.iter().map(|e| align_bytes(tt, *e)).max().unwrap_or(1),
+        _ => tt.ptr_bytes(),
+    }
+}
+
+fn align_up(n: u64, a: u64) -> u64 {
+    if a <= 1 {
+        n
+    } else {
+        n.div_ceil(a) * a
+    }
+}
 
 /// How a value's type is described to a debugger: its name, its width in bits,
 /// and its DWARF encoding. Anything held by pointer is described as one.

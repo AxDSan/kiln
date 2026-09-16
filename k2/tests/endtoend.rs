@@ -623,6 +623,61 @@ public static class P
 }
 
 #[test]
+fn order_by_over_a_list() {
+    let src = r#"
+namespace QO;
+public record Point(int X, int Y);
+public static class P
+{
+    public static void Main()
+    {
+        var xs = new List<int>();
+        xs.Add(3);
+        xs.Add(1);
+        xs.Add(2);
+        xs.Add(2);
+
+        foreach (var n in xs.OrderBy(x => x))
+            Console.Write($"{n} ");
+        Console.WriteLine("");
+
+        // The source is a copy, so ordering it leaves the original alone —
+        // where Sort is in place.
+        foreach (var n in xs)
+            Console.Write($"{n} ");
+        Console.WriteLine("");
+
+        // A key that is not the element, and a chained Where after it.
+        var desc = xs.OrderBy(x => -x).Where(x => x > 1);
+        Console.WriteLine($"{desc[1]} {desc[3]}");
+
+        // Strings order by content.
+        var names = new List<string>();
+        names.Add("grace");
+        names.Add("ada");
+        names.Add("bob");
+        foreach (var n in names.OrderBy(s => s))
+            Console.Write($"{n} ");
+        Console.WriteLine("");
+
+        // Records order by a selected field, whatever the element is.
+        var pts = new List<Point>();
+        pts.Add(new Point(3, 9));
+        pts.Add(new Point(1, 8));
+        pts.Add(new Point(2, 7));
+        foreach (var p in pts.OrderBy(q => q.X))
+            Console.Write($"{p.X}:{p.Y} ");
+        Console.WriteLine("");
+    }
+}
+"#;
+    assert_eq!(
+        run_k2(src),
+        "1 2 2 3 \n3 1 2 2 \n3 2\nada bob grace \n1:8 2:7 3:9 \n"
+    );
+}
+
+#[test]
 fn the_starter_kit_example_compiles_and_runs() {
     // examples/k2/starter.kiln — the program that motivated K2. Kept as a test
     // so the features it leans on (records, List, Select, switch over an enum,

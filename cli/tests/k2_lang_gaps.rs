@@ -341,6 +341,61 @@ public static class P
     );
 }
 
+#[test]
+fn order_by_refuses_a_key_it_cannot_compare() {
+    // There is no user comparator to call, so the key has to be something the
+    // language itself orders. A record key is refused where it is written
+    // rather than reaching clang as a `gt` it cannot emit.
+    let err = build_error(
+        "order_by_badkey",
+        r#"
+namespace OrderByBadKey;
+
+public record Box(int V);
+
+public static class P
+{
+    public static void Main()
+    {
+        var xs = new List<Box>();
+        xs.Add(new Box(1));
+        foreach (var b in xs.OrderBy(x => x))
+            Console.WriteLine(b.V);
+    }
+}
+"#,
+    );
+    assert!(
+        err.contains("OrderBy") && err.contains("can order"),
+        "the diagnostic does not name the key: {err}"
+    );
+}
+
+#[test]
+fn order_by_without_a_selector_is_a_compile_error() {
+    let err = build_error(
+        "order_by_noarg",
+        r#"
+namespace OrderByNoArg;
+
+public static class P
+{
+    public static void Main()
+    {
+        var xs = new List<int>();
+        xs.Add(1);
+        foreach (var x in xs.OrderBy())
+            Console.WriteLine(x);
+    }
+}
+"#,
+    );
+    assert!(
+        err.contains("List.OrderBy takes one key selector"),
+        "the diagnostic does not name the method: {err}"
+    );
+}
+
 // ─── generic constraints: class and new() ───────────────────────────────────
 
 #[test]

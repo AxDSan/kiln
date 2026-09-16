@@ -150,7 +150,8 @@ public static class P
 
         var evens = xs.Where(x => x % 2 == 0);
         var labels = evens.Select(x => $"n{x}");
-        Console.WriteLine($"{evens.Count} even, first {xs[1]}");
+        var ordered = xs.OrderBy(x => -x);
+        Console.WriteLine($"{evens.Count} even, first {xs[1]}, ordered {ordered[1]}");
         foreach (var l in labels)
             Console.Write($"{l} ");
         Console.WriteLine("");

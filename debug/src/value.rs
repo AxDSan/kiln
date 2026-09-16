@@ -8,10 +8,12 @@
 //!   language has to hedge, and hedging about indexing is unusable.
 //! - **`text` is a NUL-terminated UTF-8 pointer**, and `NULL` means empty
 //!   rather than absent. It renders as the characters the user wrote.
-//! - **An optional has no runtime representation.** It is two locals — the
-//!   value, and a hidden companion holding whether it is there. Nothing in
-//!   memory distinguishes an absent `int` from zero; only the emitter knows
-//!   they are a pair, which is why `nothing` can be printed at all.
+//! - **An optional has no runtime type, but it does have a shape.** 1.x keeps
+//!   it as two locals — the value and a hidden companion holding whether it is
+//!   there — joined by name; Kiln 2 holds `{ value, present }` in one slot,
+//!   described to the debugger as the flat struct it is. Nothing in memory
+//!   distinguishes an absent `int` from zero on its own; the companion, or the
+//!   present bit, is what makes `nothing` printable at all.
 //! - **Record field names do not reach a shipped binary.** They exist here
 //!   only because the compiler wrote them into the debug information.
 //! - **A Kiln 2 record is a C-layout struct behind a pointer**, with no header
@@ -19,10 +21,14 @@
 //!   pointer looks the same in both, so the member offsets decide which read
 //!   to make.
 //! - **A Kiln 2 `string` is a pointer with no name.** DWARF has no `string`, so
-//!   the characters are read from what the pointer addresses. A `T?` and a raw
-//!   `ptr` are described by that same bare pointer, so a value-type optional's
-//!   `{value, present}` pair cannot be told from a string or an address here —
-//!   describing one would be the emitter's job, and it does not yet.
+//!   the characters are read from what the pointer addresses. A raw `ptr` is
+//!   described the same way by the kind of value it is, so the name decides:
+//!   an unnamed pointer is text, and a pointer named `ptr` is an address.
+//! - **A `T?` is `{ value, present }` in the slot, not behind a pointer.** The
+//!   emitter describes it as the flat structure it is, so an absent optional
+//!   reads as `nothing` and a present one as the value it holds — where before
+//!   the slot was one unnamed pointer, and an `int?` read as an address and a
+//!   `string?` as text.
 //! - **Compiler-invented locals are hidden.** They are the only names
 //!   containing `$`, and `$` is not a character an identifier may contain, so
 //!   filtering them is exact rather than a guess.
@@ -336,6 +342,32 @@ pub fn read_record(
         }
     };
 
+    // An optional is described as the flat `{ value, present }` struct the
+    // emitter lays in the slot. The language has no such record: what a user
+    // should see is the value, or `nothing` when the bit says it is absent.
+    // The bit is a one-byte `i1`, so it is read as one byte rather than by the
+    // reader's four-byte `bool` rule, which would take padding with it.
+    if name.starts_with("$Opt") {
+        let present = fields.iter().find(|f| f.name == "present");
+        let value = fields.iter().find(|f| f.name == "value");
+        let (Some(present), Some(value)) = (present, value) else {
+            return Value::Unreadable(format!("{name} is not described as an optional"));
+        };
+        let at = match base.checked_add(present.byte_offset) {
+            Some(at) => at,
+            None => return Value::Unreadable(format!("{name}'s present bit is out of reach")),
+        };
+        match read_bytes(memory, at, 1) {
+            Some(b) if b[0] == 0 => return Value::Nothing,
+            Some(_) => {}
+            None => return unreadable_at("whether this value is there", at),
+        }
+        return match base.checked_add(value.byte_offset) {
+            Some(address) => read_optional_value(&value.type_name, address, memory),
+            None => Value::Unreadable(format!("{name}'s value is out of reach")),
+        };
+    }
+
     // The compiler's own name for a synthesised collection carries an instance
     // number the user never wrote (`$List3`). The language's spelling is what
     // a Variables pane should say, so the record is shown under that.
@@ -365,6 +397,23 @@ pub fn read_record(
         name: shown,
         fields: read_fields,
     }
+}
+
+/// Read the value half of an optional.
+///
+/// A `bool` is the one type whose stored width differs from the reader's own
+/// rule: the emitter lays it in the `{ value, present }` pair as the one-byte
+/// `i1` it is, while a `bool` field of a C-layout record — a `Result`'s `ok` —
+/// is a four-byte int. Reading four bytes here would take the neighbours with
+/// it, so the byte is read directly.
+fn read_optional_value(type_name: &str, address: u64, memory: &dyn Memory) -> Value {
+    if type_name == "bool" {
+        return match read_bytes(memory, address, 1) {
+            Some(b) => Value::Bool(b[0] != 0),
+            None => unreadable_at("this value", address),
+        };
+    }
+    read_typed(type_name, address, memory)
 }
 
 /// The name a user should see for a record type.

@@ -4277,11 +4277,14 @@ impl<'a> FnLower<'a> {
                 }
             }
             // `list.Where(pred)` / `list.Select(f)` / `list.Any(pred)` /
-            // `list.First(pred)` — written here rather than in K2 until the
-            // standard library exists.
-            if name == "Where" || name == "Select" || name == "Any" || name == "First" {
+            // `list.First(pred)` / `list.OrderBy(key)` — written here rather
+            // than in K2 until the standard library exists.
+            if matches!(name.as_str(), "Where" | "Select" | "Any" | "First" | "OrderBy") {
                 let (lv, lty) = self.expr_raw(recv, None)?;
                 if self.cx.as_list(lty).is_some() {
+                    if name == "OrderBy" {
+                        return self.list_order_by(lv, lty, args);
+                    }
                     return self.list_query(name, lv, lty, args);
                 }
             }
@@ -6411,6 +6414,241 @@ impl<'a> FnLower<'a> {
         });
         self.push(Stmt::Loop { body: inner });
         Ok((Expr::Local(out), out_ty))
+    }
+
+    /// `OrderBy(key)` — a new list holding the same elements, ordered ascending
+    /// by the key the lambda selects. `Sort` orders a list by the element
+    /// itself and does it in place; this reaches a field, leaves the source
+    /// alone, and is stable, so elements with equal keys keep their order.
+    ///
+    /// The sort is the same insertion sort `Sort` is: a list a program orders is
+    /// rarely large, and being stable is worth more than being quick. The key
+    /// must be something the language can compare — a number, a bool, a char or
+    /// a string — because there is no user comparator to call.
+    fn list_order_by(
+        &mut self,
+        src_val: Expr,
+        src_ty: TyId,
+        args: &[ast::Expr],
+    ) -> Result<(Expr, TyId), String> {
+        let (_, elem) = self.cx.as_list(src_ty).expect("a list");
+        if args.len() != 1 {
+            return Err("List.OrderBy takes one key selector".into());
+        }
+        let kty = self.probe_lambda_result(&args[0], elem)?;
+        let orderable = matches!(
+            self.tt().kind(kty),
+            TyKind::Bool
+                | TyKind::I8
+                | TyKind::U8
+                | TyKind::I16
+                | TyKind::U16
+                | TyKind::I32
+                | TyKind::U32
+                | TyKind::I64
+                | TyKind::U64
+                | TyKind::Nint
+                | TyKind::Nuint
+                | TyKind::Char
+                | TyKind::F32
+                | TyKind::F64
+                | TyKind::Str
+        );
+        if !orderable {
+            return Err(format!(
+                "`OrderBy` needs a key the language can order — a number, a bool, a char \
+                 or a string — not {}",
+                self.describe_ty(kty)
+            ));
+        }
+        let fn_ty = self.cx.b.m.types.intern(TyKind::Func {
+            params: vec![elem],
+            ret: kty,
+        });
+        let (f, fty) = self.expr(&args[0], Some(fn_ty))?;
+        self.check_fits(fty, fn_ty, "the `List.OrderBy` key")?;
+        let fl = self.new_local("$fn", fn_ty);
+        self.push(Stmt::Let {
+            local: fl,
+            value: f,
+        });
+        let src = self.new_local("$src", src_ty);
+        self.push(Stmt::Let {
+            local: src,
+            value: src_val,
+        });
+
+        // A fresh list, filled with a copy of the source: the language's own
+        // `Sort` is in place, and an ordering operation that quietly reordered
+        // the caller's list would be a different thing wearing the name.
+        let out_rid = self.cx.list_record(elem);
+        let out_data_ty = self.cx.b.m.record(out_rid).fields[LIST_DATA].ty;
+        let out = self.new_local("$out", src_ty);
+        self.push(Stmt::Let {
+            local: out,
+            value: Expr::MakeRecord(
+                out_rid,
+                vec![
+                    Expr::Int(0, TyTable::I32),
+                    Expr::Int(0, TyTable::I32),
+                    Expr::Null(out_data_ty),
+                ],
+            ),
+        });
+        let copy_i = self.new_local("$ci", TyTable::I32);
+        self.push(Stmt::Let {
+            local: copy_i,
+            value: Expr::Int(0, TyTable::I32),
+        });
+        // The append is built in a scratch block so it nests inside the loop.
+        self.blocks.push(Vec::new());
+        self.list_add(
+            out,
+            src_ty,
+            Expr::Index(
+                Box::new(Expr::Field(Box::new(Expr::Local(src)), LIST_DATA)),
+                Box::new(Expr::Local(copy_i)),
+            ),
+        );
+        let append = self.blocks.pop().unwrap();
+        let mut copy = vec![Stmt::If {
+            cond: Expr::Not(Box::new(Expr::Bin(
+                BinOp::Lt,
+                Box::new(Expr::Local(copy_i)),
+                Box::new(Expr::Field(Box::new(Expr::Local(src)), LIST_LEN)),
+                TyTable::I32,
+            ))),
+            then: vec![Stmt::Break],
+            els: vec![],
+        }];
+        copy.extend(append);
+        copy.push(Stmt::Assign {
+            place: Place::Local(copy_i),
+            value: Expr::Bin(
+                BinOp::Add,
+                Box::new(Expr::Local(copy_i)),
+                Box::new(Expr::Int(1, TyTable::I32)),
+                TyTable::I32,
+            ),
+        });
+        self.push(Stmt::Loop { body: copy });
+
+        // Insertion sort by the selected key, exactly as `Sort` does it.
+        let data = || Expr::Field(Box::new(Expr::Local(out)), LIST_DATA);
+        let len = || Expr::Field(Box::new(Expr::Local(out)), LIST_LEN);
+        let one = |e: Expr, op: BinOp| {
+            Expr::Bin(
+                op,
+                Box::new(e),
+                Box::new(Expr::Int(1, TyTable::I32)),
+                TyTable::I32,
+            )
+        };
+        let at = |loc: LocalId| Expr::Index(Box::new(data()), Box::new(Expr::Local(loc)));
+        let call_on = |e: Expr| {
+            Expr::Call(Box::new(Call::Indirect {
+                callee: Box::new(Expr::Local(fl)),
+                args: vec![e],
+                sig: fn_ty,
+            }))
+        };
+        let i = self.new_local("$oi", TyTable::I32);
+        let j = self.new_local("$oj", TyTable::I32);
+        let item = self.new_local("$oitem", elem);
+        let key = self.new_local("$okey", kty);
+        let here = self.new_local("$ohere", kty);
+        // `here > key`, which for a string is `strcmp(here, key) > 0`.
+        let greater = if kty == TyTable::STR {
+            Expr::Bin(
+                BinOp::Gt,
+                Box::new(Expr::Call(Box::new(Call::Dll {
+                    library: "c".into(),
+                    symbol: "strcmp".into(),
+                    conv: CallConv::Cdecl,
+                    args: vec![Expr::Local(here), Expr::Local(key)],
+                    arg_tys: vec![TyTable::STR, TyTable::STR],
+                    ret: TyTable::I32,
+                    varargs: false,
+                }))),
+                Box::new(Expr::Int(0, TyTable::I32)),
+                TyTable::I32,
+            )
+        } else {
+            Expr::Bin(
+                BinOp::Gt,
+                Box::new(Expr::Local(here)),
+                Box::new(Expr::Local(key)),
+                kty,
+            )
+        };
+        self.push(Stmt::Let {
+            local: i,
+            value: Expr::Int(1, TyTable::I32),
+        });
+        let inner = vec![
+            Stmt::If {
+                cond: Expr::Bin(
+                    BinOp::Lt,
+                    Box::new(Expr::Local(j)),
+                    Box::new(Expr::Int(0, TyTable::I32)),
+                    TyTable::I32,
+                ),
+                then: vec![Stmt::Break],
+                els: vec![],
+            },
+            Stmt::Assign {
+                place: Place::Local(here),
+                value: call_on(at(j)),
+            },
+            Stmt::If {
+                cond: Expr::Not(Box::new(greater)),
+                then: vec![Stmt::Break],
+                els: vec![],
+            },
+            Stmt::Assign {
+                place: Place::Index(Box::new(data()), Box::new(one(Expr::Local(j), BinOp::Add))),
+                value: at(j),
+            },
+            Stmt::Assign {
+                place: Place::Local(j),
+                value: one(Expr::Local(j), BinOp::Sub),
+            },
+        ];
+        let outer = vec![
+            Stmt::If {
+                cond: Expr::Not(Box::new(Expr::Bin(
+                    BinOp::Lt,
+                    Box::new(Expr::Local(i)),
+                    Box::new(len()),
+                    TyTable::I32,
+                ))),
+                then: vec![Stmt::Break],
+                els: vec![],
+            },
+            Stmt::Assign {
+                place: Place::Local(item),
+                value: at(i),
+            },
+            Stmt::Assign {
+                place: Place::Local(key),
+                value: call_on(Expr::Local(item)),
+            },
+            Stmt::Assign {
+                place: Place::Local(j),
+                value: one(Expr::Local(i), BinOp::Sub),
+            },
+            Stmt::Loop { body: inner },
+            Stmt::Assign {
+                place: Place::Index(Box::new(data()), Box::new(one(Expr::Local(j), BinOp::Add))),
+                value: Expr::Local(item),
+            },
+            Stmt::Assign {
+                place: Place::Local(i),
+                value: one(Expr::Local(i), BinOp::Add),
+            },
+        ];
+        self.push(Stmt::Loop { body: outer });
+        Ok((Expr::Local(out), src_ty))
     }
 
     /// `Any(pred)` — true when the predicate accepts some element; `First(pred)`

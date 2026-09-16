@@ -236,6 +236,58 @@ fn a_null_kiln2_reference_reads_as_nothing() {
     assert_eq!(value.to_string(), "nothing");
 }
 
+/// A `T?` is `{ value, present }` in the slot, and the emitter describes it as
+/// the flat struct it is. A present bit of one means the value half is real;
+/// a zero means it is absent, which the language calls `nothing` — and reading
+/// the value bytes anyway would show a zero that means nothing at all.
+#[test]
+fn a_kiln2_optional_reads_as_its_value_or_as_nothing() {
+    let fields = vec![field("value", 0, "int"), field("present", 4, "bool")];
+
+    let mut here = Ram::new();
+    here.put_i32(0, 7).put(4, &[1]);
+    let value = value::read_record(
+        &local("here", "$Opt<i32>", 0),
+        RecordShape::Flat,
+        &fields,
+        BASE,
+        &here,
+    );
+    assert_eq!(value.to_string(), "7");
+
+    let mut gone = Ram::new();
+    gone.put_i32(0, 0).put(4, &[0]);
+    let value = value::read_record(
+        &local("gone", "$Opt<i32>", 0),
+        RecordShape::Flat,
+        &fields,
+        BASE,
+        &gone,
+    );
+    assert_eq!(value.to_string(), "nothing");
+}
+
+/// A `string?` keeps the unnamed-pointer description a `string` has, so a
+/// present one reads as its characters rather than as the address it points
+/// at. The present bit is a one-byte `i1`, not the four-byte `bool` a
+/// C-layout record's field is.
+#[test]
+fn a_kiln2_optional_string_reads_through_its_unnamed_pointer() {
+    let mut ram = Ram::new();
+    ram.put_u64(0, BASE + 16) // value: the pointer, at offset 0
+        .put_text(16, "hi")
+        .put(8, &[1]); // present: one byte, at offset 8 (`{ ptr, i1 }`)
+    let fields = vec![field("value", 0, ""), field("present", 8, "bool")];
+    let value = value::read_record(
+        &local("name", "$Opt<ptr>", 0),
+        RecordShape::Flat,
+        &fields,
+        BASE,
+        &ram,
+    );
+    assert_eq!(value.to_string(), "\"hi\"");
+}
+
 // --- The whole chain --------------------------------------------------------
 
 fn repo() -> PathBuf {
@@ -383,6 +435,8 @@ fn a_stopped_kiln2_program_shows_its_values() {
          \x20       var nums = new List<int>();\n\
          \x20       nums.Add(10);\n\
          \x20       nums.Add(20);\n\
+         \x20       int? here = 7;\n\
+         \x20       int? gone = null;\n\
          \x20       Console.WriteLine($\"{p.X} {p.Y} {s.Length} {nums.Count}\");\n\
          \x20   }\n\
          }\n",
@@ -396,7 +450,7 @@ fn a_stopped_kiln2_program_shows_its_values() {
     let transcript = session(
         &dir,
         "k2.kiln",
-        14,
+        16,
         &[
             ("scopes", r#"{"frameId":1}"#),
             ("variables", r#"{"variablesReference":1}"#),
@@ -430,5 +484,16 @@ fn a_stopped_kiln2_program_shows_its_values() {
     assert!(
         dense.contains("\"value\":\"List{\u{2026}}\""),
         "the list was not named as a List: {transcript}"
+    );
+    // A `T?` is `{ value, present }` in the slot: the present one reads as what
+    // it holds, and the absent one as `nothing` rather than as a zero that
+    // could be a real value.
+    assert!(
+        dense.contains(r#""name":"here","value":"7""#),
+        "a present optional did not read as its value: {transcript}"
+    );
+    assert!(
+        dense.contains(r#""name":"gone","value":"nothing""#),
+        "an absent optional did not read as nothing: {transcript}"
     );
 }

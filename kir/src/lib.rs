@@ -212,6 +212,13 @@ impl TyTable {
         }
     }
 
+    /// The width of a pointer in bytes. A pointer-like value is one, and it is
+    /// also the alignment an aggregate is laid out to, so the debug emitter
+    /// needs it to measure the `{ value, present }` pair an optional is.
+    pub fn ptr_bytes(&self) -> u64 {
+        (self.ptr_bits / 8) as u64
+    }
+
     /// Whether a value of this type occupies the slot's pointer union — the
     /// aggregates and the pointer-like scalars. Drives slot marshalling.
     pub fn is_pointer(&self, id: TyId) -> bool {

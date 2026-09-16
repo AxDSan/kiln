@@ -74,7 +74,10 @@ clang and checks stdout):
   `info args` and `info locals` print them by name and value. Compiler-invented
   names are left out — they are machinery, not the user's variables. **A record
   is described by its fields**, so `ptype r` prints the struct and `p *r` gives
-  `{W = 3, H = 4}` rather than an address
+  `{W = 3, H = 4}` rather than an address. **An optional is described as the
+  `{ value, present }` struct it is**, so a `T?` local reads as the value it
+  holds or as `nothing` — where before it was one unnamed pointer, and an
+  `int?` read as an address and a `string?` as text
 - **Editor grammars**: the VS Code and Kate definitions highlight K2 — `//` and
   `/* */` comments, the keyword and type sets, `[Attributes]`, `$"…{x}…"`
   interpolation — while still highlighting 1.x, since both share `.kiln` during
@@ -195,6 +198,12 @@ clang and checks stdout):
   `Select` infers its result element type from the lambda body, so
   `xs.Where(x => x > 8).Select(x => $"n{x}")` turns a list of int into a list
   of string
+- **`OrderBy`** over a `List<T>`, taking a key selector — `pts.OrderBy(p => p.X)`
+  — beside `Where`/`Select`/`Any`/`First`. It answers with a **new** list (the
+  source is untouched, where `Sort` is in place) and is stable, so equal keys
+  keep their order. The key must be a number, a bool, a char or a string,
+  because there is no user comparator to call; anything else is refused by name
+  where it is written
 - **`switch` expressions**: `x switch { 1 => …, < 10 => …, _ => … }` with
   constant and relational patterns, lowered to an if-chain into one temporary
 - **`defer`**: runs when its block is left — falling off the end, `return`,
@@ -263,22 +272,20 @@ clang and checks stdout):
 1. Richer null flow: `x != null` narrows, and `x!` and `x?.` are built, but
    narrowing through `&&`, through an early `return` and through an `is T v`
    pattern is not.
-2. `OrderBy` over a `List<T>` — it needs a comparator; `Where`, `Select`, `Any`
-   and `First` are the ones written.
-3. Generic type arguments beyond the compiler-known `List<T>`, `Dictionary<K,V>`
+2. Generic type arguments beyond the compiler-known `List<T>`, `Dictionary<K,V>`
    and `HashSet<T>` are refused by name.
-4. A handler wired at run time cannot yet take an event's arguments (a grid's
+3. A handler wired at run time cannot yet take an event's arguments (a grid's
    row) — `kn_ui_on_env` refuses those with 2 rather than calling wrongly.
-5. The `.kdecl` declaration bundles (2,653 lines across `kits/`) are still
+4. The `.kdecl` declaration bundles (2,653 lines across `kits/`) are still
    Kiln 1.x: Kiln 2 reaches a kit's *commands*, but its declared structs and
    constants do not cross yet. This is Phase 4's remaining exit.
-6. Studio's code pane highlights K2 from its own line tokenizer rather than
+5. Studio's code pane highlights K2 from its own line tokenizer rather than
    from the language server's semantic tokens — the shapes are right, but the
    toolchain is not the one deciding them.
-7. `List<T>` is K2's own structure, converted to and from a runtime array at the
+6. `List<T>` is K2's own structure, converted to and from a runtime array at the
    command boundary. Re-platforming it onto `Kiln_Array` buys nothing now that
    allocation is collected.
-8. One `k2` crate holds syntax + lowering; it splits into `k2-syntax`/
+7. One `k2` crate holds syntax + lowering; it splits into `k2-syntax`/
    `k2-sema`/`k2-lower` as `k2-sema` grows.
 
 ## Milestone: the RAD half runs

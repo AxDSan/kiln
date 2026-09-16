@@ -88,8 +88,6 @@ what `--release` is for.
 
 ### Kiln 2
 
-- **`OrderBy` is not written.** `Where`, `Select`, `Any` and `First` take a
-  predicate; ordering a list needs a comparator and is next.
 - **Null flow narrows less than it could.** `x != null` narrows, and `x!` and
   `x?.` work, but the proof does not carry through `&&`, through an early
   `return`, or through an `is T v` pattern.
@@ -108,10 +106,6 @@ what `--release` is for.
 - **`kiln fmt` moves a comment written at the end of a line** above the next
   construct, because a comment attaches to the construct that follows it, and it
   normalises blank lines rather than preserving them.
-- **A `T?` shows as the wrong thing in the debugger.** A `string` and a `T?`
-  are emitted as the same unnamed pointer, so an optional local reads as text or
-  as an address. A record, class, list, dictionary, set, `Result<T>` and
-  `string` all read correctly, with the fields and lengths they have.
 
 ### Kiln 1.x
 
