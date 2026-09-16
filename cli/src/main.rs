@@ -1093,7 +1093,7 @@ fn build_k2_for(
         return 1;
     }
     let status = std::process::Command::new("clang")
-        .args(if release { &["-O2"][..] } else { &[][..] })
+        .args(if release { &["-O2"][..] } else { &["-no-pie"][..] })
         .arg("-Wno-override-module")
         .arg(ll_path.to_str().unwrap())
         .arg(shim_path.to_str().unwrap())
@@ -2559,8 +2559,14 @@ fn clang_link(
         1
     }
 
+    // A debug program is linked at a fixed address on every distribution. Some
+    // compilers default to a position-independent program (Ubuntu's clang
+    // does, Fedora's does not), and the debugger and its tests expect the
+    // addresses the debug information names.
     let ldflags = if release {
         release_ldflags(driver, &common, target.is_executable())
+    } else if target.is_executable() {
+        vec!["-no-pie".to_string()]
     } else {
         Vec::new()
     };
