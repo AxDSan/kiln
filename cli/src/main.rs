@@ -864,7 +864,13 @@ fn build_k2_for(
     // `s.Length` is core's `length`. Link the runtime whenever one is called,
     // rather than making the reader know which members are commands.
     let use_runtime = use_runtime || module.calls_commands() || !module.foreign_libraries.is_empty();
-    let mut ll = kiln_kir::emit::emit(&module);
+    // The same clang-version choice the 1.x path makes: debug records under
+    // LLVM 19+, the `llvm.dbg.declare` intrinsic under 18 and earlier.
+    let spelling = match debug_format() {
+        DebugFormat::Records => kiln_kir::emit::DebugSpelling::Records,
+        DebugFormat::Intrinsics => kiln_kir::emit::DebugSpelling::Intrinsics,
+    };
+    let mut ll = kiln_kir::emit::emit_with(&module, spelling);
     // A program carries the pictures its form names, as a 1.x one does; a
     // Windows program carries the table even when it is empty, because a PE
     // link has no weak symbol for the UI library to find missing.

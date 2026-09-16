@@ -13,10 +13,33 @@ use crate::*;
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
-/// Emit a whole module as a `.ll` string.
+/// How a variable declaration is spelled in the debug information.
+///
+/// LLVM 19 introduced debug *records* and LLVM 21 removed the `llvm.dbg.*`
+/// intrinsics they replaced, so no single spelling is accepted across the
+/// supported range: a module written for clang 21 does not parse under the
+/// clang 18 that Ubuntu 24.04 still ships. Debug information is on by default,
+/// so getting this wrong is a build that fails outright rather than a build
+/// without debug info. The caller asks the toolchain and chooses — the same
+/// choice the 1.x backend's `DebugFormat` makes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DebugSpelling {
+    /// `#dbg_declare(...)` — LLVM 19 and later.
+    Records,
+    /// `call void @llvm.dbg.declare(...)` — LLVM 18 and earlier.
+    Intrinsics,
+}
+
+/// Emit a whole module as a `.ll` string, with the modern debug records.
 pub fn emit(m: &Module) -> String {
+    emit_with(m, DebugSpelling::Records)
+}
+
+/// Emit a whole module, naming the debug spelling the assembler will accept.
+pub fn emit_with(m: &Module, debug_spelling: DebugSpelling) -> String {
     let mut e = Emit {
         m,
+        debug_spelling,
         strings: Vec::new(),
         externs: BTreeSet::new(),
         extra_globals: Vec::new(),
@@ -36,6 +59,8 @@ pub fn emit(m: &Module) -> String {
 
 struct Emit<'a> {
     m: &'a Module,
+    /// Which spelling of a debug declaration the assembler accepts.
+    debug_spelling: DebugSpelling,
     strings: Vec<String>,
     externs: BTreeSet<String>,
     /// Globals the emitter itself needs — a lazily resolved function's cache.
@@ -468,12 +493,31 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                     let loc = d.location(line, scope);
                     (var, loc)
                 };
-                writeln!(
-                    self.head,
-                    "    #dbg_declare(ptr {}, !{var}, !DIExpression(), !{loc})",
-                    self.local_ptr(LocalId(i as u32))
-                )
-                .unwrap();
+                let slot = self.local_ptr(LocalId(i as u32));
+                match self.e.debug_spelling {
+                    // A debug *record*, which is not an instruction and needs
+                    // no declaration.
+                    DebugSpelling::Records => {
+                        writeln!(
+                            self.head,
+                            "    #dbg_declare(ptr {slot}, !{var}, !DIExpression(), !{loc})"
+                        )
+                        .unwrap();
+                    }
+                    // The intrinsic, whose declaration the module must carry.
+                    // LLVM 19 and later auto-upgrade this call to a record.
+                    DebugSpelling::Intrinsics => {
+                        self.e.externs.insert(
+                            "declare void @llvm.dbg.declare(metadata, metadata, metadata)".into(),
+                        );
+                        writeln!(
+                            self.head,
+                            "  call void @llvm.dbg.declare(metadata ptr {slot}, metadata !{var}, \
+                             metadata !DIExpression()), !dbg !{loc}"
+                        )
+                        .unwrap();
+                    }
+                }
             }
         }
 

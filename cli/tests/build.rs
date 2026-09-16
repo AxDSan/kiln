@@ -2670,3 +2670,65 @@ fn a_documented_command_carries_its_doc_and_example() {
         "an undocumented command must print no doc line:\n{stdout}"
     );
 }
+
+/// A Kiln 2 module's debug declarations follow the installed clang.
+///
+/// LLVM 19 introduced debug *records* and LLVM 21 deleted the `llvm.dbg.*`
+/// intrinsics they replaced, so no single spelling covers the supported range:
+/// Ubuntu 24.04 ships clang 18, which cannot read a `#dbg_declare` record. The
+/// Kiln 2 emitter used to write records unconditionally, which made every
+/// documented K2 sample fail to assemble on that runner. `KILN_CLANG_MAJOR`
+/// forces the choice, so both spellings are checked on one machine.
+#[test]
+fn the_debug_declaration_follows_the_clang_version() {
+    let src = std::env::temp_dir().join("kiln_debug_spelling.k2");
+    std::fs::write(
+        &src,
+        "namespace Spelling;\n\
+         public static class P\n\
+         {\n\
+         \x20   public static void Main()\n\
+         \x20   {\n\
+         \x20       int n = 3;\n\
+         \x20       Console.WriteLine($\"{n}\");\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let emit = |major: &str| {
+        let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
+            .args(["k2", src.to_str().unwrap(), "--emit-ir"])
+            .env("KILN_CLANG_MAJOR", major)
+            .output()
+            .expect("run kiln k2");
+        assert!(out.status.success(), "kiln k2 --emit-ir failed");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+
+    // clang 18 and earlier: the intrinsic, and its module-level declaration.
+    let old = emit("18");
+    assert!(
+        old.contains("call void @llvm.dbg.declare(metadata ptr"),
+        "clang 18 did not get the intrinsic:\n{old}"
+    );
+    assert!(
+        old.contains("declare void @llvm.dbg.declare(metadata, metadata, metadata)"),
+        "the intrinsic was used but not declared:\n{old}"
+    );
+    assert!(
+        !old.contains("#dbg_declare"),
+        "clang 18 got a record it cannot read:\n{old}"
+    );
+
+    // clang 19 and later: the record, and no intrinsic.
+    let new = emit("21");
+    assert!(
+        new.contains("#dbg_declare(ptr"),
+        "clang 21 did not get a record:\n{new}"
+    );
+    assert!(
+        !new.contains("llvm.dbg.declare"),
+        "clang 21 got an intrinsic it removed:\n{new}"
+    );
+}
