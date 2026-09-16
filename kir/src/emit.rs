@@ -46,7 +46,13 @@ pub fn emit_with(m: &Module, debug_spelling: DebugSpelling) -> String {
         debug: m
             .source
             .as_deref()
-            .map(|s| crate::debug::Debug::new(s, concat!("Kiln 2 ", env!("CARGO_PKG_VERSION")))),
+            .map(|s| {
+                let mut d = crate::debug::Debug::new(s, concat!("Kiln 2 ", env!("CARGO_PKG_VERSION")));
+                if m.target.windows {
+                    d.dwarf = 4;
+                }
+                d
+            }),
     };
     let mut funcs = String::new();
     for f in &m.funcs {

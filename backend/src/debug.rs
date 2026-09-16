@@ -576,7 +576,10 @@ impl DebugInfo {
             escape(&self.directory)
         )
         .unwrap();
-        writeln!(out, "!{DWARF_VERSION} = !{{i32 7, !\"Dwarf Version\", i32 5}}").unwrap();
+        // DWARF 4 on Windows: mingw's linker before binutils 2.42 cannot relocate
+        // DWARF 5's `.debug_line_str` offsets in a PE image.
+        let dwarf = if self.machine.windows { 4 } else { 5 };
+        writeln!(out, "!{DWARF_VERSION} = !{{i32 7, !\"Dwarf Version\", i32 {dwarf}}}").unwrap();
         writeln!(
             out,
             "!{DEBUG_INFO_VERSION} = !{{i32 2, !\"Debug Info Version\", i32 3}}"

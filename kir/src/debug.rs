@@ -40,6 +40,9 @@ pub struct Debug {
     /// Whether any variable was described, which is what turns the compile unit
     /// from a line table into full debug information.
     described: bool,
+    /// The DWARF version written: 5, or 4 for Windows, whose mingw linker before
+    /// binutils 2.42 cannot relocate DWARF 5's `.debug_line_str` offsets.
+    pub dwarf: u32,
 }
 
 impl Debug {
@@ -55,6 +58,7 @@ impl Debug {
             .map(|d| d.to_string_lossy().to_string())
             .unwrap_or_else(|| ".".to_string());
         Debug {
+            dwarf: 5,
             file,
             dir,
             next: FIRST_FREE,
@@ -268,7 +272,8 @@ impl Debug {
         .unwrap();
         writeln!(
             out,
-            "!{DWARF_VERSION} = !{{i32 7, !\"Dwarf Version\", i32 5}}"
+            "!{DWARF_VERSION} = !{{i32 7, !\"Dwarf Version\", i32 {}}}",
+            self.dwarf
         )
         .unwrap();
         writeln!(
