@@ -1,5 +1,6 @@
 //! The line table and the functions it belongs to.
 
+use crate::value::{RecordShape, RECORD_HEADER_BYTES};
 use crate::Error;
 use object::{Object, ObjectSection, ObjectSymbol};
 use std::path::Path;
@@ -28,8 +29,12 @@ pub struct Row {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Variable {
     pub name: String,
-    /// Its offset from the frame base, which for these binaries is `rbp`.
+    /// Its offset from the frame base, which is the register the function
+    /// names — see [`FrameBase`].
     pub frame_offset: i64,
+    /// Which register that is. A debugger that assumed one reads a Kiln 2
+    /// local out of the caller's frame, because the two compilers disagree.
+    pub frame_base: FrameBase,
     /// The type's name as the debug information spells it, which is what the
     /// value reader dispatches on.
     pub type_name: String,
@@ -44,6 +49,22 @@ pub struct Variable {
     pub record: Option<RecordFields>,
 }
 
+/// The register a subprogram measures its locals from, which is what its
+/// `DW_AT_frame_base` names.
+///
+/// The two are not interchangeable. A 1.x function is compiled with the frame
+/// pointer pinned and describes its locals as offsets from `rbp`, which is
+/// negative because the frame sits below it. A Kiln 2 function describes them
+/// as offsets from `rsp`, which are positive. Reading one with the other's
+/// register lands in the caller's frame and shows whatever is there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameBase {
+    /// `DW_OP_reg6`, the frame pointer.
+    FramePointer,
+    /// `DW_OP_reg7`, the stack pointer.
+    StackPointer,
+}
+
 /// A record's fields, as the compiler described them.
 ///
 /// Held beside the variable rather than looked up on demand, because the
@@ -51,20 +72,23 @@ pub struct Variable {
 /// type tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordFields {
-    /// Whether the local holds the record itself or a pointer to it. The two
-    /// are read from different places, and one rule for both renders a heap
-    /// record's fields out of the eight bytes of a pointer.
-    pub flat: bool,
+    /// Where the fields are read from. The debug information describing a
+    /// variable's type as a pointer to a structure does not settle this on its
+    /// own: 1.x's heap `record` puts an eight-byte header before its fields and
+    /// Kiln 2's C-layout struct does not, and they are spelled the same way.
+    pub shape: RecordShape,
     /// Each field's name and its offset from the start of the storage.
     pub fields: Vec<(String, u64, String)>,
 }
 
-/// A function, as the linker knows it.
+/// A function, as the program describes it.
 ///
-/// These come from the symbol table rather than from DWARF: the compiler emits
-/// line tables only, so there are no `DW_TAG_subprogram` entries to read yet.
-/// The symbol table has what is needed — a name, an address and a size — and
-/// it is what a `--release` build strips, which is the same condition.
+/// A 1.x function comes from the symbol table: its linker name is
+/// `kn_user_<name>`, which is how it is told from the runtime's own C, and the
+/// symbol carries the name, the address and the size. A Kiln 2 function is
+/// named plainly (`P_Main`) and looks like any other text symbol, so a prefix
+/// test would sweep in the C library; its `DW_TAG_subprogram` is read instead,
+/// and only from the units this compiler produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Subprogram {
     /// The name in the source, with the compiler's prefix removed.
@@ -189,6 +213,14 @@ const USER_PREFIX: &str = "kn_user_";
 /// was compiled by something else and is not the user's code.
 const PRODUCER: &str = "Kiln";
 
+/// The producer a Kiln 2 compile unit names, which decides that its
+/// subroutines are read from DWARF rather than from the symbol table.
+///
+/// The trailing space matters: a 1.x unit names itself `Kiln 2.0.0` — the
+/// version of the *release*, not of the language — and without it a 1.x
+/// binary's DWARF subprograms would be added beside the symbol table's.
+const K2_PRODUCER: &str = "Kiln 2 ";
+
 /// A compile unit's `DW_AT_producer`, or an empty string when it has none.
 fn unit_producer(
     dwarf: &gimli::Dwarf<gimli::EndianSlice<gimli::RunTimeEndian>>,
@@ -235,6 +267,7 @@ pub(crate) fn load(path: &Path) -> Result<Program, Error> {
     let mut directory = String::new();
     let mut rows: Vec<Row> = Vec::new();
     let mut variables: Vec<Variable> = Vec::new();
+    let mut dwarf_subs: Vec<Subprogram> = Vec::new();
 
     let mut units = dwarf.units();
     while let Some(header) = units.next()? {
@@ -250,7 +283,8 @@ pub(crate) fn load(path: &Path) -> Result<Program, Error> {
         // `atexit.c`'s line 45 under the user's filename and step a user into
         // the C library. The producer string is what separates them, and it is
         // written by this compiler, so it is ours to rely on.
-        if !unit_producer(&dwarf, &unit)?.starts_with(PRODUCER) {
+        let producer = unit_producer(&dwarf, &unit)?;
+        if !producer.starts_with(PRODUCER) {
             continue;
         }
         if source.is_empty() {
@@ -262,6 +296,12 @@ pub(crate) fn load(path: &Path) -> Result<Program, Error> {
             }
         }
         variables.extend(read_variables(&dwarf, &unit)?);
+        // A Kiln 2 function has no `kn_user_` prefix to be found by, so its
+        // subprogram is taken from the unit that describes it. A 1.x unit has
+        // one too, and taking it here as well would name a frame twice.
+        if producer.starts_with(K2_PRODUCER) {
+            dwarf_subs.extend(read_subprograms(&dwarf, &unit)?);
+        }
         let mut state = program.rows();
         while let Some((_, row)) = state.next_row()? {
             // A row with no line is one the compiler could not attribute. It
@@ -305,6 +345,9 @@ pub(crate) fn load(path: &Path) -> Result<Program, Error> {
             })
         })
         .collect();
+    // A 1.x binary has no DWARF subprograms here and keeps the symbol table's;
+    // a Kiln 2 one has no `kn_user_` symbols and keeps these.
+    subs.extend(dwarf_subs);
     subs.sort_by_key(|s| s.low_pc);
 
     Ok(Program {
@@ -327,6 +370,7 @@ fn read_variables(
 ) -> Result<Vec<Variable>, Error> {
     let mut found = Vec::new();
     let mut low_pc = 0u64;
+    let mut frame_base = FrameBase::FramePointer;
     let mut parameters = 0usize;
     let mut entries = unit.entries();
     while let Some((_, entry)) = entries.next_dfs()? {
@@ -337,6 +381,7 @@ fn read_variables(
                     Some(gimli::AttributeValue::DebugAddrIndex(i)) => dwarf.address(unit, i)?,
                     _ => 0,
                 };
+                frame_base = frame_base_of(entry);
                 parameters = 0;
             }
             tag @ (gimli::DW_TAG_variable | gimli::DW_TAG_formal_parameter) => {
@@ -368,6 +413,7 @@ fn read_variables(
                 found.push(Variable {
                     name,
                     frame_offset: offset,
+                    frame_base,
                     type_name,
                     parameter,
                     low_pc,
@@ -380,12 +426,97 @@ fn read_variables(
     Ok(found)
 }
 
+/// The register a subprogram's `DW_AT_frame_base` names.
+///
+/// The expression is a single `DW_OP_regN` for both compilers here, and the
+/// choice is between the two stack registers. Anything else — a location list,
+/// or an expression this does not recognise — keeps the frame pointer, which
+/// is what every 1.x binary uses, so an unrecognised function reads exactly as
+/// it did before rather than silently moving its locals.
+fn frame_base_of(
+    entry: &gimli::DebuggingInformationEntry<gimli::EndianSlice<gimli::RunTimeEndian>>,
+) -> FrameBase {
+    let Ok(Some(gimli::AttributeValue::Exprloc(expression))) =
+        entry.attr_value(gimli::DW_AT_frame_base)
+    else {
+        return FrameBase::FramePointer;
+    };
+    let mut operations = expression.operations(gimli::Encoding {
+        address_size: 8,
+        format: gimli::Format::Dwarf32,
+        version: 5,
+    });
+    // x86-64's DWARF register numbers: 6 is `rbp` and 7 is `rsp`.
+    match operations.next().ok().flatten() {
+        Some(gimli::Operation::Register {
+            register: gimli::Register(7),
+        }) => FrameBase::StackPointer,
+        _ => FrameBase::FramePointer,
+    }
+}
+
+/// The subroutines a Kiln 2 compile unit describes itself.
+///
+/// A 1.x function is found by its `kn_user_` symbol, but a Kiln 2 one is named
+/// plainly (`P_Main`) and cannot be told from the runtime's C by its name. The
+/// unit already says which functions are the user's — a `DW_TAG_subprogram`
+/// with a body — and this is that answer, with the address range the frame
+/// lookup needs. A declaration has no `DW_AT_high_pc` and is skipped: it is a
+/// promise about a function, not one.
+fn read_subprograms(
+    dwarf: &gimli::Dwarf<gimli::EndianSlice<gimli::RunTimeEndian>>,
+    unit: &gimli::Unit<gimli::EndianSlice<gimli::RunTimeEndian>>,
+) -> Result<Vec<Subprogram>, Error> {
+    let mut found = Vec::new();
+    let mut entries = unit.entries();
+    while let Some((_, entry)) = entries.next_dfs()? {
+        if entry.tag() != gimli::DW_TAG_subprogram {
+            continue;
+        }
+        let Some(name) = entry.attr(gimli::DW_AT_name)? else {
+            continue;
+        };
+        let Ok(name) = dwarf.attr_string(unit, name.value()) else {
+            continue;
+        };
+        let name = String::from_utf8_lossy(name.slice()).into_owned();
+        let low_pc = match entry.attr_value(gimli::DW_AT_low_pc)? {
+            Some(gimli::AttributeValue::Addr(a)) => a,
+            Some(gimli::AttributeValue::DebugAddrIndex(i)) => dwarf.address(unit, i)?,
+            _ => continue,
+        };
+        // `DW_AT_high_pc` is an offset from `low_pc` in the DWARF this compiler
+        // writes; an address is the older spelling and says the same thing.
+        let size = match entry.attr_value(gimli::DW_AT_high_pc)? {
+            Some(gimli::AttributeValue::Udata(n)) => n,
+            Some(gimli::AttributeValue::Addr(high)) => high.saturating_sub(low_pc),
+            _ => continue,
+        };
+        if low_pc == 0 || size == 0 {
+            continue;
+        }
+        found.push(Subprogram {
+            symbol: name.clone(),
+            name,
+            low_pc,
+            size,
+        });
+    }
+    Ok(found)
+}
+
 /// A record's fields, when the variable is one.
 ///
-/// Two shapes reach here. A `c record` local holds the object itself, so its
-/// type is the structure. A `record` local holds a pointer to one on the heap,
-/// so its type is a pointer *to* the structure — and reading the fields out of
-/// the eight bytes of the pointer instead is the mistake this distinguishes.
+/// Two descriptions reach here. A local holds the object itself — a 1.x
+/// `c record`'s `alloca`, for instance — so its type is the structure. A local
+/// holds a *pointer* to the object, so its type is a pointer to the structure,
+/// and reading the fields out of the pointer's eight bytes instead of out of
+/// what it points at is the mistake this distinguishes.
+///
+/// The pointer case is itself two shapes: 1.x's `record` puts a `{count, pad}`
+/// header before its fields, so its first member is at eight, while a Kiln 2
+/// `record`/`class` and a by-address c-record start at zero. The pointer does
+/// not say which, but the member offsets do.
 fn record_fields(
     dwarf: &gimli::Dwarf<gimli::EndianSlice<gimli::RunTimeEndian>>,
     unit: &gimli::Unit<gimli::EndianSlice<gimli::RunTimeEndian>>,
@@ -395,8 +526,8 @@ fn record_fields(
         return Ok(None);
     };
     let described = unit.entry(offset)?;
-    let (structure, flat) = match described.tag() {
-        gimli::DW_TAG_structure_type => (offset, true),
+    let (structure, by_pointer) = match described.tag() {
+        gimli::DW_TAG_structure_type => (offset, false),
         gimli::DW_TAG_pointer_type => {
             let Some(gimli::AttributeValue::UnitRef(inner)) =
                 described.attr_value(gimli::DW_AT_type)?
@@ -406,7 +537,7 @@ fn record_fields(
             if unit.entry(inner)?.tag() != gimli::DW_TAG_structure_type {
                 return Ok(None);
             }
-            (inner, false)
+            (inner, true)
         }
         _ => return Ok(None),
     };
@@ -443,7 +574,20 @@ fn record_fields(
     if fields.is_empty() {
         return Ok(None);
     }
-    Ok(Some(RecordFields { flat, fields }))
+    // Where the fields begin is what tells a header from its absence. A record
+    // reached through a pointer whose first field sits inside the header is the
+    // 1.x heap layout; one whose first field sits at zero has none.
+    let first = fields
+        .iter()
+        .map(|(_, offset, _)| *offset)
+        .min()
+        .unwrap_or(0);
+    let shape = match (by_pointer, first < RECORD_HEADER_BYTES) {
+        (false, _) => RecordShape::Flat,
+        (true, true) => RecordShape::Pointer,
+        (true, false) => RecordShape::Heap,
+    };
+    Ok(Some(RecordFields { shape, fields }))
 }
 
 /// The offset in a `DW_OP_fbreg` location, or `None` for any other kind.
@@ -519,6 +663,7 @@ mod tests {
             variables: vec![Variable {
                 name: "total".into(),
                 frame_offset: -8,
+                frame_base: FrameBase::FramePointer,
                 type_name: "int".into(),
                 parameter: None,
                 low_pc: 0x1000,

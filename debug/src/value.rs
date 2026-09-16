@@ -43,7 +43,11 @@ const ARRAY_LEN_OFFSET: u64 = 4;
 /// followed by `count` cells (`runtime/kn_record.c:23`). Only the count is read
 /// from it; every field's position comes from the debug information, which
 /// already measures from the start of this header.
-const RECORD_HEADER_BYTES: u64 = 8;
+///
+/// Exposed to [`crate::symbols`], which is where the header is told from its
+/// absence: a pointer to a structure whose first field sits at zero has no
+/// header, and that is a different read.
+pub(crate) const RECORD_HEADER_BYTES: u64 = 8;
 
 /// Where the entry block hangs off `Kiln_Dict`
 /// (`runtime/kiln_core.h:46`): three `int32`s and a pad, then the pointer.
@@ -101,7 +105,8 @@ pub enum Value {
     Double(f64),
     Bool(bool),
     Text(String),
-    /// An optional that is not there.
+    /// A value that is not there: an optional that is absent, or a reference
+    /// that is `null`.
     Nothing,
     /// An array, already 1-based for display.
     Array(Vec<Value>),
@@ -195,19 +200,28 @@ impl Local {
     }
 }
 
-/// Which of a record's two layouts a local holds.
+/// Which of a record's layouts a local holds.
 ///
-/// The distinction is not cosmetic: the two are read from different places.
-/// A heap record's slot holds a pointer to the runtime's allocation, so the
-/// fields are one dereference away; a c-record's slot *is* the struct — an
-/// `alloca [N x i8]` — so the fields are in the frame itself. One sentence
-/// covering both would render garbage for one of them.
+/// The distinction is not cosmetic: the three are read from different places.
+/// A heap record's slot holds a pointer to the runtime's allocation, whose
+/// fields sit behind an eight-byte header, so the fields are one dereference
+/// and one header away; a c-record's slot *is* the struct — an
+/// `alloca [N x i8]` — so the fields are in the frame itself; and a Kiln 2
+/// `record`, `class` or a by-address c-record holds a pointer to a struct with
+/// no header at all, so the fields are one dereference away and no further.
+/// One sentence covering them would render garbage for two of the three.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordShape {
-    /// A `record`: `kn_rec_new`'s allocation, held by pointer.
+    /// A 1.x `record`: `kn_rec_new`'s allocation, held by pointer, with a
+    /// `{count, pad}` header before the fields.
     Heap,
-    /// A `c record`: flat bytes laid out where the local lives.
+    /// A `c record` local: flat bytes laid out where the local lives.
     Flat,
+    /// A pointer to a C-layout struct — a Kiln 2 `record` or `class`, or a
+    /// c-record passed by address. The fields sit at the offsets the debug
+    /// information gives, counting from the pointee, and nothing precedes
+    /// them.
+    Pointer,
 }
 
 /// One field of a record, as the debug information describes it.
@@ -217,8 +231,9 @@ pub struct Field {
     /// wrote it into the debug information.
     pub name: String,
     /// Its offset from the start of the record's storage, in bytes — DWARF's
-    /// `DW_AT_data_member_location`. For a heap record that already counts the
-    /// eight-byte header, because the backend writes the offsets that way.
+    /// `DW_AT_data_member_location`. For a 1.x heap record that already counts
+    /// the eight-byte header, because the backend writes the offsets that way;
+    /// a C-layout struct's first field is at zero.
     pub byte_offset: u64,
     /// The field's type, spelled as the debug information spells it.
     pub type_name: String,
@@ -294,11 +309,41 @@ pub fn read_record(
             }
             pointer
         }
+        // A Kiln 2 record or class is one heap allocation of a C-layout struct:
+        // the slot holds the address of the first field, not of a header, so
+        // the fields are read at the offsets the debug information gives with
+        // nothing skipped and no count to check against.
+        RecordShape::Pointer => {
+            let slot = local.address(frame_base);
+            let Some(pointer) = read_u64_at(memory, slot) else {
+                return unreadable_at("this record", slot);
+            };
+            if pointer == 0 {
+                // A class reference is `null` until it is created, and `null`
+                // is a value in this language — `nothing` is the word for one.
+                return Value::Nothing;
+            }
+            pointer
+        }
     };
 
+    // The compiler's own name for a synthesised collection carries an instance
+    // number the user never wrote (`$List3`). The language's spelling is what
+    // a Variables pane should say, so the record is shown under that.
+    let shown = shown_name(&name);
     let mut read_fields = Vec::with_capacity(fields.len());
     for field in fields {
         let value = match base.checked_add(field.byte_offset) {
+            // A synthesised collection's element buffers are raw storage, not
+            // text: reading one as a string walks element bytes until a zero
+            // happens to appear. The address is the only true thing to show.
+            Some(address) if is_collection_buffer(&name, &field.name) => {
+                match read_u64_at(memory, address) {
+                    Some(0) => Value::Nothing,
+                    Some(pointer) => Value::Int64(pointer as i64),
+                    None => unreadable_at(&format!("the buffer of {shown}"), address),
+                }
+            }
             Some(address) => read_typed(&field.type_name, address, memory),
             None => Value::Unreadable(format!(
                 "field {} sits past the end of the address space",
@@ -308,9 +353,48 @@ pub fn read_record(
         read_fields.push((field.name.clone(), value));
     }
     Value::Record {
-        name,
+        name: shown,
         fields: read_fields,
     }
+}
+
+/// The name a user should see for a record type.
+///
+/// Only the compiler's synthesised collections are renamed: their names end in
+/// an instance number (`$List3`) that means nothing outside the type table.
+/// The `$` is exact — it is not a character an identifier may contain — so no
+/// user's own type can be caught here.
+fn shown_name(name: &str) -> String {
+    for (prefix, shown) in [
+        ("$List", "List"),
+        ("$Set", "HashSet"),
+        ("$Dict", "Dictionary"),
+        ("$Result", "Result"),
+    ] {
+        if name.starts_with(prefix) {
+            return shown.to_string();
+        }
+    }
+    name.to_string()
+}
+
+/// Whether a record's field is the raw element storage of a synthesised
+/// collection.
+///
+/// `List<T>` is `{len, cap, data}`, `HashSet<T>` is `{len, cap, data, index}`
+/// and `Dictionary<K, V>` is `{len, cap, keys, values, index}`
+/// (`k2/src/lower.rs`, `list_record`/`set_record`/`dict_record`). The buffers
+/// hold the elements themselves — a `T` each, not a `Kiln_Array` and not a
+/// string — and the debug information does not say what `T` is, so there is
+/// nothing truthful to read out of one here.
+fn is_collection_buffer(record: &str, field: &str) -> bool {
+    if record.starts_with("$List") || record.starts_with("$Set") {
+        return field == "data" || field == "index";
+    }
+    if record.starts_with("$Dict") {
+        return field == "keys" || field == "values" || field == "index";
+    }
+    false
 }
 
 /// Render a frame's locals, pairing each optional with its hidden companion.
@@ -407,6 +491,19 @@ fn read_typed(type_name: &str, address: u64, memory: &dyn Memory) -> Value {
         "ptr" => match read_u64_at(memory, address) {
             Some(v) => Value::Int64(v as i64),
             None => unreadable_at("this pointer", address),
+        },
+        // A Kiln 2 `string` is a pointer to NUL-terminated UTF-8, and the front
+        // end writes it into the debug information as a pointer with neither a
+        // name nor a base type — `string` is not a spelling DWARF carries, so
+        // there is no `text` to dispatch on. Reading the characters is the only
+        // reading that is true for one. Every other unnamed pointer — a raw
+        // `ptr`, and the `{value, present}` pair a `T?` is stored as — shares
+        // the same description, so the read is by the address: bytes that are
+        // there render, and one that leads nowhere is reported rather than
+        // guessed at.
+        "" => match read_u64_at(memory, address) {
+            Some(pointer) => read_text(memory, pointer),
+            None => unreadable_at("this value", address),
         },
         _ if type_name.ends_with("[]") => match read_u64_at(memory, address) {
             Some(pointer) => read_array(memory, pointer),

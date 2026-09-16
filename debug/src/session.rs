@@ -337,11 +337,12 @@ impl Session {
         let Some(static_pc) = pc.checked_sub(self.bias) else {
             return Ok(Vec::new());
         };
-        // The frame base is the frame pointer, which the compiler pins for
-        // exactly this reason: it is a register the unwinder recovers for
-        // every frame, where the stack pointer in an outer frame would have to
-        // be inferred from the call that left it.
-        let base = frame.registers.bp;
+        // The frame base is the register the function named, which the compiler
+        // pins for exactly this reason: the unwinder recovers it for every
+        // frame, where the stack pointer in an outer frame would have to be
+        // inferred from the call that left it. The two compilers name different
+        // registers, so the choice comes from the debug information and not
+        // from a guess.
         let mut read = Vec::new();
         for variable in self.program.variables_at(static_pc) {
             // Names the compiler invented are not the user's. The only one
@@ -351,6 +352,10 @@ impl Session {
             if variable.name.contains('$') {
                 continue;
             }
+            let base = match variable.frame_base {
+                crate::symbols::FrameBase::FramePointer => frame.registers.bp,
+                crate::symbols::FrameBase::StackPointer => frame.registers.sp,
+            };
             let local = value::Local {
                 name: variable.name.clone(),
                 frame_offset: variable.frame_offset,
@@ -367,12 +372,9 @@ impl Session {
                             type_name: type_name.clone(),
                         })
                         .collect();
-                    let shape = if record.flat {
-                        value::RecordShape::Flat
-                    } else {
-                        value::RecordShape::Heap
-                    };
-                    value::read_record(&local, shape, &fields, base, &self.target)
+                    // Which layout the fields are in is the debug information's
+                    // own answer, worked out where the members were read.
+                    value::read_record(&local, record.shape, &fields, base, &self.target)
                 }
                 None => value::read(&local, base, &self.target)
                     .unwrap_or_else(|e| value::Value::Unreadable(e.to_string())),
