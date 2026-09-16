@@ -30,7 +30,17 @@ pub fn edit(src: &str, e: &Edit) -> Result<String, String> {
 /// Convert a Kiln 1.x program to Kiln 2 source — `kiln migrate`.
 /// As `migrate`, with the program's libraries loaded for exact types.
 pub fn migrate_with(src: &str, registry: Option<&kiln_ir::Registry>) -> Result<String, String> {
-    migrate::migrate_with(src, registry)
+    migrate::migrate_with_units(src, registry, &|_| false)
+}
+
+/// `migrate_with`, told which `use`d names are unit files beside the program:
+/// those become `using Accounts;` rather than a library's `using Kiln.Accounts;`.
+pub fn migrate_with_units(
+    src: &str,
+    registry: Option<&kiln_ir::Registry>,
+    is_unit: &dyn Fn(&str) -> bool,
+) -> Result<String, String> {
+    migrate::migrate_with_units(src, registry, is_unit)
 }
 
 pub fn migrate(src: &str) -> Result<String, String> {
@@ -89,6 +99,101 @@ pub fn compile_opts(
     let program =
         parser::parse(toks).map_err(|e| format!("{}:{}: {}", e.span.line, e.span.col, e.msg))?;
     let mut m = lower::lower_opts(&program, runtime, registry, opts)?;
+    m.source = source.map(|s| s.to_string());
+    Ok(m)
+}
+
+/// A program assembled from its entry file and the unit files it names.
+///
+/// `using Accounts;` names `accounts.kiln` beside the entry file, the way 1.x's
+/// `use accounts` did: when such a file exists it is parsed and its types join
+/// the program, and the units it names in turn are followed. A `using` that
+/// names no file beside — `Kiln.Db`, or a namespace declared in the same file —
+/// is left to the lowerer as it always was. Each file is read once, however many
+/// others name it, and a unit may not carry top-level statements: only the
+/// entry file is a program.
+pub struct Units {
+    pub program: ast::Program,
+    /// Every file read, entry first, with its text — so a caller can collect
+    /// the libraries each one asks for.
+    pub files: Vec<(std::path::PathBuf, String)>,
+}
+
+/// The file a `using` names beside `dir`, if there is one.
+pub fn unit_file(dir: &std::path::Path, using: &str) -> Option<std::path::PathBuf> {
+    if using.starts_with("Kiln.") || using.starts_with("System") {
+        return None;
+    }
+    let last = using.rsplit('.').next().unwrap_or(using);
+    let mut snake = String::new();
+    for (i, c) in last.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            snake.push('_');
+        }
+        snake.extend(c.to_lowercase());
+    }
+    [snake, last.to_lowercase(), last.to_string()]
+        .into_iter()
+        .map(|stem| dir.join(format!("{stem}.kiln")))
+        .find(|p| p.is_file())
+}
+
+pub fn parse_units(entry: &std::path::Path, entry_src: &str) -> Result<Units, String> {
+    let parse = |path: &std::path::Path, src: &str| -> Result<ast::Program, String> {
+        let toks = lexer::lex(src)
+            .map_err(|e| format!("{}:{}:{}: {}", path.display(), e.line, e.col, e.msg))?;
+        parser::parse(toks).map_err(|e| {
+            format!("{}:{}:{}: {}", path.display(), e.span.line, e.span.col, e.msg)
+        })
+    };
+    let dir = entry
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."))
+        .to_path_buf();
+    let mut program = parse(entry, entry_src)?;
+    let canon = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let mut seen = vec![canon(entry)];
+    let mut files = vec![(entry.to_path_buf(), entry_src.to_string())];
+    let mut queue: Vec<String> = program.usings.iter().map(|u| u.path.clone()).collect();
+    while let Some(using) = queue.pop() {
+        let Some(path) = unit_file(&dir, &using) else {
+            continue;
+        };
+        if seen.contains(&canon(&path)) {
+            continue;
+        }
+        seen.push(canon(&path));
+        let src = std::fs::read_to_string(&path)
+            .map_err(|e| format!("cannot read unit {}: {e}", path.display()))?;
+        let unit = parse(&path, &src)?;
+        if !unit.top_level.is_empty() {
+            return Err(format!(
+                "{}: a unit holds declarations only; its top-level statements belong in the program",
+                path.display()
+            ));
+        }
+        for u in &unit.usings {
+            queue.push(u.path.clone());
+            if !program.usings.iter().any(|have| have.path == u.path) {
+                program.usings.push(u.clone());
+            }
+        }
+        program.items.extend(unit.items);
+        files.push((path, src));
+    }
+    Ok(Units { program, files })
+}
+
+/// Lower an already-parsed program — `parse_units`' — as `compile_opts` does.
+pub fn compile_program_opts(
+    program: &ast::Program,
+    runtime: Runtime,
+    registry: Option<&kiln_ir::Registry>,
+    source: Option<&str>,
+    opts: &lower::Options,
+) -> Result<kiln_kir::Module, String> {
+    let mut m = lower::lower_opts(program, runtime, registry, opts)?;
     m.source = source.map(|s| s.to_string());
     Ok(m)
 }

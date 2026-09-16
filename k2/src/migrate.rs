@@ -23,6 +23,14 @@ pub fn migrate(src: &str) -> Result<String, String> {
 /// that come from commands are known. That is what tells a byte-set, whose
 /// 1-based 1.x positions become 0-based offsets, from a list, whose do not.
 pub fn migrate_with(src: &str, registry: Option<&ir::Registry>) -> Result<String, String> {
+    migrate_with_units(src, registry, &|_| false)
+}
+
+pub fn migrate_with_units(
+    src: &str,
+    registry: Option<&ir::Registry>,
+    is_unit: &dyn Fn(&str) -> bool,
+) -> Result<String, String> {
     let m = ir::parse(src).map_err(|e| format!("{}: {}", e.line, e.msg))?;
     // Comment blocks, keyed by the line they sit above; the one above
     // `module` is the file's own header.
@@ -99,6 +107,12 @@ pub fn migrate_with(src: &str, registry: Option<&ir::Registry>) -> Result<String
             .collect();
     });
     let mut program = module(&m);
+    // A unit beside the program is not a library: it keeps its own name.
+    for (u, using) in m.uses.iter().zip(program.usings.iter_mut()) {
+        if is_unit(u) {
+            using.path = pascal(u);
+        }
+    }
     if !header.is_empty() {
         let mut lead = header;
         lead.push(String::new());
@@ -303,7 +317,9 @@ fn ty(t: ir::Ty) -> TypeRef {
             )
         }
         T::Optional(e) => return TypeRef::Optional(Box::new(elem(e))),
-        T::CArray(_) => "Bytes",
+        // `byte[32]` in a c-record is thirty-two bytes held in place — Kiln 2's
+        // `byte[32]` — not a pointer to a buffer, which moved every field after it.
+        T::CArray(a) => return TypeRef::Fixed(Box::new(ty(a.elem)), a.count),
         T::AnyArray | T::AnyElem | T::AnyDict => "object",
     };
     TypeRef::Named(name.into())
@@ -311,6 +327,16 @@ fn ty(t: ir::Ty) -> TypeRef {
 
 fn elem(e: ir::Elem) -> TypeRef {
     ty(e.ty())
+}
+
+/// A module variable's initial value, typed by its declaration. An empty `{}`
+/// has no element to learn a type from, and read on its own it would become a
+/// `Dictionary<string, string>` beside a `Dictionary<string, Conn>` field.
+fn initial_value(v: &ir::GlobalVar) -> Expr {
+    match &v.value {
+        ir::Expr::DictLit(pairs) => dict_init(ty(v.ty), pairs.as_slice()),
+        other => expr(other),
+    }
 }
 
 // ─── module ─────────────────────────────────────────────────────────────────
@@ -359,7 +385,7 @@ fn module(m: &ir::Module) -> Program {
                 vis: Vis::Private,
                 name: camel(&v.name),
                 ty: ty(v.ty),
-                default: Some(expr(&v.value)),
+                default: Some(initial_value(v)),
                 is_readonly: false,
                 is_const: false,
                 span: sp(),
@@ -1008,6 +1034,8 @@ fn call(cmd: &str, args: &[ir::Expr]) -> Expr {
                 None => got,
             };
         }
+        ("dict_keys", [d]) => return e(ExprKind::Member(Box::new(expr(d)), "Keys".into())),
+        ("dict_values", [d]) => return e(ExprKind::Member(Box::new(expr(d)), "Values".into())),
         ("dict_has", [d, k]) => return member(d, "ContainsKey", std::slice::from_ref(k)),
         ("dict_remove", [d, k]) => return member(d, "Remove", std::slice::from_ref(k)),
         ("contains", [xs, x]) => return member(xs, "Contains", std::slice::from_ref(x)),

@@ -632,7 +632,14 @@ fn cmd_migrate(rest: &[String]) -> i32 {
                 .map(|p| p.registry)
         })
     });
-    let out = match kiln_k2::migrate_with(&src, registry.as_ref()) {
+    // A `use` naming a file beside the program is one of its units.
+    let dir = Path::new(&input)
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
+        .to_path_buf();
+    let is_unit = |u: &str| dir.join(format!("{u}.kiln")).is_file();
+    let out = match kiln_k2::migrate_with_units(&src, registry.as_ref(), &is_unit) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("kiln migrate: {input}: {e}");
@@ -825,7 +832,22 @@ fn build_k2_for(
     };
     // `using Kiln.File;` asks for the `file` library. The registry it builds is
     // what makes `File.ReadText(p)` resolve to the `file_read_text` command.
-    let uses = k2_uses(&src);
+    // The program and the unit files its `using`s name beside it.
+    let units = match kiln_k2::parse_units(Path::new(&input), &src) {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("kiln k2: {e}");
+            return 1;
+        }
+    };
+    let mut uses = Vec::new();
+    for (_, text) in &units.files {
+        for u in k2_uses(text) {
+            if !uses.contains(&u) {
+                uses.push(u);
+            }
+        }
+    }
     let registry = find_repo_root().and_then(|root| {
         libload::load_metadata(&root, &uses, goal.arch)
             .ok()
@@ -842,7 +864,13 @@ fn build_k2_for(
             windows: goal.os == Os::Windows,
         },
     };
-    let module = match kiln_k2::compile_opts(&src, runtime, registry.as_ref(), Some(&input), &opts) {
+    let module = match kiln_k2::compile_program_opts(
+        &units.program,
+        runtime,
+        registry.as_ref(),
+        Some(&input),
+        &opts,
+    ) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("kiln k2: {input}:{e}");
@@ -911,7 +939,8 @@ fn build_k2_for(
             eprintln!("kiln k2: this program needs the Kiln runtime, and its sources are not here");
             return 1;
         };
-        let mut uses = k2_uses(&src);
+        // Every file's libraries, the units' as well as the entry's.
+        let mut uses = uses.clone();
         if is_gui && !uses.iter().any(|u| u == "ui") {
             uses.push("ui".to_string());
         }

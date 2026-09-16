@@ -1075,3 +1075,64 @@ fn the_starter_inventory_runs_against_mariadb() {
     );
     assert_eq!(build_and_run("inventory_mariadb", &src), INVENTORY_OUT);
 }
+
+/// A Kiln 2 program spread over files: `using Accounts;` names `accounts.kiln`
+/// beside the entry file, a unit may name further units, a library a unit asks
+/// for is linked, and a `using` that names no file is left alone.
+#[test]
+fn a_program_is_assembled_from_the_units_it_names() {
+    let dir = std::env::temp_dir().join(format!("k2-units-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("main.kiln"),
+        "namespace App;\nusing Accounts;\nusing Kiln.Text;\n\npublic static class Program\n{\n    public static void Main()\n    {\n        Console.WriteLine(Accounts.Greeting(\"ada\"));\n        Console.WriteLine($\"{Accounts.Total(new Account(\"grace\", 2))}\");\n    }\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("accounts.kiln"),
+        "namespace Accounts;\nusing Wording;\n\npublic record Account(string Name, int Logins);\n\npublic static class Accounts\n{\n    public static string Greeting(string who) => Wording.Hello(who);\n    public static int Total(Account a) => a.Logins + 40;\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("wording.kiln"),
+        "namespace Wording;\nusing Kiln.Text;\n\npublic static class Wording\n{\n    public static string Hello(string who) => $\"hello, {Uppercase(who)}\";\n}\n",
+    )
+    .unwrap();
+    let exe = dir.join("app");
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["build", dir.join("main.kiln").to_str().unwrap(), "-o", exe.to_str().unwrap()])
+        .output()
+        .expect("kiln build");
+    assert!(out.status.success(), "build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    let run = Command::new(&exe).output().expect("the program runs");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "hello, ADA\n42\n");
+}
+
+/// `kiln migrate` on a 1.x unit program: a `use` naming a file beside it stays
+/// the unit's own name, a c-record's `byte[32]` stays thirty-two bytes in place,
+/// and an empty `{}` module variable is created with its declared value type.
+#[test]
+fn migrate_keeps_units_inline_arrays_and_dictionary_types() {
+    let dir = std::env::temp_dir().join(format!("k2-migrate-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("helpers.kiln"), "unit helpers\n\nsub twice(n: int): int\n  return n * 2\nend\n").unwrap();
+    let main = dir.join("main.kiln");
+    std::fs::write(
+        &main,
+        "module main\nuse helpers\nuse text\n\nrecord frame is c\n  id: byte\n  name: byte[32]\n  port: int\nend\n\nrecord conn\n  n: int\nend\n\nvar conns: conn{} = {}\n\nsub main\n  call print_text(\"{twice(2)}\")\nend\n",
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["migrate", main.to_str().unwrap()])
+        .output()
+        .expect("kiln migrate");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(text.contains("using Helpers;"), "a unit became a library:\n{text}");
+    assert!(text.contains("using Kiln.Text;"), "a library lost its prefix:\n{text}");
+    assert!(text.contains("byte[32] Name"), "the inline array became a pointer:\n{text}");
+    assert!(
+        text.contains("Dictionary<string, Conn> conns = new Dictionary<string, Conn>()"),
+        "the empty dictionary took the wrong value type:\n{text}"
+    );
+}
