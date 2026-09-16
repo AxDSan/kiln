@@ -265,6 +265,7 @@ mod tests {
             column: 3,
             is_stmt,
             end_sequence: false,
+            file: None,
         };
         vec![
             row(0x1000, 3, true),
@@ -282,6 +283,7 @@ mod tests {
                 column: 0,
                 is_stmt: false,
                 end_sequence: true,
+                file: None,
             },
         ]
     }

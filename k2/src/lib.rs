@@ -117,6 +117,9 @@ pub struct Units {
     /// Every file read, entry first, with its text — so a caller can collect
     /// the libraries each one asks for.
     pub files: Vec<(std::path::PathBuf, String)>,
+    /// Each type a unit file declares, and that file — so a function lowered
+    /// from its methods can be described in the file it is written in.
+    pub type_files: Vec<(String, std::path::PathBuf)>,
 }
 
 /// The file a `using` names beside `dir`, if there is one.
@@ -155,6 +158,7 @@ pub fn parse_units(entry: &std::path::Path, entry_src: &str) -> Result<Units, St
     let canon = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
     let mut seen = vec![canon(entry)];
     let mut files = vec![(entry.to_path_buf(), entry_src.to_string())];
+    let mut type_files = Vec::new();
     let mut queue: Vec<String> = program.usings.iter().map(|u| u.path.clone()).collect();
     while let Some(using) = queue.pop() {
         let Some(path) = unit_file(&dir, &using) else {
@@ -179,10 +183,22 @@ pub fn parse_units(entry: &std::path::Path, entry_src: &str) -> Result<Units, St
                 program.usings.push(u.clone());
             }
         }
+        for item in &unit.items {
+            let name = match item {
+                ast::Item::Type(t) => &t.name,
+                ast::Item::Form(f) => &f.name,
+                _ => continue,
+            };
+            type_files.push((name.clone(), path.clone()));
+        }
         program.items.extend(unit.items);
         files.push((path, src));
     }
-    Ok(Units { program, files })
+    Ok(Units {
+        program,
+        files,
+        type_files,
+    })
 }
 
 /// A kit's `.kdecl` bundle as Kiln 2 declarations — see `migrate::declarations`.

@@ -586,6 +586,10 @@ pub struct Func {
     pub symbol: String,
     /// The line the function is declared on, for its subprogram entry.
     pub line: usize,
+    /// The file it is declared in, when that is not the module's own source —
+    /// a method of a type from a unit file beside the program. `None` is the
+    /// module's `source`.
+    pub file: Option<String>,
     pub params: Vec<Param>,
     pub ret: TyId,
     pub conv: CallConv,

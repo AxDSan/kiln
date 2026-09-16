@@ -23,6 +23,10 @@ pub struct Row {
     /// address one past the last instruction, so it bounds the row before it
     /// and is never itself a stopping place.
     pub end_sequence: bool,
+    /// The file this row's line is in, when that is not the program's own
+    /// source: a Kiln 2 program spread over unit files describes a unit's
+    /// functions in the unit. `None` is `Program::source`.
+    pub file: Option<String>,
 }
 
 /// A local variable, as the compiler described it.
@@ -181,7 +185,7 @@ impl Program {
     pub fn breakpoint_for(&self, line: u32) -> Option<&Row> {
         self.rows
             .iter()
-            .filter(|r| r.is_stmt && !r.end_sequence && r.line >= line)
+            .filter(|r| r.is_stmt && !r.end_sequence && r.file.is_none() && r.line >= line)
             .min_by_key(|r| (r.line, r.address))
     }
 
@@ -190,7 +194,7 @@ impl Program {
     pub fn addresses_for(&self, line: u32) -> Vec<u64> {
         self.rows
             .iter()
-            .filter(|r| r.is_stmt && !r.end_sequence && r.line == line)
+            .filter(|r| r.is_stmt && !r.end_sequence && r.file.is_none() && r.line == line)
             .map(|r| r.address)
             .collect()
     }
@@ -302,8 +306,12 @@ pub(crate) fn load(path: &Path) -> Result<Program, Error> {
         if producer.starts_with(K2_PRODUCER) {
             dwarf_subs.extend(read_subprograms(&dwarf, &unit)?);
         }
+        let primary = unit
+            .name
+            .map(|n| String::from_utf8_lossy(n.slice()).into_owned())
+            .unwrap_or_default();
         let mut state = program.rows();
-        while let Some((_, row)) = state.next_row()? {
+        while let Some((header, row)) = state.next_row()? {
             // A row with no line is one the compiler could not attribute. It
             // is dropped rather than kept as line 0: a debugger that stopped
             // there would show no source, and a table that reports it as a
@@ -313,7 +321,27 @@ pub(crate) fn load(path: &Path) -> Result<Program, Error> {
                 None if row.end_sequence() => 0,
                 None => continue,
             };
+            // Which file the row names. The compile unit's own is the common
+            // case and stays `None`, so a single-file program reads as before.
+            let file = row.file(header).and_then(|entry| {
+                let name = dwarf.attr_string(&unit, entry.path_name()).ok()?;
+                let name = String::from_utf8_lossy(name.slice()).into_owned();
+                if name == primary || std::path::Path::new(&name).file_name() == std::path::Path::new(&primary).file_name() && entry.directory(header).is_none() {
+                    return None;
+                }
+                let dir = entry
+                    .directory(header)
+                    .and_then(|d| dwarf.attr_string(&unit, d).ok())
+                    .map(|d| String::from_utf8_lossy(d.slice()).into_owned());
+                Some(match dir {
+                    Some(d) if !d.is_empty() && !std::path::Path::new(&name).is_absolute() => {
+                        std::path::Path::new(&d).join(&name).to_string_lossy().into_owned()
+                    }
+                    _ => name,
+                })
+            });
             rows.push(Row {
+                file,
                 address: row.address(),
                 line,
                 column: match row.column() {
@@ -648,11 +676,11 @@ mod tests {
             source: "demo.kiln".into(),
             directory: "examples".into(),
             rows: vec![
-                Row { address: 0x1000, line: 3, column: 3, is_stmt: true, end_sequence: false },
-                Row { address: 0x1010, line: 5, column: 3, is_stmt: true, end_sequence: false },
-                Row { address: 0x1018, line: 5, column: 9, is_stmt: false, end_sequence: false },
-                Row { address: 0x1020, line: 7, column: 3, is_stmt: true, end_sequence: false },
-                Row { address: 0x1030, line: 0, column: 0, is_stmt: false, end_sequence: true },
+                Row { address: 0x1000, line: 3, column: 3, is_stmt: true, end_sequence: false, file: None },
+                Row { address: 0x1010, line: 5, column: 3, is_stmt: true, end_sequence: false, file: None },
+                Row { address: 0x1018, line: 5, column: 9, is_stmt: false, end_sequence: false, file: None },
+                Row { address: 0x1020, line: 7, column: 3, is_stmt: true, end_sequence: false, file: None },
+                Row { address: 0x1030, line: 0, column: 0, is_stmt: false, end_sequence: true, file: None },
             ],
             subs: vec![Subprogram {
                 name: "main".into(),

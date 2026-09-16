@@ -497,3 +497,44 @@ fn a_stopped_kiln2_program_shows_its_values() {
         "an absent optional did not read as nothing: {transcript}"
     );
 }
+
+/// A program spread over unit files is debugged in the file each line is in.
+///
+/// Stepping from `Main` into a unit's method stops in the unit — the frame
+/// names `helper.kiln` and the unit's own line — where before every line was
+/// reported against the entry file, so the editor showed line 7 of the wrong
+/// file.
+#[test]
+fn stepping_into_a_unit_stops_in_the_units_file() {
+    let dir = std::env::temp_dir().join("kiln_dap_k2_units_test");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("main.kiln"),
+        "namespace Main;\nusing Helper;\n\npublic static class P\n{\n    public static void Main()\n    {\n        int n = Helper.Twice(21);\n        Console.WriteLine($\"{n}\");\n    }\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("helper.kiln"),
+        "namespace Helper;\n\npublic static class Helper\n{\n    public static int Twice(int x)\n    {\n        int y = x * 2;\n        return y;\n    }\n}\n",
+    )
+    .unwrap();
+    let transcript = session(
+        &dir,
+        "main.kiln",
+        8,
+        &[
+            ("stepIn", r#"{"threadId":1}"#),
+            ("stackTrace", r#"{"threadId":1}"#),
+        ],
+    );
+    let dense: String = transcript.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        dense.contains("helper.kiln"),
+        "the frame in the unit did not name the unit's file: {transcript}"
+    );
+    assert!(
+        dense.contains(r#""line":7"#),
+        "the step did not stop on the unit's first line: {transcript}"
+    );
+}

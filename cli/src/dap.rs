@@ -539,7 +539,15 @@ impl Debuggee for Live {
                 .subprogram_for(address)
                 .map(|s| s.name.clone())
                 .unwrap_or_else(|| "<unknown>".to_string()),
-            source: self.source(),
+            // A row in a unit file names that file; the program's own rows name
+            // the program.
+            source: match &row.file {
+                Some(f) if Path::new(f).is_absolute() => Some(f.clone()),
+                Some(f) => Some(
+                    Path::new(&self.program.directory).join(f).to_string_lossy().into_owned(),
+                ),
+                None => self.source(),
+            },
             line: row.line,
             column: row.column,
         })

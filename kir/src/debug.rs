@@ -22,8 +22,12 @@ pub struct Debug {
     file: String,
     dir: String,
     next: usize,
-    /// Function symbol → its subprogram node.
-    subprograms: Vec<(String, usize, usize)>,
+    /// Function symbol → its line, its subprogram node and its file node.
+    subprograms: Vec<(String, usize, usize, usize)>,
+    /// Files other than the module's own, each `(filename, directory, node)`: a
+    /// program spread over unit files describes each function in the file that
+    /// declares it, or a debugger shows a unit's lines out of the entry file.
+    files: Vec<(String, String, usize)>,
     /// `(line, scope)` → its location node.
     locations: HashMap<(usize, usize), usize>,
     producer: String,
@@ -55,6 +59,7 @@ impl Debug {
             dir,
             next: FIRST_FREE,
             subprograms: Vec::new(),
+            files: Vec::new(),
             locations: HashMap::new(),
             producer: producer.to_string(),
             types: Vec::new(),
@@ -74,11 +79,42 @@ impl Debug {
     /// function — a thunk, a generic instance's body — has no source position
     /// worth stopping in, and gets none.
     pub fn subprogram(&mut self, symbol: &str, line: usize) -> usize {
-        if let Some((_, _, n)) = self.subprograms.iter().find(|(s, _, _)| s == symbol) {
+        self.subprogram_in(symbol, line, None)
+    }
+
+    /// `subprogram`, in `file` when that is not the module's own source.
+    pub fn subprogram_in(&mut self, symbol: &str, line: usize, file: Option<&str>) -> usize {
+        if let Some((_, _, n, _)) = self.subprograms.iter().find(|(s, _, _, _)| s == symbol) {
+            return *n;
+        }
+        let file_node = match file {
+            Some(path) => self.file_node(path),
+            None => FILE,
+        };
+        let n = self.fresh();
+        self.subprograms.push((symbol.to_string(), line, n, file_node));
+        n
+    }
+
+    fn file_node(&mut self, path: &str) -> usize {
+        let p = std::path::Path::new(path);
+        let name = p
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string());
+        let dir = p
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .map(|d| d.to_string_lossy().to_string())
+            .unwrap_or_else(|| ".".to_string());
+        if name == self.file && dir == self.dir {
+            return FILE;
+        }
+        if let Some((_, _, n)) = self.files.iter().find(|(f, d, _)| *f == name && *d == dir) {
             return *n;
         }
         let n = self.fresh();
-        self.subprograms.push((symbol.to_string(), line, n));
+        self.files.push((name, dir, n));
         n
     }
 
@@ -181,9 +217,15 @@ impl Debug {
             Some(i) => format!("arg: {i}, "),
             None => String::new(),
         };
+        let file = self
+            .subprograms
+            .iter()
+            .find(|(_, _, sp, _)| *sp == scope)
+            .map(|(_, _, _, f)| *f)
+            .unwrap_or(FILE);
         self.variables.push(format!(
             "!{n} = !DILocalVariable(name: \"{name}\", {argpart}scope: !{scope}, \
-             file: !{FILE}, line: {line}, type: !{ty})"
+             file: !{file}, line: {line}, type: !{ty})"
         ));
         self.described = true;
         n
@@ -235,10 +277,13 @@ impl Debug {
         )
         .unwrap();
         writeln!(out, "!{SUBPROGRAM_TYPE} = !DISubroutineType(types: !{{}})").unwrap();
-        for (symbol, line, n) in &self.subprograms {
+        for (name, dir, n) in &self.files {
+            writeln!(out, "!{n} = !DIFile(filename: \"{name}\", directory: \"{dir}\")").unwrap();
+        }
+        for (symbol, line, n, file) in &self.subprograms {
             writeln!(
                 out,
-                "!{n} = distinct !DISubprogram(name: \"{symbol}\", scope: !{FILE}, file: !{FILE}, \
+                "!{n} = distinct !DISubprogram(name: \"{symbol}\", scope: !{file}, file: !{file}, \
                  line: {line}, type: !{SUBPROGRAM_TYPE}, scopeLine: {line}, \
                  spFlags: DISPFlagDefinition, unit: !{CU})"
             )

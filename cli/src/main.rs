@@ -899,7 +899,7 @@ fn build_k2_for(
             windows: goal.os == Os::Windows,
         },
     };
-    let module = match kiln_k2::compile_program_opts(
+    let mut module = match kiln_k2::compile_program_opts(
         &units.program,
         runtime,
         registry.as_ref(),
@@ -912,6 +912,17 @@ fn build_k2_for(
             return 1;
         }
     };
+    // A method of a type from a unit file is described in that file, so a
+    // debugger stepping into it shows the unit's lines rather than the entry's.
+    for f in module.funcs.iter_mut() {
+        if let Some((_, path)) = units
+            .type_files
+            .iter()
+            .find(|(t, _)| f.symbol.starts_with(&format!("{t}_")))
+        {
+            f.file = Some(path.to_string_lossy().to_string());
+        }
+    }
     // A program with a form is a GUI program: it needs the ui library, and the
     // runtime enters its event loop.
     let is_gui = module.kind == kiln_k2::ModuleKind::Gui;

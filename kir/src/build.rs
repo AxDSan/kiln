@@ -149,6 +149,7 @@ impl ModuleBuilder {
             id,
             symbol: symbol.to_string(),
             line: 0,
+            file: None,
             params: param_defs,
             ret,
             conv,

@@ -353,7 +353,7 @@ impl<'a, 'b> FnEmit<'a, 'b> {
         // thunk, a lifted lambda — has no source position worth stopping in.
         if !self.f.synthetic {
             if let Some(d) = self.e.debug.as_mut() {
-                let sp = d.subprogram(&self.f.symbol, self.f.line);
+                let sp = d.subprogram_in(&self.f.symbol, self.f.line, self.f.file.as_deref());
                 self.scope = Some(sp);
                 // Start at the declaration line rather than at no location.
                 // LLVM discards a module's debug information entirely if a
