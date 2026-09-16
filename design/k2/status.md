@@ -1,14 +1,14 @@
 # Kiln 2 — implementation status
 
-Updated 2026-09-13. Tracks what of the [spec](spec.md) is actually built, so the
+Updated 2026-09-15. Tracks what of the [spec](spec.md) is actually built, so the
 [plan](plan.md)'s phases can be checked off against running code.
 
 ## Crates
 
 | Crate | Role | State |
 |---|---|---|
-| `kir` | the typed middle IR + LLVM emitter | types, emitter, 5 tests (4 exit fixtures + slot-ABI) |
-| `k2` | lexer + parser + lowerer (k2-syntax/k2-lower, one crate for now) | runnable subset, 6 end-to-end tests |
+| `kir` | the typed middle IR + LLVM emitter | types, emitter, **module variables as collector roots**, 8 fixtures |
+| `k2` | lexer + parser + lowerer (k2-syntax/k2-lower, one crate for now) | the language guide's surface, 70 end-to-end tests |
 | `backend` | 1.x → LLVM, split into `lower/` modules | unchanged behaviour, 61 tests |
 | `k2::print` | the canonical printer — `kiln fmt` | fixed point, comments carried, meaning unchanged |
 | `kir::debug` | DWARF line tables | a K2 binary is steppable in gdb |
@@ -200,11 +200,38 @@ clang and checks stdout):
 - **`defer`**: runs when its block is left — falling off the end, `return`,
   `break` or `continue` — with several defers in a block unwinding in reverse
   declaration order
+- **A program's module variables are collector roots**: the emitter writes a
+  `@kn_gc_roots` table of the pointer-typed globals and calls
+  `kn_gc_set_roots` before the entry function can run a static field's initial
+  value. `GlobalDef::is_gc_root` had existed since KIR was written and the
+  emitter ignored it, so a collection freed anything a program held only in a
+  module variable — reachable from nowhere else, and found by no stack scan.
+  Only in an executable and only with the runtime linked, which is 1.x's rule.
+- **`x!` and `x?.`**: `x!` asserts an optional is present and reads as its
+  plain type; `x?.Member` and `x?[i]` evaluate to nothing when the receiver is
+  empty, without evaluating the member or the index. `x!` on a `Result` is a
+  compile error, since the two absences are not the same thing.
+- **`Any` and `First`** over a `List<T>`, taking a predicate lambda, beside
+  `Where`/`Select`. `First` with no match stops the program by name rather than
+  answering with a zero.
+- **Constraints beyond interfaces**: `where T : class` and `where T : new()`
+  are enforced where the type argument is chosen, naming both the type and the
+  constraint when they do not hold.
+- **A format spec in an interpolation is refused by name.** `$"{x:03}"` used to
+  drop the spec silently and print `7` where the writer asked for `007`, which
+  is the one outcome an interpolation must not have; the hole is now parsed as
+  a whole expression and a leftover `:` is reported. That also fixed a ternary
+  inside a hole, which the spec splitter had been truncating.
+- **A ternary narrows an optional the way an `if` does**, and its arms unify
+  when they differ only in optionality — `n == 1 ? "one" : null`. Both used to
+  store a `{value, present}` pair into a slot typed from the other arm, which
+  clang refused.
+- **Every target builds from Kiln 2 source**: console and GUI programs,
+  `sharedlib` and `staticlib` with the C header, and the Windows x64/x86 cross
+  builds. `kiln build` names a library's entry file and reads the project
+  beside it for the target, because a Kiln 2 program does not declare one in
+  its source.
 
-**Parsed but not yet lowered** (parser accepts; lowering errors clearly):
-
-- `x!` (null-forgiving) and `x?.M`; `??` covers both `Result` and `T?`
-- generic type arguments (`List<T>` maps to an array type; others rejected)
 - **`[Table]` runs**: `T.Insert(h, row)` and `T.Select(h, x => pred)` build the
   statement at compile time and execute it through `libs/db` — the predicate
   becomes parameterised SQL, captured values bind rather than being pasted, and
@@ -233,12 +260,26 @@ clang and checks stdout):
 
 **Not yet built** (next phases, in rough order):
 
-1. `List<T>` is K2's own structure, converted to and from a runtime array at the command boundary. Re-platforming it onto `Kiln_Array` buys nothing now that allocation is collected — Phase 4's remaining exit is the `.kdecl`/libinfo migration, which is flip-adjacent and waits for the flip
-2. richer null flow (narrowing through `&&`, early `return`, `is T v` patterns) — the `if (x != null)` form is done
-3. constraints beyond interfaces (`where T : class`, `new()`) are parsed and ignored
-4. the standard-library surface (Phase 4): real `File.`, `Db.`, `s.Length`, etc., replacing the `printf` shim
-5. ABI v5 is done; a handler wired at run time cannot yet take an event's arguments (a grid's row) — `kn_ui_on_env` refuses those with 2 rather than calling wrongly
-6. Studio's code pane highlights K2 from its own line tokenizer rather than from the language server's semantic tokens — the shapes are right, but the toolchain is not the one deciding them
+1. Richer null flow: `x != null` narrows, and `x!` and `x?.` are built, but
+   narrowing through `&&`, through an early `return` and through an `is T v`
+   pattern is not.
+2. `OrderBy` over a `List<T>` — it needs a comparator; `Where`, `Select`, `Any`
+   and `First` are the ones written.
+3. Generic type arguments beyond the compiler-known `List<T>`, `Dictionary<K,V>`
+   and `HashSet<T>` are refused by name.
+4. A handler wired at run time cannot yet take an event's arguments (a grid's
+   row) — `kn_ui_on_env` refuses those with 2 rather than calling wrongly.
+5. The `.kdecl` declaration bundles (2,653 lines across `kits/`) are still
+   Kiln 1.x: Kiln 2 reaches a kit's *commands*, but its declared structs and
+   constants do not cross yet. This is Phase 4's remaining exit.
+6. Studio's code pane highlights K2 from its own line tokenizer rather than
+   from the language server's semantic tokens — the shapes are right, but the
+   toolchain is not the one deciding them.
+7. `List<T>` is K2's own structure, converted to and from a runtime array at the
+   command boundary. Re-platforming it onto `Kiln_Array` buys nothing now that
+   allocation is collected.
+8. One `k2` crate holds syntax + lowering; it splits into `k2-syntax`/
+   `k2-sema`/`k2-lower` as `k2-sema` grows.
 
 ## Milestone: the RAD half runs
 
@@ -256,21 +297,14 @@ record, a `List<T>`, a `Select` lambda and a `switch` over an enum.
 
 ## Known shortcuts to revisit
 
-- **Records are C-layout + `malloc`**, even `class`. Managed records / GC
-  integration and reference vs value equality land with the runtime work.
-- **`Console.WriteLine` is `printf`**, strings are built with
-  `snprintf`/`malloc`, and `List<T>` uses `malloc`/`realloc` — not the Kiln text
-  runtime or collector. Nothing built this way is freed. Replaced in Phase 4.
-- **The K2 path links libc only** via a generated `main` shim — unless the
-  program calls a command, which the driver detects (`Module::calls_commands`)
-  and links the runtime for. Folded into `kiln build` later.
-- **No collector roots are registered.** `needs_gc` is never set, so
-  `kn_gc_set_roots` is never called: the collector finds a runtime-allocated
-  value through a conservative stack scan, but not through a K2 *global*. A
-  global holding a command's result can therefore be swept once the program
-  allocates past the collection threshold. Not yet reachable in practice — a
-  form's state is ints and the collections are `malloc` — and it lands with the
-  runtime allocator work, but it is the one place the two heaps meet wrongly.
+- **Records and classes are C-layout structs with no runtime type tag.** What a
+  program can do with one is fixed when it compiles, which is the point: no
+  metadata reaches the binary.
+- **The libc-only path is a subset, and `kiln build` never takes it.** `kiln k2
+  <file>` with no `--runtime` links libc alone behind a generated `main`, and
+  there strings come from `snprintf`/`malloc`, `Console.WriteLine` is `printf`,
+  and nothing is freed. `kiln build` always links the runtime and its collector,
+  which is what a shipped program gets.
 - **One `k2` crate** holds syntax + lowering; splits into `k2-syntax`/`k2-sema`/
   `k2-lower` as `k2-sema` grows (it is currently folded into the lowerer).
 - Comments are carried as *leading* trivia, so one written at the end of a line
