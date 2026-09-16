@@ -1,0 +1,87 @@
+namespace Game.Inventory;
+using Kiln.Db;
+
+public record KitRow(int Slot, uint Template, uint ClassValue, uint Flags);
+
+/// An item as it is stored against a character — the starter sketch's row,
+/// now a table.
+[Table("character_items")]
+public record CharacterItem(
+    [Auto] long Id,
+    uint CharacterId,
+    int Slot,
+    uint TemplateId,
+    uint ClassValue,
+    uint Flags);
+
+public static class Outfit
+{
+    const uint EggFlags = 16843015;
+    const uint PlainFlags = 16843009;
+    const uint ConsumableFlags = 33620225;
+    const uint SackFlags = 50397441;
+
+    public static List<KitRow> Kit()
+    {
+        var kit = new List<KitRow>();
+        kit.Add(new KitRow(0, 10157, 1747, EggFlags));
+        kit.Add(new KitRow(1, 10154, 1747, EggFlags));
+        kit.Add(new KitRow(2, 4199, 1459, SackFlags));
+        kit.Add(new KitRow(3, 4103, 2207, PlainFlags));
+        kit.Add(new KitRow(4, 4535, 2207, ConsumableFlags));
+        kit.Add(new KitRow(5, 4538, 2207, ConsumableFlags));
+        kit.Add(new KitRow(6, 4533, 2207, ConsumableFlags));
+        kit.Add(new KitRow(7, 4469, 2207, ConsumableFlags));
+        kit.Add(new KitRow(8, 3922, 2207, PlainFlags));
+        kit.Add(new KitRow(9, 4151, 2207, ConsumableFlags));
+        kit.Add(new KitRow(10, 3875, 2207, PlainFlags));
+        return kit;
+    }
+
+    public static List<CharacterItem> KitFor(uint characterId) =>
+        Kit().Select(k => new CharacterItem(0, characterId, k.Slot, k.Template, k.ClassValue, k.Flags));
+}
+
+public static class Inventory
+{
+    public static int Stock(int h, uint characterId)
+    {
+        var n = 0;
+        foreach (var item in Outfit.KitFor(characterId))
+        {
+            CharacterItem.Insert(h, item);
+            n = n + 1;
+        }
+        return n;
+    }
+
+    public static List<CharacterItem> Bag(int h, uint characterId) =>
+        CharacterItem.Select(h, i => i.CharacterId == characterId);
+
+    public static List<CharacterItem> Consumables(int h, uint characterId)
+    {
+        uint flags = 33620225;
+        return CharacterItem.Select(h, i => i.CharacterId == characterId && i.Flags == flags);
+    }
+}
+
+public static class Program
+{
+    public static void Main()
+    {
+        var h = Db.Open("@DSN@");
+        if (h == 0)
+        {
+            Console.WriteLine("could not open the database");
+            return;
+        }
+        Db.Exec(h, "drop table if exists character_items", []);
+        Db.Exec(h, "@CREATE@", []);
+        Console.WriteLine($"stocked {Inventory.Stock(h, 7)} for 7, {Inventory.Stock(h, 9)} for 9");
+        var bag = Inventory.Bag(h, 7);
+        Console.WriteLine($"7 holds {bag.Count}");
+        Console.WriteLine($"slot {bag[3].Slot}: template {bag[3].TemplateId} flags {bag[3].Flags}");
+        Console.WriteLine($"7 has {Inventory.Consumables(h, 7).Count} consumables");
+        Console.WriteLine($"{CharacterItem.Select(h).Count} rows, the last id {bag[11 - 0].Id}");
+    }
+}

@@ -1037,3 +1037,41 @@ fn string_append_ternary_arms_chained_commands_and_division_by_zero() {
     assert!(String::from_utf8_lossy(&r.stderr).contains("division by zero"));
     assert_eq!(r.status.code(), Some(1));
 }
+
+/// Phase 7's exit: the starter sketch's inventory — `Outfit` stocks a
+/// character from the kit, `Inventory` reads the bag back — as a `[Table]`
+/// record, run against SQLite always and against MariaDB when a server is named.
+/// The same program answers the same way on both: the SQL is built while
+/// compiling, the captured values are bound, and the columns come back through
+/// the readers their declared types ask for.
+const INVENTORY_FIXTURE: &str = include_str!("fixtures/k2_inventory.kiln.tmpl");
+const INVENTORY_OUT: &str = "stocked 11 for 7, 11 for 9\n7 holds 11\n\
+slot 2: template 4199 flags 50397441\n7 has 5 consumables\n22 rows, the last id 11\n";
+
+#[test]
+fn the_starter_inventory_runs_against_sqlite() {
+    let src = INVENTORY_FIXTURE.replace("@DSN@", "sqlite::memory:").replace(
+        "@CREATE@",
+        "create table character_items (id integer primary key, character_id int, slot int, \
+         template_id int, class_value int, flags int)",
+    );
+    assert_eq!(build_and_run("inventory_sqlite", &src), INVENTORY_OUT);
+}
+
+/// `KILN_TEST_MYSQL_DSN=mysql://user:pass@host:port/database` runs it against a
+/// real MariaDB or MySQL; the table is dropped and made again. Unset, the test
+/// says so and passes, because most machines have no server to give it.
+#[test]
+fn the_starter_inventory_runs_against_mariadb() {
+    let Ok(dsn) = std::env::var("KILN_TEST_MYSQL_DSN") else {
+        eprintln!("skipped: set KILN_TEST_MYSQL_DSN to run the inventory against MariaDB");
+        return;
+    };
+    let src = INVENTORY_FIXTURE.replace("@DSN@", &dsn).replace(
+        "@CREATE@",
+        "create table character_items (id bigint auto_increment primary key, \
+         character_id int unsigned, slot int, template_id int unsigned, \
+         class_value int unsigned, flags int unsigned)",
+    );
+    assert_eq!(build_and_run("inventory_mariadb", &src), INVENTORY_OUT);
+}

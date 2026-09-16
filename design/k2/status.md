@@ -251,6 +251,11 @@ clang and checks stdout):
   becomes parameterised SQL, captured values bind rather than being pasted, and
   each column is read back with the reader its declared type asks for, into a
   `List<T>`. `InsertSql`/`SelectSql` still answer with the text alone
+- **Phase 7's exit runs**: the starter sketch's inventory as a `[Table]` record —
+  `Outfit` stocks a character from the kit, `Inventory` reads the bag and its
+  consumables back — gives the same answers against SQLite and against MariaDB
+  10.11 (`cli/tests/k2_runtime.rs`; the MariaDB half runs when
+  `KILN_TEST_MYSQL_DSN` names a server)
 - collection expressions `[a, b, c]` and `[]`, target-typed to an array — what
   a command taking a list of values (`db_exec`'s parameters) expects
 - **every command argument is checked against the slot its signature declares**,
