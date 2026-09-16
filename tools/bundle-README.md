@@ -1,9 +1,8 @@
 # Kiln __VERSION__
 
-An open implementation of **Easy Programming Language** (易语言, EPL): a
-cross-platform RAD environment where you draw a form, wire an event, and get a
-clean native binary. English-first, and a fresh implementation rather than a
-clone — it does not run existing EPL programs.
+A **C#-shaped language** and form designer that compiles to one native binary —
+no runtime, no .NET, no metadata to reverse. English-first, cross-platform and
+open source.
 
     bin/kiln-studio          the IDE — run it with no arguments
     bin/kiln                 the command-line toolchain
@@ -32,7 +31,7 @@ Debian/Ubuntu: `sudo apt install clang binutils pkg-config libsdl2-dev libsdl2-i
 
 Studio opens a welcome screen: pick a project kind, and it is created and opened
 for you. Drag components onto the form, set properties in the inspector, wire a
-button's click to a subroutine, and press **Run**.
+button's click to a method, and press **Run**.
 
 From the command line:
 
@@ -51,8 +50,8 @@ One source builds as any of these — a choice, not a rewrite:
 | `sharedlib` | `.so` (`.dll` / `.dylib` on other platforms) |
 | `staticlib` | `.a` archive |
 
-Declare it in the module (`target sharedlib`) or override it per build
-(`--target sharedlib`). Omitted, a module with a form is a GUI program and
+The project file names it (`target: sharedlib`), and `--target sharedlib`
+overrides it for one build. With neither, a form makes it a GUI program and
 anything else is a console one.
 
 ## Editing
@@ -120,8 +119,10 @@ off in a Windows build.
   and the `httpserver` component is plaintext regardless. Building the
   toolchain from source with `tools/fetch-mbedtls.sh` run is what adds
   https.
-* **Memory is reclaimed at exit**, not before. A program that runs for days
-  grows with the work it has done.
+* **Memory is reclaimed while the program runs.** A value it can no longer
+  reach is collected automatically, so a program that runs for days does not
+  grow with the work it has done; a collection is a pause whose length grows
+  with the heap, and `collect_garbage()` moves one to a moment it chooses.
 
 The full documentation — a tour of the language, the component model, the
 IDE, and the generated reference for every command and component — is at

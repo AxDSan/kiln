@@ -145,30 +145,31 @@ a module with a form is a GUI program and anything else is a console one.
 kiln build lib.kiln --target sharedlib -o libgreet.so
 ```
 
-Libraries export their subroutines under their own names, so a C host — or
-anything that can call C — links against them directly.
+Libraries export the public static methods of a public static class under their
+own names, so a C host — or anything that can call C — links against them
+directly.
 
-Native interop runs both ways: a program calls into native libraries and is
-called back by them — a `ptr` type, `dll` declarations, `address of` for C
-function pointers, and a `dll_attach` that gives a shared library a real
-`DllMain` (an ELF constructor on Linux) so it can hook a function the moment it
+Native interop runs both ways: `[Dll("c")]` binds a C function, `[Packed]`
+gives a record an exact byte layout with generated `Read`/`Write`, `Bytes` is a
+raw buffer, and a library's `DllAttach` is its loader hook — `DllMain` on
+Windows, an ELF constructor on Linux — so it can hook a function the moment it
 loads. See the [interop guide](https://axdsan.github.io/kiln/interop.html).
 
-The `win` kit is the largest thing that rides on this: `use win` is the Win32
-API — over four hundred entry points, the structs they take and the constants
-they are written in terms of, across user32, gdi32, kernel32 and advapi32 —
-with no wrapper and nothing to link. A program that
-registers a window class, pumps a message loop, reads its own memory through
-`ReadProcessMemory` or writes the registry does it with `use win` as its only
-foreign declaration. It is Windows-only, cross-built from Linux with
-`--os windows`, and tested by running under wine. See the
+The `win` kit is the largest thing that rides on this: the Win32 API — over four
+hundred entry points, the structs they take and the constants they are written
+in terms of, across user32, gdi32, kernel32 and advapi32 — with no wrapper and
+nothing to link. A program that registers a window class, pumps a message loop,
+reads its own memory through `ReadProcessMemory` or writes the registry does it
+with that one kit as its only foreign declaration. It is Windows-only,
+cross-built from Linux with `--os windows`, and tested by running under wine.
+Its guide is written for Kiln 1.x syntax. See the
 [`win` kit guide](https://axdsan.github.io/kiln/win-kit.html).
 
 ## Editing
 
 Studio's editor gives you syntax highlighting and live diagnostics as you
 type, backed by the same language server any other editor can use. Tab
-indents, Enter carries the indentation and opens a block after `sub`, `if` or
+indents, Enter carries the indentation and opens a block after `{`, `if` or
 `for`, and completion knows every command the toolchain reports.
 
 <div align="center">
