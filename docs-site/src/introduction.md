@@ -4,33 +4,30 @@
 
 # Introduction
 
-Kiln is an open implementation of **Easy Programming Language** (易语言,
-usually shortened to EPL) — a RAD environment where you build desktop software
-by drawing it.
+A **C#-shaped language** and form designer that compiles to one native binary —
+no runtime, no .NET, no metadata to reverse.
 
 You lay a window out visually, set properties in an inspector, wire a button's
-click to a subroutine, and press **Run** — and what comes out is an ordinary
+click to a method, and press **Run** — and what comes out is an ordinary
 native binary you can hand to someone.
 
 ![The Kiln Studio visual designer](./assets/screenshot-designer.png)
 
-The language is English-first and deliberately small. There is one way to call
-things, no pointers, no manual memory management, and no ceremony:
+The language is English-first, C#-shaped and deliberately small. Types are
+checked when you build, there are no pointers and no manual memory management,
+and there is no ceremony:
 
-```
-module hello
-target console
+```k2
+namespace Hello;
 
-sub main
-  call print_text("Hello from Kiln.")
+Console.WriteLine("Hello from Kiln.");
 
-  let answer = 6 * 7
-  call print_text("six times seven is {answer}")
-end
+let answer = 6 * 7;
+Console.WriteLine($"six times seven is {answer}");
 ```
 
-Assignment is a statement rather than an expression, so `if x = 5` compares —
-it cannot silently assign.
+`=` assigns and `==` compares, so a comparison can never silently store a
+value.
 
 ## What makes it different
 
@@ -53,25 +50,26 @@ component with no rectangle, declared beside the form or without one, and the
 runtime's event loop keeps the program alive while any such source is live.
 See [Components](./components.md).
 
-## Its relationship to EPL
+## Where this came from
 
-Easy Programming Language is a Chinese RAD environment with a large following:
-a visual designer, a component library, event-driven code, and a compiler that
-produces standalone native executables. That model is what Kiln implements.
+Kiln 1.x was an open implementation of Easy Programming Language (易语言, EPL) —
+a RAD environment where you build desktop software by drawing it. That version
+still builds and its [language guide](./language.md) still applies to it.
 
-It is an open implementation of the idea rather than a clone. Kiln does not
-read or run existing EPL programs, and its keywords are English rather than
-Chinese, so the language is approachable to people who do not read Chinese —
-and the whole toolchain is open source, cross-platform and inspectable.
+Kiln 2, the language documented here and the one `kiln build` uses, is a
+different language: C#-shaped, with classes, records, interfaces, generics and
+`Result<T>` instead of exceptions. It is not a wrapper around EPL or C#, does
+not read or run existing EPL programs, and compiles to an ordinary native
+executable on an open, cross-platform, inspectable toolchain.
 
 ## Where to start
 
 - [Installation](./installation.md) — download or build it
 - [Quick start](./quick-start.md) — a program in about a minute
 - [Your first GUI app](./first-gui-app.md) — draw a window and wire a button
-- [Language guide](./language.md) — the whole language, in the order you meet
-  it: values, choosing, repeating, subroutines and what happens when something
-  fails
+- [Kiln 2](./kiln-2.md) — the whole language, in the order you meet it: values,
+  choosing and repeating, records and classes, collections, generics, and what
+  happens when something fails
 
 ## What is not here yet
 

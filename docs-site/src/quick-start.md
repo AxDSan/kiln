@@ -33,16 +33,19 @@ six times seven is 42
 
 Create `hello.kiln`:
 
-```
-module hello
-target console
+```k2
+namespace hello;
 
-sub main
-  call print_text("Hello from Kiln.")
+public static class Program
+{
+    public static void Main()
+    {
+        Console.WriteLine("Hello from Kiln.");
 
-  let answer = 6 * 7
-  call print_text("six times seven is {answer}")
-end
+        let answer = 6 * 7;
+        Console.WriteLine($"six times seven is {answer}");
+    }
+}
 ```
 
 Then:
@@ -71,17 +74,17 @@ tick 2
 tick 3
 ```
 
-`main` printed one line and returned — and the program kept running, because
-the module declares a `timer`, and the runtime stays in its event loop while
-any source is live. It ends when the tick handler calls `quit()`. A timer draws
-nothing, so it is declared at module level rather than inside a form: a program
-that waits for something needs no window at all.
+`Main` printed one line and returned — and the program kept running, because
+the program declares a `Timer`, and the runtime stays in its event loop while
+any source is live. It ends when the tick handler calls `Quit()`. A timer draws
+nothing, so it is declared at the top of the file rather than inside a form: a
+program that waits for something needs no window at all.
 
 ## In your editor
 
 `kiln lsp` is a language server, and every editor that speaks LSP can use
 it. You get errors underlined as you type, completion for commands, components
-and your own subroutines, the parameter list while you are typing a call, and
+and your own methods, the parameter list while you are typing a call, and
 go-to-definition on any name.
 
 ```sh
@@ -95,17 +98,21 @@ underlines is something that would genuinely fail to build.
 
 ## What the pieces mean
 
-- **`module hello`** names the compilation unit. Every file starts with one.
-- **`target console`** says what to build. Leave it out and Kiln infers it:
-  a module with a form is a windowed program, anything else is a console one.
-- **`sub main`** is where a console program starts.
-- **`call`** invokes a command for its effect. When you want its result
-  instead, use it in an expression: `let n: int = max_int(3, 9)`.
+- **`namespace hello;`** names the compilation unit. Every sample here starts
+  with one.
+- **`public static class Program`** holds the program's methods, and **`Main`**
+  is where it starts. Top-level statements are the shorter spelling of the same
+  thing: they become `Main`.
+- **`Console.WriteLine(...)`** writes a line of text. A standard-library
+  command is an ordinary method: `using Kiln.File;` makes `file_read_text`
+  reachable as `File.ReadText`.
 - **`let`** declares a value that will not change. Use `var` when it will.
-- **Everything counts from 1.** The first element of an array is `a[1]`, the
+- **`$"..."`** puts a value inside text: `$"six times seven is {answer}"`.
+- **Everything counts from 1.** The first element of a list is `xs[1]`, the
   first character of a text is at position 1, and `0` is free to mean *not
-  found* — which is what `find` answers when there is nothing there.
+  found* — which is what `Find` answers when there is nothing there.
+- **There is no target to declare.** A file with a `partial form` is a windowed
+  program and links the UI library; anything else is a console program.
 
-Continue with [Your first GUI app](./first-gui-app.md), or read the
-[Language guide](./language.md) — the whole language, in the order you meet
-it.
+Continue with [Your first GUI app](./first-gui-app.md), or read
+[Kiln 2](./kiln-2.md) — the whole language, in the order you meet it.

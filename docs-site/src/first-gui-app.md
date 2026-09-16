@@ -27,19 +27,20 @@ that could drift from your source.
 
 ## Wire the button
 
-Select the button, switch the inspector to **Events**, and put a subroutine
-name against `click`. If the subroutine does not exist yet, Kiln writes an
-empty one for you.
+Select the button, switch the inspector to **Events**, and give `Click` a
+handler name. If the method does not exist yet, Kiln writes an empty one for
+you.
 
 Then open the **Code** tab and fill it in:
 
 ```
-sub on_ok_click
-  greeting.text = "Button clicked."
-end
+void OnOkClick()
+{
+    greeting.Text = "Button clicked.";
+}
 ```
 
-`greeting` is the label's name, and `text` is one of its properties — the same
+`greeting` is the label's name, and `Text` is one of its properties — the same
 property you can see in the inspector. Setting it from code and setting it in
 the inspector are the same operation.
 
@@ -53,40 +54,52 @@ ship.
 
 ## The whole file
 
+```k2
+namespace my_app;
+
+using Kiln.Ui;
+
+public partial form MainWindow
+{
+    Title = "my_app";
+    Width = 480;
+    Height = 300;
+    BackgroundColor = "#1e2233";
+
+    Label greeting
+    {
+        Text = "Click the button.";
+        Left = 40;
+        Top = 50;
+        Width = 200;
+        Height = 24;
+    }
+
+    Button ok_button
+    {
+        Text = "Click me";
+        Left = 40;
+        Top = 110;
+        Width = 160;
+        Height = 32;
+        Click += OnOkClick;
+    }
+}
+
+public partial form MainWindow
+{
+    void OnOkClick()
+    {
+        greeting.Text = "Button clicked.";
+    }
+}
 ```
-module my_app
-target gui
-use ui
 
-form main_window
-  title = "my_app"
-  width = 480
-  height = 300
-  background_color = "#1e2233"
+The first `partial form` block is the designer's half — Studio reads and writes
+it. The second is yours: state and the methods behind the events. They are two
+blocks in the one file so that the whole window, how it looks and what it does,
+is one thing you can read top to bottom.
 
-  label greeting
-    text = "Click the button."
-    left = 40
-    top = 50
-    width = 200
-    height = 24
-  end
-
-  button ok_button
-    text = "Click me"
-    left = 40
-    top = 110
-    width = 160
-    height = 32
-    on click: on_ok_click
-  end
-end
-
-sub on_ok_click
-  greeting.text = "Button clicked."
-end
-```
-
-`use ui` brings in the visual components. See [Forms and
+`using Kiln.Ui;` brings in the visual components. See [Forms and
 events](./forms-and-events.md) for the full shape, and
 [Components](./reference-components.md) for every component and property.
