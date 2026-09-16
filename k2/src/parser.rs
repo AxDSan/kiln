@@ -1607,6 +1607,35 @@ impl Parser {
                         break;
                     }
                 }
+                // `Make<int>()`, `P.Make<List<int>>(x)` — type arguments written
+                // at a call. Tried only after a name, and kept only when a
+                // whole argument list closes and a `(` follows, which is C#'s
+                // own rule for telling it from `a < b`.
+                Tok::Lt if matches!(e.kind, ExprKind::Ident(_) | ExprKind::Member(..)) => {
+                    let (at, toks) = (self.i, self.toks.clone());
+                    let parsed = (|| -> Result<Vec<TypeRef>, ParseError> {
+                        self.bump();
+                        let mut args = vec![self.type_ref()?];
+                        while self.eat(&Tok::Comma) {
+                            args.push(self.type_ref()?);
+                        }
+                        self.close_generic()?;
+                        Ok(args)
+                    })();
+                    match parsed {
+                        Ok(targs) if self.peek() == &Tok::LParen => {
+                            e = Expr {
+                                span: e.span,
+                                kind: ExprKind::TypeArgs(Box::new(e), targs),
+                            };
+                        }
+                        _ => {
+                            self.i = at;
+                            self.toks = toks;
+                            break;
+                        }
+                    }
+                }
                 _ => break,
             }
         }

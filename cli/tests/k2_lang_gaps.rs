@@ -631,3 +631,43 @@ public static class P
     );
     assert_eq!(out, "50 -1 none 7 5 9\n");
 }
+
+#[test]
+fn a_generic_method_takes_written_type_arguments() {
+    // `Make<T>()` has no argument to infer `T` from, so it must be written;
+    // written arguments also set the width a literal lowers to. `a < b` beside
+    // them is still a comparison.
+    let out = build_and_run(
+        "type_args",
+        r#"
+namespace TypeArgs;
+
+public record Point(int X, int Y);
+
+public static class P
+{
+    public static T Make<T>() where T : new() => new T();
+    public static T Pick<T>(T a, T b) => a;
+    public static List<T> Two<T>(T a)
+    {
+        var xs = new List<T>();
+        xs.Add(a);
+        xs.Add(a);
+        return xs;
+    }
+
+    public static void Main()
+    {
+        var xs = Make<List<int>>();
+        xs.Add(3);
+        var p = Make<Point>();
+        long l = Pick<long>(5, 6);
+        int a = 2;
+        int b = 3;
+        Console.WriteLine($"{xs.Count} {p.X} {l} {a < b} {a > b} {P.Two<string>("x").Count}");
+    }
+}
+"#,
+    );
+    assert_eq!(out, "1 0 5 true false 2\n");
+}

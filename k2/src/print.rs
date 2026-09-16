@@ -596,6 +596,10 @@ pub fn expr(e: &Expr) -> String {
             let a: Vec<String> = args.iter().map(expr).collect();
             format!("{}({})", expr(c), a.join(", "))
         }
+        ExprKind::TypeArgs(c, targs) => {
+            let t: Vec<String> = targs.iter().map(ty).collect();
+            format!("{}<{}>", expr(c), t.join(", "))
+        }
         ExprKind::Index(b, i) => format!("{}[{}]", expr(b), expr(i)),
         ExprKind::Unary(op, x) => {
             let s = match op {
@@ -729,6 +733,7 @@ fn postfix_operand(e: &Expr) -> String {
             | ExprKind::Interp(..)
             | ExprKind::Collection(..)
             | ExprKind::NullForgiving(..)
+            | ExprKind::TypeArgs(..)
             | ExprKind::NullConditional(..)
     );
     if atomic {

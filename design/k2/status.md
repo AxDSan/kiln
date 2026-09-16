@@ -223,6 +223,11 @@ clang and checks stdout):
 - **`Any` and `First`** over a `List<T>`, taking a predicate lambda, beside
   `Where`/`Select`. `First` with no match stops the program by name rather than
   answering with a zero.
+- **Written type arguments**: `Make<int>()`, `P.Two<string>(x)` — for a generic
+  method with nothing to infer from, and to set the width a literal argument
+  lowers to (`Pick<long>(5, 6)`). Told from `a < b` by C#'s rule: a complete
+  argument list followed by `(`. User generic types nest as well
+  (`Box<Pair<Point, string>>`).
 - **Constraints beyond interfaces**: `where T : class` and `where T : new()`
   are enforced where the type argument is chosen, naming both the type and the
   constraint when they do not hold.
@@ -272,20 +277,18 @@ clang and checks stdout):
 1. Richer null flow: `x != null` narrows, and `x!` and `x?.` are built, but
    narrowing through `&&`, through an early `return` and through an `is T v`
    pattern is not.
-2. Generic type arguments beyond the compiler-known `List<T>`, `Dictionary<K,V>`
-   and `HashSet<T>` are refused by name.
-3. A handler wired at run time cannot yet take an event's arguments (a grid's
+2. A handler wired at run time cannot yet take an event's arguments (a grid's
    row) — `kn_ui_on_env` refuses those with 2 rather than calling wrongly.
-4. The `.kdecl` declaration bundles (2,653 lines across `kits/`) are still
+3. The `.kdecl` declaration bundles (2,653 lines across `kits/`) are still
    Kiln 1.x: Kiln 2 reaches a kit's *commands*, but its declared structs and
    constants do not cross yet. This is Phase 4's remaining exit.
-5. Studio's code pane highlights K2 from its own line tokenizer rather than
+4. Studio's code pane highlights K2 from its own line tokenizer rather than
    from the language server's semantic tokens — the shapes are right, but the
    toolchain is not the one deciding them.
-6. `List<T>` is K2's own structure, converted to and from a runtime array at the
+5. `List<T>` is K2's own structure, converted to and from a runtime array at the
    command boundary. Re-platforming it onto `Kiln_Array` buys nothing now that
    allocation is collected.
-7. One `k2` crate holds syntax + lowering; it splits into `k2-syntax`/
+6. One `k2` crate holds syntax + lowering; it splits into `k2-syntax`/
    `k2-sema`/`k2-lower` as `k2-sema` grows.
 
 ## Milestone: the RAD half runs

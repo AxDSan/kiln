@@ -3402,6 +3402,9 @@ impl<'a> FnLower<'a> {
                 Ok((Expr::Field(Box::new(Expr::Local(t)), RESULT_VALUE), val_ty))
             }
             ast::ExprKind::NullForgiving(inner) => self.null_forgiving(inner),
+            ast::ExprKind::TypeArgs(..) => {
+                Err("type arguments are written on a call to a generic method: `Make<int>()`".into())
+            }
             ast::ExprKind::NullConditional(recv, steps) => self.null_conditional(recv, steps),
             ast::ExprKind::Range(_, _, _) => Err("a range is only valid in `foreach`".into()),
             ast::ExprKind::Interp(segs) => {
@@ -3722,6 +3725,19 @@ impl<'a> FnLower<'a> {
     }
 
     fn call(&mut self, callee: &ast::Expr, args: &[ast::Expr]) -> Result<(Expr, TyId), String> {
+        // `Make<int>()`: the written type arguments are resolved here and the
+        // call goes on as the plain one would, with them handed to
+        // `instantiate` in place of inference.
+        let (callee, explicit) = match &callee.kind {
+            ast::ExprKind::TypeArgs(inner, trefs) => {
+                let mut tys = Vec::new();
+                for t in trefs {
+                    tys.push(self.cx.resolve(t)?);
+                }
+                (inner.as_ref(), Some(tys))
+            }
+            _ => (callee, None),
+        };
         // `T.OffsetOf("Field")` — where a field of a record starts, in bytes,
         // known while compiling as `T.Size` is.
         if let ast::ExprKind::Member(recv, m) = &callee.kind {
@@ -4449,11 +4465,29 @@ impl<'a> FnLower<'a> {
         // A generic method: lower the arguments first (their types are what the
         // type parameters are inferred from), then instantiate.
         if self.cx.generics.contains_key(&key) {
-            let mut lowered = Vec::new();
-            for a in args {
-                lowered.push(self.expr(a, None)?);
+            // With the type arguments written, each parameter's type is known
+            // before its argument is lowered, so `Pick<long>(5, 6)` widens the
+            // literals rather than inferring `int` and conflicting.
+            let mut hints: Vec<Option<TyId>> = Vec::new();
+            if let Some(ex) = &explicit {
+                let method = self.cx.generics[&key].method.clone();
+                if ex.len() == method.type_params.len() {
+                    let mut tv = self.cx.tvars.clone();
+                    for (tp, t) in method.type_params.iter().zip(ex) {
+                        tv.insert(tp.clone(), *t);
+                    }
+                    let saved = std::mem::replace(&mut self.cx.tvars, tv);
+                    for p in &method.params {
+                        hints.push(self.cx.resolve(&p.ty).ok());
+                    }
+                    self.cx.tvars = saved;
+                }
             }
-            let sig = self.instantiate(&key, &lowered)?;
+            let mut lowered = Vec::new();
+            for (i, a) in args.iter().enumerate() {
+                lowered.push(self.expr(a, hints.get(i).copied().flatten())?);
+            }
+            let sig = self.instantiate(&key, &lowered, explicit.as_deref())?;
             let mut kargs: Vec<Expr> = Vec::new();
             if let Some(this) = this_arg {
                 kargs.push(this);
@@ -7639,7 +7673,12 @@ impl<'a> FnLower<'a> {
     /// Type parameters are inferred by matching each declared parameter type
     /// against the lowered argument's type; the instance is cached, so the same
     /// type arguments produce one function with one mangled symbol.
-    fn instantiate(&mut self, key: &str, args: &[(Expr, TyId)]) -> Result<Sig, String> {
+    fn instantiate(
+        &mut self,
+        key: &str,
+        args: &[(Expr, TyId)],
+        explicit: Option<&[TyId]>,
+    ) -> Result<Sig, String> {
         let t = self.cx.generics[key].clone();
         let m = &t.method;
         if args.len() != m.params.len() {
@@ -7649,8 +7688,21 @@ impl<'a> FnLower<'a> {
                 args.len()
             ));
         }
-        // Infer.
+        // Written type arguments first, then inference for the rest — which
+        // also checks the arguments against what was written.
         let mut tvars: HashMap<String, TyId> = HashMap::new();
+        if let Some(explicit) = explicit {
+            if explicit.len() != m.type_params.len() {
+                return Err(format!(
+                    "`{key}` takes {} type argument(s), and {} were written",
+                    m.type_params.len(),
+                    explicit.len()
+                ));
+            }
+            for (tp, t) in m.type_params.iter().zip(explicit) {
+                tvars.insert(tp.clone(), *t);
+            }
+        }
         for (p, (_, aty)) in m.params.iter().zip(args.iter()) {
             unify(&p.ty, *aty, &m.type_params, &self.cx.b.m.types, &mut tvars)?;
         }
@@ -8899,7 +8951,7 @@ fn collect_lambdas_expr(e: &ast::Expr, out: &mut Vec<ast::Lambda>) {
             collect_lambdas_expr(a, out);
             collect_lambdas_expr(b, out);
         }
-        E::Unary(_, a) | E::Cast(_, a) | E::Try(a) | E::NullForgiving(a) => {
+        E::Unary(_, a) | E::Cast(_, a) | E::Try(a) | E::NullForgiving(a) | E::TypeArgs(a, _) => {
             collect_lambdas_expr(a, out)
         }
         E::NullConditional(recv, steps) => {
@@ -9060,7 +9112,7 @@ fn collect_idents_expr(e: &ast::Expr, out: &mut Vec<String>) {
             collect_idents_expr(a, out);
             collect_idents_expr(b, out);
         }
-        E::Unary(_, a) | E::Cast(_, a) | E::Try(a) | E::NullForgiving(a) => {
+        E::Unary(_, a) | E::Cast(_, a) | E::Try(a) | E::NullForgiving(a) | E::TypeArgs(a, _) => {
             collect_idents_expr(a, out)
         }
         E::NullConditional(recv, steps) => {

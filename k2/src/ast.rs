@@ -332,6 +332,9 @@ pub enum ExprKind {
     NullCoalesce(Box<Expr>, Box<Expr>),
     /// `e?` — Result/T? propagation.
     Try(Box<Expr>),
+    /// `Name<T, U>` in callee position — a generic method's type arguments
+    /// written out rather than inferred. Only ever the callee of a `Call`.
+    TypeArgs(Box<Expr>, Vec<TypeRef>),
     /// `e!` — assert that an optional holds a value. The result is the value
     /// the optional would carry, without the `T?`.
     NullForgiving(Box<Expr>),
