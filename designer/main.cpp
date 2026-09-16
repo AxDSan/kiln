@@ -7529,6 +7529,13 @@ bool close_splash(Splash& sp, const std::string& family, Uint32 min_ms) {
 
 /// The welcome screen. Returns the project file to open, or "" if the user
 /// closed the window.
+/// The wordmark the welcome screen draws: the tight crop, or the full asset
+/// when an older bundle has only that.
+std::string welcome_mark() {
+    const std::string tight = asset_path("kiln-wordmark-tight.png");
+    return tight.empty() ? asset_path("kiln-wordmark.png") : tight;
+}
+
 std::string run_welcome(const std::string& family) {
     auto dim = g.context->GetDimensions();
     const auto templates = kiln::welcome::load_templates(g.kiln_bin);
@@ -7537,7 +7544,7 @@ std::string run_welcome(const std::string& family) {
 
     Rml::ElementDocument* doc = g.context->LoadDocumentFromMemory(
         kiln::welcome::welcome_markup(family, dim.x, dim.y, templates, recent,
-                                         asset_path("kiln-wordmark.png"), g.kiln_bin));
+                                         welcome_mark(), g.kiln_bin));
     if (!doc) return "";
     doc->Show();
 
@@ -7574,7 +7581,7 @@ std::string run_welcome(const std::string& family) {
         doc->Close();
         g.context->Update();
         doc = g.context->LoadDocumentFromMemory(kiln::welcome::welcome_markup(
-            family, dim.x, dim.y, templates, recent, asset_path("kiln-wordmark.png"),
+            family, dim.x, dim.y, templates, recent, welcome_mark(),
             g.kiln_bin));
         if (!doc) return "";
         doc->Show();
@@ -7775,7 +7782,7 @@ std::string run_welcome(const std::string& family) {
             const bool ok = browse_mode.empty()
                 ? swap_document(kiln::welcome::welcome_markup(
                       family, dim.x, dim.y, templates, recent,
-                      asset_path("kiln-wordmark.png"), g.kiln_bin))
+                      welcome_mark(), g.kiln_bin))
                 : swap_document(kiln::welcome::browse_markup(
                       family, dim.x, dim.y, browse_dir, browse_mode, g.kiln_bin));
             if (!ok) break;
@@ -7829,7 +7836,7 @@ std::string run_welcome(const std::string& family) {
             browse_mode.clear();
             if (!swap_document(kiln::welcome::welcome_markup(
                     family, dim.x, dim.y, templates, recent,
-                    asset_path("kiln-wordmark.png"), g.kiln_bin))) break;
+                    welcome_mark(), g.kiln_bin))) break;
             continue;
         } else {
             break;

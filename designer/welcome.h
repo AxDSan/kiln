@@ -272,7 +272,11 @@ inline std::string welcome_markup(const std::string& family, int w, int h,
     // guarantees no unpainted region shows through as black.
     s += "#bg{position:absolute;left:0;top:0;width:" + std::to_string(w) + "px;height:" +
          std::to_string(h) + "px;background-color:" + CANVAS + "}";
-    s += "#logo{display:block;width:300px}";
+    // The tight crop (`kiln-wordmark-tight.png`, 1920x715) at a height the head
+    // has room for. The full asset carries 40% transparent margin and drew
+    // 150px tall into a 102px head, over the tagline and the column headings.
+    s += "#logo{display:block;width:150px;height:56px}";
+    s += "#tag{margin-top:10px}";
     s += window_controls_styles();
     s += "</style></head><body><div id='bg'/>" + window_controls_markup();
 
