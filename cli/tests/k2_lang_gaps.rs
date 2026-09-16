@@ -538,3 +538,96 @@ public static class P
         "the diagnostic does not name the format specifier: {err}"
     );
 }
+
+#[test]
+fn null_conditional_through_an_optional_member_stays_one_optional() {
+    // `a?.Name` where `Name` is already a `string?` is a `string?`, as in C#.
+    // It was an optional of an optional, which clang refused to zero.
+    let out = build_and_run(
+        "cond_flat",
+        r#"
+namespace CondFlat;
+
+public record Inner(int N);
+public record Mid(Inner? In, string? Name);
+
+public static class P
+{
+    public static void Main()
+    {
+        Mid? a = new Mid(new Inner(5), "x");
+        Mid? b = new Mid(null, null);
+        Mid? c = null;
+        Console.WriteLine(a?.Name ?? "none");
+        Console.WriteLine(b?.Name ?? "none");
+        Console.WriteLine(c?.Name ?? "none");
+        Console.WriteLine($"{a?.In?.N ?? -1} {b?.In?.N ?? -1} {c?.In?.N ?? -1}");
+    }
+}
+"#,
+    );
+    assert_eq!(out, "x\nnone\nnone\n5 -1 -1\n");
+}
+
+#[test]
+fn order_by_a_bool_puts_false_first() {
+    // An `i1` compared signed reads `true` as -1; the order must be C#'s.
+    let out = build_and_run(
+        "order_bool",
+        r#"
+namespace OrderBool;
+
+public record Item(string Name, bool Done);
+
+public static class P
+{
+    public static void Main()
+    {
+        var xs = new List<Item>();
+        xs.Add(new Item("a", true));
+        xs.Add(new Item("b", false));
+        xs.Add(new Item("c", true));
+        foreach (var x in xs.OrderBy(i => i.Done))
+            Console.Write(x.Name);
+        Console.WriteLine("");
+    }
+}
+"#,
+    );
+    assert_eq!(out, "bac\n");
+}
+
+#[test]
+fn optional_fields_and_elements_get_their_whole_size() {
+    // A `T?` is `{ T, i1 }` and a function value is a pair: measured as one
+    // pointer, a record of optionals was allocated half the bytes it wrote,
+    // and a list of them overran its buffer. A number literal into a `long?`
+    // is widened before it is wrapped.
+    let out = build_and_run(
+        "opt_size",
+        r#"
+namespace OptSize;
+
+public record Inner(int N);
+public record Mid(Inner? In, string? Name, long? L, bool? B);
+
+public static class P
+{
+    public static void Main()
+    {
+        var xs = new List<int?>();
+        for (int i = 1; i <= 50; i++) xs.Add(i);
+        xs.Add(null);
+        Mid? b = new Mid(null, null, 7, true);
+        Func<int, int> f = x => x + 1;
+        var fs = new List<Func<int, int>>();
+        for (int i = 1; i <= 20; i++) fs.Add(f);
+        var g = fs[20];
+        long? n = 9;
+        Console.WriteLine($"{xs[50] ?? -1} {xs[51] ?? -1} {b?.Name ?? "none"} {b?.L ?? 0} {g(4)} {n ?? 0}");
+    }
+}
+"#,
+    );
+    assert_eq!(out, "50 -1 none 7 5 9\n");
+}

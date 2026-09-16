@@ -1534,6 +1534,34 @@ impl Cx {
                 };
                 (esz * (count.max(1) as i64), eal.max(1))
             }
+            _ => self.value_size_align(ty),
+        }
+    }
+
+    /// Size and alignment of a value held in a slot, a field or a buffer cell,
+    /// as LLVM lays out the type the emitter spells for it. A `T?` is
+    /// `{ T, i1 }`, a function value is the `{fn, env}` pair and a tuple is a
+    /// struct: none of them is one pointer wide, and measuring them as one gave
+    /// a record with two optional fields half the allocation it writes to.
+    fn value_size_align(&self, ty: TyId) -> (i64, i64) {
+        let ptr = (self.b.m.target.ptr_bits / 8) as i64;
+        match self.b.m.types.kind(ty) {
+            TyKind::Optional(inner) => {
+                let (sz, al) = self.value_size_align(*inner);
+                (round_up(sz + 1, al.max(1)), al.max(1))
+            }
+            TyKind::Func { .. } => (ptr * 2, ptr),
+            TyKind::Tuple(elems) => {
+                let mut offset = 0i64;
+                let mut align = 1i64;
+                for e in elems.clone() {
+                    let (sz, al) = self.value_size_align(e);
+                    offset = round_up(offset, al.max(1)) + sz;
+                    align = align.max(al);
+                }
+                (round_up(offset, align), align)
+            }
+            TyKind::Void => (0, 1),
             _ => {
                 let s = self.scalar_size(ty);
                 (s, s)
@@ -1543,6 +1571,9 @@ impl Cx {
 
     pub(crate) fn scalar_size(&self, ty: TyId) -> i64 {
         match self.b.m.types.kind(ty) {
+            TyKind::Optional(_) | TyKind::Func { .. } | TyKind::Tuple(_) => {
+                self.value_size_align(ty).0
+            }
             TyKind::Bool | TyKind::I8 | TyKind::U8 => 1,
             TyKind::I16 | TyKind::U16 => 2,
             TyKind::I32 | TyKind::U32 | TyKind::Char | TyKind::F32 => 4,
@@ -2954,7 +2985,15 @@ impl<'a> FnLower<'a> {
 
     /// Lower an expression, wrapping a plain `T` when a `T?` is expected.
     fn expr(&mut self, e: &ast::Expr, hint: Option<TyId>) -> Result<(Expr, TyId), String> {
-        let (v, ty) = self.expr_raw(e, hint)?;
+        // A number literal takes its width from the value type a `T?` holds, so
+        // `long? n = 7;` is a `long` wrapped rather than an `int` left unwrapped.
+        let raw_hint = match (&e.kind, hint.map(|h| self.tt().kind(h).clone())) {
+            (ast::ExprKind::Int(_) | ast::ExprKind::Float(..), Some(TyKind::Optional(inner))) => {
+                Some(inner)
+            }
+            _ => hint,
+        };
+        let (v, ty) = self.expr_raw(e, raw_hint)?;
         if let Some(want) = hint {
             if ty != want {
                 if let TyKind::Optional(inner) = *self.tt().kind(want) {
@@ -6573,6 +6612,15 @@ impl<'a> FnLower<'a> {
                 Box::new(Expr::Int(0, TyTable::I32)),
                 TyTable::I32,
             )
+        } else if kty == TyTable::BOOL {
+            // `here && !key`: an `i1` compared signed reads `true` as -1, which
+            // would put `true` before `false`.
+            Expr::Bin(
+                BinOp::And,
+                Box::new(Expr::Local(here)),
+                Box::new(Expr::Not(Box::new(Expr::Local(key)))),
+                kty,
+            )
         } else {
             Expr::Bin(
                 BinOp::Gt,
@@ -7428,19 +7476,28 @@ impl<'a> FnLower<'a> {
         let lowered = self.expr(&access, None);
         self.scope.remove(&hidden);
         let (av, aty) = lowered?;
-        let out_ty = self.cx.b.m.types.intern(TyKind::Optional(aty));
+        // An access that is already a `T?` stays one, as in C#: `a?.Name` where
+        // `Name` is a `string?` is a `string?`, not an optional of an optional.
+        let (out_ty, val_ty, wrapped) = match *self.tt().kind(aty) {
+            TyKind::Optional(i) => (aty, i, av),
+            _ => (
+                self.cx.b.m.types.intern(TyKind::Optional(aty)),
+                aty,
+                Expr::MakeOptional(aty, Some(Box::new(av))),
+            ),
+        };
         let out = self.new_local("$ncopt", out_ty);
         let mut then_body = self.blocks.pop().unwrap();
         then_body.push(Stmt::Assign {
             place: Place::Local(out),
-            value: Expr::MakeOptional(aty, Some(Box::new(av))),
+            value: wrapped,
         });
         self.push(Stmt::If {
             cond: Expr::OptionalHasValue(Box::new(Expr::Local(held))),
             then: then_body,
             els: vec![Stmt::Assign {
                 place: Place::Local(out),
-                value: Expr::MakeOptional(aty, None),
+                value: Expr::MakeOptional(val_ty, None),
             }],
         });
         Ok((Expr::Local(out), out_ty))
