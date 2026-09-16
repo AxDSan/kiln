@@ -1,0 +1,59 @@
+name: CI
+
+# The test suite and the paperwork checks, on every push and pull request. Until
+# this existed, a break was caught only by whoever next ran `cargo test` on their
+# own machine.
+#
+# Tests that need something the runner lacks skip themselves and say so: the
+# vendored UI stack (RmlUi, accesskit), the designer, Wine, and a MariaDB server
+# (`KILN_TEST_MYSQL_DSN`). mingw and gdb are installed, so the Windows
+# cross-builds and the debugger are exercised; Wine is not, so the Windows
+# images are built but not run.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          # clang is the backend; sqlite and the MariaDB client turn on `db`'s
+          # optional drivers; mingw-w64 is the Windows cross-compiler; gdb is
+          # what the debugger tests drive.
+          sudo apt-get install -y clang pkg-config libsqlite3-dev libmariadb-dev \
+            mingw-w64 gdb
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the compiler
+        run: cargo build --release
+
+      - name: Test
+        run: cargo test --release --no-fail-fast
+
+      - name: The generated reference is what the toolchain says
+        run: |
+          tools/gen-docs.sh
+          git diff --exit-code docs-site/src/reference-*.md docs-site/src/cli.md
+
+      - name: Every documented sample compiles
+        run: tools/check-docs.sh
+
+      - name: Nothing a release can leave stale is stale
+        run: tools/check-release.sh
