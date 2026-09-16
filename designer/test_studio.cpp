@@ -1118,8 +1118,9 @@ static void test_help(const std::string& kiln, const std::string& designer) {
           !ref.code.empty() &&
               [&] {
                   for (const std::string& c : ref.code)
-                      if (c.find("file_read_text(") != std::string::npos)
-                          return c.rfind("module ", 0) == 0 && c.find("\nend\n") != std::string::npos;
+                      if (c.find("FileReadText(") != std::string::npos)
+                          return c.rfind("namespace ", 0) == 0 &&
+                                 c.find("public static void Main") != std::string::npos;
                   return false;
               }());
 
@@ -1169,7 +1170,7 @@ static void test_help(const std::string& kiln, const std::string& designer) {
           has(out, "helptext: ") && !has(out, "helptext: (closed)"));
     check("help: a page opens by name", has(out, "help: language"));
     check("help: the opened page renders its prose",
-          has(out, "Language guide") && has(out, "A whole program is one module"));
+          has(out, "Language guide") && has(out, "This is the whole language"));
     check("help: searching shows results rather than a page", has(out, "help: search"));
 
     // Hovering a documented command in the editor. The signature was always
