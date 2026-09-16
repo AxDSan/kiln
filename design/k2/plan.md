@@ -173,8 +173,14 @@ Phase 4). Rewrite `language.md` and the
 teaching pages; update `gen-docs.sh` wrapping and the `check-docs.sh` sample
 regex; README, landing page.
 
-**10. Release 2.0** — K2 becomes the default; delete `ir/` front end and 1.x
-paths; cut a `1.x` maintenance branch from the last 1.x release. **Acceptance:**
+**10. Release 2.0** — K2 becomes the default; cut a `1.x` maintenance branch
+from the last 1.x release. *Amended 2026-09-16:* the 1.x front end is **not**
+deleted in 2.x. 2.0.0 shipped promising that a 1.x program still builds (with a
+deprecation note, `--1x` to silence it, `kiln migrate` to convert), the GBO game
+server port — about 7,000 lines — is still 1.x and in active development, and
+`kiln migrate` reads 1.x through `ir/`'s parser. Removing `ir/`'s checker and
+the 1.x backend path is a 3.0 change, after that port has moved; the parser
+stays for as long as `kiln migrate` does. **Acceptance:**
 the server port's login server migrated to K2 and run against its real client
 (ten logins in a row from a fresh launch, the 750 ms reply delay kept).
 
