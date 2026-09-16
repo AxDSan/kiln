@@ -451,6 +451,40 @@ public static class P
 }
 
 #[test]
+fn a_ternary_deals_with_an_optional_the_way_an_if_does() {
+    // Two halves of the same rule. An arm that runs when a null test proved the
+    // value present reads it as its plain type; and when the arms differ only
+    // in optionality the result is the optional, with the plain arm wrapped.
+    // Without the first, `s == null ? "none" : s` stored the `{value, present}`
+    // pair into a slot typed from the other arm; without the second,
+    // `f() == null ? "none" : f()` did the same, since a call is not a name the
+    // proof can follow. Both are valid Kiln that clang refused at the IR.
+    let src = r#"
+namespace TN;
+public static class P
+{
+    public static string? Name(int n)
+    {
+        if (n == 1)
+            return "one";
+        return null;
+    }
+
+    public static void Main()
+    {
+        var s = Name(1);
+        Console.WriteLine(s == null ? "none" : s);
+        Console.WriteLine(Name(2) == null ? "none" : Name(2));
+
+        var t = Name(2) == null ? "none" : Name(2);
+        Console.WriteLine(t == null ? "gone" : "here");
+    }
+}
+"#;
+    assert_eq!(run_k2(src), "one\nnone\nhere\n");
+}
+
+#[test]
 fn switch_expressions() {
     let src = r#"
 namespace S;

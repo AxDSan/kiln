@@ -33,6 +33,15 @@ impl Parser {
     fn span(&self) -> Span {
         self.toks[self.i].span
     }
+    /// Whether token `n` ahead starts exactly where the current token ends —
+    /// no whitespace between them. `?[` is a null-conditional index only when
+    /// the two touch, which is what keeps `c ? [1] : [2]` a ternary.
+    fn adjacent(&self, n: usize) -> bool {
+        match (self.toks.get(self.i), self.toks.get(self.i + n)) {
+            (Some(a), Some(b)) => a.span.line == b.span.line && a.span.end_col == b.span.col,
+            _ => false,
+        }
+    }
     fn doc(&self) -> Option<String> {
         self.toks[self.i].doc.clone()
     }
@@ -675,8 +684,7 @@ impl Parser {
     }
 
     /// `<T, U>` after a method name, or nothing.
-    fn opt_type_params(&mut self) -> Result<Vec<String>, ParseError> {
-        if self.peek() != &Tok::Lt {
+    fn opt_type_params(&mut self) -> Result<Vec<String>, ParseError> {        if self.peek() != &Tok::Lt {
             return Ok(Vec::new());
         }
         self.bump();
@@ -692,6 +700,25 @@ impl Parser {
         Ok(out)
     }
 
+    /// One constraint after `T :` — an interface or type name, the keyword
+    /// `class`, or `new()`. `None` for a shape — a generic or an optional —
+    /// that names no constraint.
+    fn constraint_name(&mut self) -> Result<Option<String>, ParseError> {
+        if self.eat_kw(Kw::Class) {
+            return Ok(Some("class".into()));
+        }
+        if self.peek() == &Tok::Keyword(Kw::New) {
+            self.bump();
+            self.expect(&Tok::LParen)?;
+            self.expect(&Tok::RParen)?;
+            return Ok(Some("new()".into()));
+        }
+        Ok(match self.type_ref()? {
+            TypeRef::Named(n) => Some(n),
+            _ => None,
+        })
+    }
+
     /// `where T : I1, U : I2` — the constraints a type argument must satisfy.
     fn opt_where_clause(&mut self) -> Result<Vec<(String, String)>, ParseError> {
         let mut out = Vec::new();
@@ -703,8 +730,8 @@ impl Parser {
             let tp = self.ident()?;
             self.expect(&Tok::Colon)?;
             loop {
-                if let TypeRef::Named(n) = self.type_ref()? {
-                    out.push((tp.clone(), n));
+                if let Some(c) = self.constraint_name()? {
+                    out.push((tp.clone(), c));
                 }
                 if !self.eat(&Tok::Comma) {
                     break;
@@ -1481,30 +1508,85 @@ impl Parser {
 
     fn postfix(&mut self) -> Result<Expr, ParseError> {
         let mut e = self.primary()?;
+        // Whether the chain being built in this loop started with a `?.`/`?[`.
+        // Once it has, the links that follow belong to the same null-conditional
+        // chain (so `x?.a.b` is empty when `x` is). A parenthesised `(x?.a).b`
+        // starts a fresh chain and stops at the optional instead.
+        let mut conditional = false;
         loop {
             match self.peek() {
                 Tok::Dot => {
                     self.bump();
                     let name = self.ident()?;
-                    e = Expr {
-                        span: e.span,
-                        kind: ExprKind::Member(Box::new(e), name),
+                    e = if conditional {
+                        chain_step(e, NullStep::Member(name))
+                    } else {
+                        Expr {
+                            span: e.span,
+                            kind: ExprKind::Member(Box::new(e), name),
+                        }
                     };
                 }
                 Tok::LParen => {
                     let args = self.call_args()?;
-                    e = Expr {
-                        span: e.span,
-                        kind: ExprKind::Call(Box::new(e), args),
+                    e = if conditional {
+                        chain_step(e, NullStep::Call(args))
+                    } else {
+                        Expr {
+                            span: e.span,
+                            kind: ExprKind::Call(Box::new(e), args),
+                        }
                     };
                 }
                 Tok::LBracket => {
                     self.bump();
                     let idx = self.expr()?;
                     self.expect(&Tok::RBracket)?;
+                    e = if conditional {
+                        chain_step(e, NullStep::Index(Box::new(idx)))
+                    } else {
+                        Expr {
+                            span: e.span,
+                            kind: ExprKind::Index(Box::new(e), Box::new(idx)),
+                        }
+                    };
+                }
+                // `x?.M` — the lexer makes this one token.
+                Tok::QuestionDot => {
+                    self.bump();
+                    let name = self.ident()?;
                     e = Expr {
                         span: e.span,
-                        kind: ExprKind::Index(Box::new(e), Box::new(idx)),
+                        kind: ExprKind::NullConditional(
+                            Box::new(e),
+                            vec![NullStep::Member(name)],
+                        ),
+                    };
+                    conditional = true;
+                }
+                // `x?[i]` — `?` and `[` must touch, or this is a ternary whose
+                // true branch is a collection expression (`c ? [1] : [2]`).
+                Tok::Question if self.peek_at(1) == &Tok::LBracket && self.adjacent(1) => {
+                    self.bump();
+                    self.expect(&Tok::LBracket)?;
+                    let idx = self.expr()?;
+                    self.expect(&Tok::RBracket)?;
+                    e = Expr {
+                        span: e.span,
+                        kind: ExprKind::NullConditional(
+                            Box::new(e),
+                            vec![NullStep::Index(Box::new(idx))],
+                        ),
+                    };
+                    conditional = true;
+                }
+                // `x!` — null-forgiving. Only here, in postfix position; a
+                // leading `!` is logical not and `unary` takes it.
+                Tok::Bang => {
+                    self.bump();
+                    e = Expr {
+                        span: e.span,
+                        kind: ExprKind::NullForgiving(Box::new(e)),
                     };
                 }
                 Tok::Question if !matches!(self.peek_at(1), Tok::Colon) => {
@@ -1600,14 +1682,40 @@ impl Parser {
                     }
                 }
                 InterpPart::Hole(src) => {
-                    // A format spec after `:` is dropped for now.
-                    let expr_src = src.split(':').next().unwrap_or("").to_string();
-                    let toks = crate::lexer::lex(&expr_src).map_err(|e| ParseError {
+                    let toks = crate::lexer::lex(&src).map_err(|e| ParseError {
                         msg: e.msg,
                         span: self.span(),
                     })?;
                     let mut sub = Parser { toks, i: 0 };
                     let e = sub.expr()?;
+                    // A hole holds exactly one expression. A ternary consumes
+                    // its own `:`, so anything still here is either a format
+                    // specifier — which Kiln 2 does not implement, and must
+                    // refuse rather than silently drop (`$"{x:03}"` printed
+                    // `7`, not `007`) — or a mistake.
+                    match sub.peek() {
+                        Tok::Eof => {}
+                        Tok::Colon => {
+                            let at = sub.span().col.saturating_sub(1);
+                            let spec: String = src.chars().skip(at).collect();
+                            let spec = spec.trim_start_matches(':').trim();
+                            let shown = if spec.is_empty() {
+                                "an empty one".to_string()
+                            } else {
+                                format!("`{spec}`")
+                            };
+                            return self.err(format!(
+                                "a format specifier is not supported yet — this hole asks for \
+                                 {shown}; format the value before it goes in the string"
+                            ));
+                        }
+                        other => {
+                            return self.err(format!(
+                                "expected the interpolation hole to hold one expression, \
+                                 found {other:?} after it"
+                            ));
+                        }
+                    }
                     segs.push(InterpSeg::Expr(Box::new(e)));
                 }
             }
@@ -1663,9 +1771,34 @@ impl Parser {
     }
 }
 
+/// Add one link to the null-conditional chain `e`. A link after the first `?.`
+/// joins the same chain, so the receiver is tested once and the accesses run
+/// only when it holds a value.
+fn chain_step(e: Expr, step: NullStep) -> Expr {
+    let span = e.span;
+    match e.kind {
+        ExprKind::NullConditional(recv, mut steps) => {
+            steps.push(step);
+            Expr {
+                span,
+                kind: ExprKind::NullConditional(recv, steps),
+            }
+        }
+        other => Expr {
+            span,
+            kind: ExprKind::NullConditional(
+                Box::new(Expr {
+                    kind: other,
+                    span,
+                }),
+                vec![step],
+            ),
+        },
+    }
+}
+
 /// A leading comparison in a pattern position: `> 0`, `<= 10`.
-fn relational_pat(t: &Tok) -> Option<(BinOp, u8)> {
-    Some(match t {
+fn relational_pat(t: &Tok) -> Option<(BinOp, u8)> {    Some(match t {
         Tok::Lt => (BinOp::Lt, 0),
         Tok::Le => (BinOp::Le, 0),
         Tok::Gt => (BinOp::Gt, 0),

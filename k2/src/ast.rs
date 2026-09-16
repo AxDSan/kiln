@@ -332,6 +332,14 @@ pub enum ExprKind {
     NullCoalesce(Box<Expr>, Box<Expr>),
     /// `e?` — Result/T? propagation.
     Try(Box<Expr>),
+    /// `e!` — assert that an optional holds a value. The result is the value
+    /// the optional would carry, without the `T?`.
+    NullForgiving(Box<Expr>),
+    /// `e?.M`, `e?[i]`, `e?.M(…)` — one null-conditional chain. The receiver is
+    /// evaluated once; the steps only run when it holds a value, and the whole
+    /// expression is empty otherwise. A step written after the first `?` is
+    /// part of the same chain, so `e?.a.b` is empty when `e` is.
+    NullConditional(Box<Expr>, Vec<NullStep>),
     /// `x => e`, `(a, b) => e`, `() => { ... }`
     Lambda(Lambda),
     /// `subject switch { pattern => value, _ => value }`
@@ -339,6 +347,18 @@ pub enum ExprKind {
     /// A collection expression: `[]`, `[a, b, c]`. Target-typed — today that
     /// means an array, which is what a command taking a list of values wants.
     Collection(Vec<Expr>),
+}
+
+/// One access in a null-conditional chain: `?.M` is `Member`, `?[i]` is
+/// `Index`, and `?.M(…)` is `Member` followed by `Call`.
+#[derive(Clone, Debug)]
+pub enum NullStep {
+    /// `.name`
+    Member(String),
+    /// `(args)`
+    Call(Vec<Expr>),
+    /// `[index]`
+    Index(Box<Expr>),
 }
 
 /// One `case …:` group of a `switch` statement: its labels (`Discard` is

@@ -660,6 +660,24 @@ pub fn expr(e: &Expr) -> String {
         }
         ExprKind::NullCoalesce(a, b) => format!("({} ?? {})", expr(a), expr(b)),
         ExprKind::Try(x) => format!("{}?", expr(x)),
+        ExprKind::NullForgiving(x) => format!("{}!", postfix_operand(x)),
+        ExprKind::NullConditional(recv, steps) => {
+            let mut s = format!("{}?", postfix_operand(recv));
+            for st in steps {
+                match st {
+                    NullStep::Member(n) => {
+                        s.push('.');
+                        s.push_str(&name(n));
+                    }
+                    NullStep::Call(args) => {
+                        let a: Vec<String> = args.iter().map(expr).collect();
+                        s.push_str(&format!("({})", a.join(", ")));
+                    }
+                    NullStep::Index(i) => s.push_str(&format!("[{}]", expr(i))),
+                }
+            }
+            s
+        }
         ExprKind::Lambda(l) => lambda(l),
         ExprKind::Interp(segs) => {
             let mut s = String::from("$\"");
@@ -688,6 +706,35 @@ pub fn expr(e: &Expr) -> String {
                 .collect();
             format!("{} switch {{ {} }}", expr(subject), a.join(", "))
         }
+    }
+}
+
+/// The receiver of a postfix `!` or `?.`: parenthesised unless it is itself a
+/// primary or a postfix form, which bind tightest.
+fn postfix_operand(e: &Expr) -> String {
+    let atomic = matches!(
+        &e.kind,
+        ExprKind::Int(_)
+            | ExprKind::Float(..)
+            | ExprKind::Bool(_)
+            | ExprKind::Str(_)
+            | ExprKind::Char(_)
+            | ExprKind::Null
+            | ExprKind::Ident(_)
+            | ExprKind::Member(..)
+            | ExprKind::Call(..)
+            | ExprKind::Index(..)
+            | ExprKind::New(..)
+            | ExprKind::DictInit(..)
+            | ExprKind::Interp(..)
+            | ExprKind::Collection(..)
+            | ExprKind::NullForgiving(..)
+            | ExprKind::NullConditional(..)
+    );
+    if atomic {
+        expr(e)
+    } else {
+        format!("({})", expr(e))
     }
 }
 

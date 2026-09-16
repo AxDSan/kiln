@@ -1469,6 +1469,40 @@ impl Cx {
         None
     }
 
+    /// Whether `ty` is a reference — what `where T : class` admits: a class,
+    /// record or interface value, text, a byte buffer, an array or a
+    /// collection. Numbers, flags, characters, pointers and `T?` are not.
+    fn is_reference_type(&self, ty: TyId) -> bool {
+        matches!(
+            self.b.m.types.kind(ty),
+            TyKind::Record(_)
+                | TyKind::Str
+                | TyKind::Bytes
+                | TyKind::Array(_)
+                | TyKind::Dict(..)
+                | TyKind::Set(_)
+                | TyKind::Func { .. }
+        )
+    }
+
+    /// Whether `new T()` would find something to run — what `where T : new()`
+    /// requires. A collection starts empty; a record with no declared
+    /// constructor is zeroed; a declared constructor must be callable with no
+    /// arguments.
+    fn can_new_without_arguments(&self, ty: TyId) -> bool {
+        if self.as_list(ty).is_some() || self.as_dict(ty).is_some() || self.as_set(ty).is_some() {
+            return true;
+        }
+        let TyKind::Record(rid) = *self.b.m.types.kind(ty) else {
+            return false;
+        };
+        let name = self.b.m.record(rid).name.clone();
+        match self.methods.get(&format!("{name}.$ctor")) {
+            Some(sig) => sig.defaults.iter().all(|d| d.is_some()),
+            None => true,
+        }
+    }
+
     fn c_layout(&self, fields: &[FieldDef]) -> (i64, i64, Vec<i64>) {
         let mut offset = 0i64;
         let mut align = 1i64;
@@ -3328,6 +3362,8 @@ impl<'a> FnLower<'a> {
                 });
                 Ok((Expr::Field(Box::new(Expr::Local(t)), RESULT_VALUE), val_ty))
             }
+            ast::ExprKind::NullForgiving(inner) => self.null_forgiving(inner),
+            ast::ExprKind::NullConditional(recv, steps) => self.null_conditional(recv, steps),
             ast::ExprKind::Range(_, _, _) => Err("a range is only valid in `foreach`".into()),
             ast::ExprKind::Interp(segs) => {
                 let mut parts: Vec<(String, Option<(Expr, TyId)>)> = Vec::new();
@@ -4240,9 +4276,10 @@ impl<'a> FnLower<'a> {
                     return Ok((Expr::Local(out), opt_ty));
                 }
             }
-            // `list.Where(pred)` / `list.Select(f)` — written here rather than
-            // in K2 until the standard library exists.
-            if name == "Where" || name == "Select" {
+            // `list.Where(pred)` / `list.Select(f)` / `list.Any(pred)` /
+            // `list.First(pred)` — written here rather than in K2 until the
+            // standard library exists.
+            if name == "Where" || name == "Select" || name == "Any" || name == "First" {
                 let (lv, lty) = self.expr_raw(recv, None)?;
                 if self.cx.as_list(lty).is_some() {
                     return self.list_query(name, lv, lty, args);
@@ -6252,8 +6289,9 @@ impl<'a> FnLower<'a> {
         });
     }
 
-    /// `Where` keeps the elements a predicate accepts; `Select` maps each one.
-    /// The result type of a `Select` comes from probing the lambda body.
+    /// `Where` keeps the elements a predicate accepts; `Select` maps each one;
+    /// `Any` asks whether one exists; `First` answers with the first one. The
+    /// result type of a `Select` comes from probing the lambda body.
     fn list_query(
         &mut self,
         which: &str,
@@ -6264,6 +6302,11 @@ impl<'a> FnLower<'a> {
         let (_, elem) = self.cx.as_list(src_ty).expect("a list");
         if args.len() != 1 {
             return Err(format!("List.{which} takes one argument"));
+        }
+        // `Any` and `First` answer with one value rather than a new list, so
+        // they stop at the first element the predicate accepts.
+        if which == "Any" || which == "First" {
+            return self.list_find_by(which, src_val, src_ty, &args[0], elem);
         }
         // The lambda's type: Where is T -> bool; Select is T -> R, and R is
         // found by lowering the body into a scratch block that is discarded.
@@ -6367,6 +6410,131 @@ impl<'a> FnLower<'a> {
             ),
         });
         self.push(Stmt::Loop { body: inner });
+        Ok((Expr::Local(out), out_ty))
+    }
+
+    /// `Any(pred)` — true when the predicate accepts some element; `First(pred)`
+    /// — that element. Both stop at the first one that matches. `First` with no
+    /// match has no value to answer with, so it stops the program by name
+    /// rather than answering with a zero that would read like a result.
+    fn list_find_by(
+        &mut self,
+        which: &str,
+        src_val: Expr,
+        src_ty: TyId,
+        arg: &ast::Expr,
+        elem: TyId,
+    ) -> Result<(Expr, TyId), String> {
+        let fn_ty = self.cx.b.m.types.intern(TyKind::Func {
+            params: vec![elem],
+            ret: TyTable::BOOL,
+        });
+        let (f, fty) = self.expr(arg, Some(fn_ty))?;
+        self.check_fits(fty, fn_ty, &format!("the `List.{which}` predicate"))?;
+        let fl = self.new_local("$fn", fn_ty);
+        self.push(Stmt::Let {
+            local: fl,
+            value: f,
+        });
+        let src = self.new_local("$src", src_ty);
+        self.push(Stmt::Let {
+            local: src,
+            value: src_val,
+        });
+
+        let out_ty = if which == "Any" { TyTable::BOOL } else { elem };
+        let out = self.new_local("$qout", out_ty);
+        let seed = if which == "Any" {
+            Expr::Bool(false)
+        } else {
+            zero_of(self.tt(), elem)
+        };
+        self.push(Stmt::Let {
+            local: out,
+            value: seed,
+        });
+        let found = (which == "First").then(|| {
+            let l = self.new_local("$qfound", TyTable::BOOL);
+            self.push(Stmt::Let {
+                local: l,
+                value: Expr::Bool(false),
+            });
+            l
+        });
+
+        let i = self.new_local("$qi", TyTable::I32);
+        self.push(Stmt::Let {
+            local: i,
+            value: Expr::Int(0, TyTable::I32),
+        });
+        let item = self.new_local("$qitem", elem);
+        let call = Expr::Call(Box::new(Call::Indirect {
+            callee: Box::new(Expr::Local(fl)),
+            args: vec![Expr::Local(item)],
+            sig: fn_ty,
+        }));
+        let mut hit = Vec::new();
+        if which == "Any" {
+            hit.push(Stmt::Assign {
+                place: Place::Local(out),
+                value: Expr::Bool(true),
+            });
+        } else {
+            hit.push(Stmt::Assign {
+                place: Place::Local(out),
+                value: Expr::Local(item),
+            });
+            hit.push(Stmt::Assign {
+                place: Place::Local(found.unwrap()),
+                value: Expr::Bool(true),
+            });
+        }
+        hit.push(Stmt::Break);
+        let inner = vec![
+            Stmt::If {
+                cond: Expr::Not(Box::new(Expr::Bin(
+                    BinOp::Lt,
+                    Box::new(Expr::Local(i)),
+                    Box::new(Expr::Field(Box::new(Expr::Local(src)), LIST_LEN)),
+                    TyTable::I32,
+                ))),
+                then: vec![Stmt::Break],
+                els: vec![],
+            },
+            Stmt::Assign {
+                place: Place::Local(item),
+                value: Expr::Index(
+                    Box::new(Expr::Field(Box::new(Expr::Local(src)), LIST_DATA)),
+                    Box::new(Expr::Local(i)),
+                ),
+            },
+            Stmt::If {
+                cond: call,
+                then: hit,
+                els: vec![],
+            },
+            Stmt::Assign {
+                place: Place::Local(i),
+                value: Expr::Bin(
+                    BinOp::Add,
+                    Box::new(Expr::Local(i)),
+                    Box::new(Expr::Int(1, TyTable::I32)),
+                    TyTable::I32,
+                ),
+            },
+        ];
+        self.push(Stmt::Loop { body: inner });
+
+        if let Some(found) = found {
+            let report = self.stop_message(vec![Expr::Str(
+                "kiln: First found no element the predicate accepts\n".into(),
+            )]);
+            self.push(Stmt::If {
+                cond: Expr::Not(Box::new(Expr::Local(found))),
+                then: vec![Stmt::Expr(report), self.exit_one()],
+                els: vec![],
+            });
+        }
         Ok((Expr::Local(out), out_ty))
     }
 
@@ -6935,6 +7103,124 @@ impl<'a> FnLower<'a> {
         Ok(Expr::OptionalGet(Box::new(Expr::Local(held))))
     }
 
+    /// `x!` — assert that an optional holds a value. The result is the value
+    /// without its `T?`; one that is not there stops the program with a
+    /// message rather than being read as though it were. A value that is
+    /// already a `T` comes back unchanged, as C#'s `!` is a no-op there.
+    fn null_forgiving(&mut self, inner: &ast::Expr) -> Result<(Expr, TyId), String> {
+        let (v, ty) = self.expr(inner, None)?;
+        if let TyKind::Optional(val_ty) = *self.tt().kind(ty) {
+            let held = self.new_local("$assert", ty);
+            self.push(Stmt::Let {
+                local: held,
+                value: v,
+            });
+            let report = self.stop_message(vec![Expr::Str(
+                "kiln: `!` was used on a value that is not there\n".into(),
+            )]);
+            self.push(Stmt::If {
+                cond: Expr::Not(Box::new(Expr::OptionalHasValue(Box::new(Expr::Local(held))))),
+                then: vec![Stmt::Expr(report), self.exit_one()],
+                els: vec![],
+            });
+            return Ok((Expr::OptionalGet(Box::new(Expr::Local(held))), val_ty));
+        }
+        if self.cx.as_result(ty).is_some() {
+            return Err("`!` applies to a `T?`; a `Result` is unwrapped with `??` or `?`".into());
+        }
+        Ok((v, ty))
+    }
+
+    /// `x?.M`, `x?[i]`, `x?.M(…)` — the receiver is evaluated once and the
+    /// accesses run only when it holds a value. The result is the access's
+    /// type made optional, so a missing receiver yields no value rather than a
+    /// read through nothing.
+    fn null_conditional(
+        &mut self,
+        recv: &ast::Expr,
+        steps: &[ast::NullStep],
+    ) -> Result<(Expr, TyId), String> {
+        let (rv, rty) = self.expr(recv, None)?;
+        let TyKind::Optional(inner) = *self.tt().kind(rty) else {
+            return Err(format!(
+                "`?.` reads through a value that may be null, but this is {} — write `.` \
+                 instead, or make it a `T?`",
+                self.describe_ty(rty)
+            ));
+        };
+        if steps.is_empty() {
+            return Err("`?.` needs a member or an index after it".into());
+        }
+        let held = self.new_local("$nc", rty);
+        self.push(Stmt::Let {
+            local: held,
+            value: rv,
+        });
+        let val = self.new_local("$ncval", inner);
+        // The access is lowered exactly as the written form would be, against a
+        // hidden name bound to the value the optional holds: the same member,
+        // call and index rules, inside one presence guard.
+        let hidden = format!("$nc{}", val.0);
+        let mut access = ast::Expr {
+            kind: ast::ExprKind::Ident(hidden.clone()),
+            span: recv.span,
+        };
+        for step in steps {
+            access = match step {
+                ast::NullStep::Member(name) => ast::Expr {
+                    kind: ast::ExprKind::Member(Box::new(access), name.clone()),
+                    span: recv.span,
+                },
+                ast::NullStep::Call(args) => ast::Expr {
+                    kind: ast::ExprKind::Call(Box::new(access), args.clone()),
+                    span: recv.span,
+                },
+                ast::NullStep::Index(idx) => ast::Expr {
+                    kind: ast::ExprKind::Index(Box::new(access), idx.clone()),
+                    span: recv.span,
+                },
+            };
+        }
+        self.scope.insert(hidden.clone(), (val, inner));
+        self.blocks.push(Vec::new());
+        self.push(Stmt::Let {
+            local: val,
+            value: Expr::OptionalGet(Box::new(Expr::Local(held))),
+        });
+        let lowered = self.expr(&access, None);
+        self.scope.remove(&hidden);
+        let (av, aty) = lowered?;
+        let out_ty = self.cx.b.m.types.intern(TyKind::Optional(aty));
+        let out = self.new_local("$ncopt", out_ty);
+        let mut then_body = self.blocks.pop().unwrap();
+        then_body.push(Stmt::Assign {
+            place: Place::Local(out),
+            value: Expr::MakeOptional(aty, Some(Box::new(av))),
+        });
+        self.push(Stmt::If {
+            cond: Expr::OptionalHasValue(Box::new(Expr::Local(held))),
+            then: then_body,
+            els: vec![Stmt::Assign {
+                place: Place::Local(out),
+                value: Expr::MakeOptional(aty, None),
+            }],
+        });
+        Ok((Expr::Local(out), out_ty))
+    }
+
+    /// The statement that ends a program with a message already printed.
+    fn exit_one(&self) -> Stmt {
+        Stmt::Expr(Expr::Call(Box::new(Call::Dll {
+            library: "c".into(),
+            symbol: "exit".into(),
+            conv: CallConv::Cdecl,
+            args: vec![Expr::Int(1, TyTable::I32)],
+            arg_tys: vec![TyTable::I32],
+            ret: TyTable::VOID,
+            varargs: false,
+        })))
+    }
+
     /// A condition: something that is true or false, and nothing else.
     ///
     /// A string or a number used as one was accepted and emitted as a branch on
@@ -6967,6 +7253,7 @@ impl<'a> FnLower<'a> {
             TyKind::Record(_) if self.cx.as_result(ty).is_some() => "a Result".into(),
             TyKind::Record(rid) => format!("a `{}`", self.cx.b.m.record(*rid).name),
             TyKind::Optional(_) => "an optional value — test it with `!= null`".into(),
+            TyKind::Func { .. } => "a function".into(),
             TyKind::CFunc { .. } => "a C function address".into(),
             k if matches!(k, TyKind::I8 | TyKind::I16 | TyKind::I32 | TyKind::I64 | TyKind::U8 | TyKind::U16 | TyKind::U32 | TyKind::U64 | TyKind::Nint | TyKind::Nuint) => "a whole number".into(),
             _ => "a value".into(),
@@ -7083,25 +7370,48 @@ impl<'a> FnLower<'a> {
                 }
             }
         }
-        // `where T : I` — the type argument must actually implement I.
-        for (tp, iface) in &m.constraints {
-            let Some(bound) = tvars.get(tp) else { continue };
-            if !self.cx.interfaces.contains_key(iface) {
-                continue; // not an interface constraint (`class`, `new()`, …)
-            }
-            let ok = self
-                .cx
-                .record_name(*bound)
-                .map(|n| self.cx.impls.contains_key(&(n, iface.clone())))
-                .unwrap_or(false);
-            if !ok {
-                let shown = self
-                    .cx
-                    .record_name(*bound)
-                    .unwrap_or_else(|| format!("{:?}", self.cx.b.m.types.kind(*bound)));
-                return Err(format!(
-                    "`{key}` needs `{tp}` to implement `{iface}`, and `{shown}` does not"
-                ));
+        // `where T : I`, `where T : class`, `where T : new()` — checked when
+        // the type argument is chosen, so the instance's body may rely on them.
+        for (tp, constraint) in &m.constraints {
+            let Some(bound) = tvars.get(tp).copied() else { continue };
+            match constraint.as_str() {
+                "class" => {
+                    if !self.cx.is_reference_type(bound) {
+                        return Err(format!(
+                            "`{key}` needs `{tp}` to be a reference type (`where {tp} : class`), \
+                             and {} is not",
+                            self.describe_ty(bound)
+                        ));
+                    }
+                }
+                "new()" => {
+                    if !self.cx.can_new_without_arguments(bound) {
+                        return Err(format!(
+                            "`{key}` needs `{tp}` to have a parameterless constructor \
+                             (`where {tp} : new()`), and {} does not",
+                            self.describe_ty(bound)
+                        ));
+                    }
+                }
+                iface if self.cx.interfaces.contains_key(iface) => {
+                    let ok = self
+                        .cx
+                        .record_name(bound)
+                        .map(|n| self.cx.impls.contains_key(&(n, iface.to_string())))
+                        .unwrap_or(false);
+                    if !ok {
+                        let shown = self
+                            .cx
+                            .record_name(bound)
+                            .unwrap_or_else(|| self.describe_ty(bound));
+                        return Err(format!(
+                            "`{key}` needs `{tp}` to implement `{iface}`, and `{shown}` does not"
+                        ));
+                    }
+                }
+                // A name the compiler does not know as a constraint is left
+                // alone, as before: the parser accepts any type name here.
+                _ => {}
             }
         }
 
@@ -7792,17 +8102,50 @@ impl<'a> FnLower<'a> {
         hint: Option<TyId>,
     ) -> Result<(Expr, TyId), String> {
         let cond = self.condition(c)?;
+        // `s == null ? "none" : s` proves `s` present in the arm that runs when
+        // it is not null, exactly as an `if`/`else` does. Without the proof the
+        // arm read `s` as the `T?` it is and stored the pair into a slot typed
+        // from the other arm — valid Kiln that clang then refused.
+        let (narrow_then, narrow_else) = null_test_target(c);
+        let saved = self.narrowed.clone();
         // Each arm is lowered into its own branch, with whatever statements it
         // emits to compute itself: `ok ? xs[99] : 0` must not check the index
         // when `ok` is false.
         self.blocks.push(Vec::new());
+        if let Some(n) = &narrow_then {
+            self.narrowed.insert(n.clone());
+        }
         let a_res = self.expr(a, hint);
         let mut then = self.blocks.pop().unwrap();
+        self.narrowed = saved.clone();
+        if let Some(n) = &narrow_else {
+            self.narrowed.insert(n.clone());
+        }
         let (av, aty) = a_res?;
         self.blocks.push(Vec::new());
         let b_res = self.expr(b, hint.or(Some(aty)));
         let mut els = self.blocks.pop().unwrap();
-        let (bv, _) = b_res?;
+        self.narrowed = saved;
+        let (bv, bty) = b_res?;
+        // The two arms may differ only in optionality — `n == 1 ? "one" : null`
+        // is the natural way to write it — and then the result is the optional:
+        // the plain arm is wrapped. Taking the plain arm's type instead put the
+        // other arm's `{value, present}` pair into a plain slot, which is valid
+        // Kiln that clang refuses at the IR.
+        let (av, aty, bv) = match (
+            self.tt().kind(aty).clone(),
+            self.tt().kind(bty).clone(),
+        ) {
+            (TyKind::Optional(i), _) if bty == i => {
+                (av, aty, Expr::MakeOptional(i, Some(Box::new(bv))))
+            }
+            (_, TyKind::Optional(i)) if aty == i => (
+                Expr::MakeOptional(i, Some(Box::new(av))),
+                bty,
+                bv,
+            ),
+            _ => (av, aty, bv),
+        };
         let t = self.new_local("$tern", aty);
         then.push(Stmt::Assign {
             place: Place::Local(t),
@@ -8261,7 +8604,23 @@ fn collect_lambdas_expr(e: &ast::Expr, out: &mut Vec<ast::Lambda>) {
             collect_lambdas_expr(a, out);
             collect_lambdas_expr(b, out);
         }
-        E::Unary(_, a) | E::Cast(_, a) | E::Try(a) => collect_lambdas_expr(a, out),
+        E::Unary(_, a) | E::Cast(_, a) | E::Try(a) | E::NullForgiving(a) => {
+            collect_lambdas_expr(a, out)
+        }
+        E::NullConditional(recv, steps) => {
+            collect_lambdas_expr(recv, out);
+            for st in steps {
+                match st {
+                    ast::NullStep::Member(_) => {}
+                    ast::NullStep::Call(args) => {
+                        for a in args {
+                            collect_lambdas_expr(a, out);
+                        }
+                    }
+                    ast::NullStep::Index(i) => collect_lambdas_expr(i, out),
+                }
+            }
+        }
         E::Ternary(a, b, c) => {
             collect_lambdas_expr(a, out);
             collect_lambdas_expr(b, out);
@@ -8406,7 +8765,23 @@ fn collect_idents_expr(e: &ast::Expr, out: &mut Vec<String>) {
             collect_idents_expr(a, out);
             collect_idents_expr(b, out);
         }
-        E::Unary(_, a) | E::Cast(_, a) | E::Try(a) => collect_idents_expr(a, out),
+        E::Unary(_, a) | E::Cast(_, a) | E::Try(a) | E::NullForgiving(a) => {
+            collect_idents_expr(a, out)
+        }
+        E::NullConditional(recv, steps) => {
+            collect_idents_expr(recv, out);
+            for st in steps {
+                match st {
+                    ast::NullStep::Member(_) => {}
+                    ast::NullStep::Call(args) => {
+                        for a in args {
+                            collect_idents_expr(a, out);
+                        }
+                    }
+                    ast::NullStep::Index(i) => collect_idents_expr(i, out),
+                }
+            }
+        }
         E::Binary(_, a, b) | E::NullCoalesce(a, b) => {
             collect_idents_expr(a, out);
             collect_idents_expr(b, out);
