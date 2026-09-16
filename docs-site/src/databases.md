@@ -1,5 +1,9 @@
 # Databases
 
+> **The samples on this page are Kiln 1.x.** Kiln 1.x still builds, so they run
+> as written. [Kiln 2](./kiln-2.md) is the current language, and it calls the
+> same libraries and components with different syntax.
+
 `use db` opens a database, runs statements with bound parameters, and walks
 rows. Two backends — SQLite and MySQL — behind one set of commands, chosen by
 the DSN's prefix so a program does not change between them.

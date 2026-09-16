@@ -1,5 +1,9 @@
 # Kits
 
+> **The samples on this page are Kiln 1.x.** Kiln 1.x still builds, so they run
+> as written. [Kiln 2](./kiln-2.md) is the current language, and it calls the
+> same libraries and components with different syntax.
+
 A kit is a support library together with what an IDE needs to present it: a
 display name, a toolbox section, an icon for each component it contributes, a
 version, and the project templates it ships.

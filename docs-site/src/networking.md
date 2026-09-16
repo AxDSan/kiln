@@ -1,5 +1,9 @@
 # Networking
 
+> **The samples on this page are Kiln 1.x.** Kiln 1.x still builds, so they run
+> as written. [Kiln 2](./kiln-2.md) is the current language, and it calls the
+> same libraries and components with different syntax.
+
 `use net` gives a program TCP, an HTTP client, and an HTTP server. The server
 is a **component**: you drop it on a form or declare it at module level, set a
 port, wire one event, and you have a web service. There is no socket in the

@@ -1,5 +1,9 @@
 # Reading data files
 
+> **The samples on this page are Kiln 1.x.** Kiln 1.x still builds, so they run
+> as written. [Kiln 2](./kiln-2.md) is the current language, and it calls the
+> same libraries and components with different syntax.
+
 Two kits exist for the data files a program reads: `xml` for the tables, and
 `encoding` for the codepages they are written in. They are separate because the
 two problems are separate — a document can be UTF-8 XML that needs no decoding,

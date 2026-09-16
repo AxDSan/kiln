@@ -1,5 +1,9 @@
 # Memory
 
+> **The samples on this page are Kiln 1.x.** Kiln 1.x still builds, so they run
+> as written. [Kiln 2](./kiln-2.md) is the current language, and it calls the
+> same libraries and components with different syntax.
+
 You do not free anything in Kiln. There is no `free`, no `delete`, no
 ownership annotation, and no lifetime to reason about. A text, an array, a
 record, a dictionary and a byte-set are all allocated by the runtime, and the

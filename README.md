@@ -281,8 +281,10 @@ that the map is filled in:
 - **TLS is opt-in.** `https://` works once `tools/fetch-mbedtls.sh` has
   vendored mbedTLS, and the call fails rather than downgrading without it;
   the `httpserver` component is plaintext either way.
-- **Memory is reclaimed at exit**, not before: a program that runs for days
-  grows with the work it has done.
+- **Memory is reclaimed while the program runs.** A value it can no longer
+  reach is collected automatically, so a long-running program does not grow
+  with the work it has done; a collection is a pause whose length grows with
+  the heap, and `collect_garbage()` moves one to a moment the program chooses.
 - Twenty-one components. The
   [limitations page](https://axdsan.github.io/kiln/docs/limitations.html)
   is the full list, checked against the toolchain.

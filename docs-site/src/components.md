@@ -1,5 +1,9 @@
 # Components
 
+> **The samples on this page are Kiln 1.x.** Kiln 1.x still builds, so they run
+> as written. [Kiln 2](./kiln-2.md) is the current language, and it calls the
+> same libraries and components with different syntax.
+
 A component is a thing with properties you set and events you bind to
 subroutines. A button is one; so is a timer, which has no rectangle at all.
 Every component and every property is listed in the generated

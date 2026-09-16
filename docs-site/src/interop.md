@@ -1,5 +1,9 @@
 # Interop
 
+> **The samples on this page are Kiln 1.x.** Kiln 1.x still builds, so they run
+> as written. [Kiln 2](./kiln-2.md) is the current language, and it calls the
+> same libraries and components with different syntax.
+
 Kiln talks to C in both directions: a program calls into native libraries,
 and native code calls back into it. A shared library Kiln builds can go one
 step further and carry a loader hook — a real `DllMain` on Windows, an ELF

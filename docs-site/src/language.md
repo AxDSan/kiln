@@ -1,5 +1,9 @@
 # Language guide
 
+> **This is the Kiln 1.x language guide.** Kiln 1.x still builds, so it stays
+> accurate for a program that already exists. A new program is
+> [Kiln 2](./kiln-2.md).
+
 This is the whole language, in the order you meet it: a module, then the
 values it holds, then the ways it chooses, repeats and calls, then what
 happens when something fails. Start at the top and read down and nothing will

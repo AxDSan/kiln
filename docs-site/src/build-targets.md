@@ -1,5 +1,9 @@
 # Build targets
 
+> **The samples on this page are Kiln 1.x.** Kiln 1.x still builds, so they run
+> as written. [Kiln 2](./kiln-2.md) is the current language, and it calls the
+> same libraries and components with different syntax.
+
 The same source builds as any of these. It is a build option, not a rewrite:
 the language, the type checking and the component model are identical across
 all of them. Only the entry contract changes.
