@@ -794,12 +794,22 @@ static void test_sessions(const std::string& kiln, const std::string& designer) 
     // The window's own frame: no window-manager frame over it, and the green
     // dot maximises. What the manager did is read back from SDL, since a
     // scripted session cannot look at the screen.
-    {
+    // A driver with no window manager (offscreen, the default for a headless
+    // run) refuses the hit test, and Studio then keeps the frame on purpose, so
+    // there is nothing to check there.
+    const char* driver = std::getenv("SDL_VIDEODRIVER");
+    const bool headless = driver && (std::string(driver) == "offscreen" ||
+                                     std::string(driver) == "dummy");
+    if (headless) {
+        std::printf("  window frame: %s has no window manager, skipped\n", driver);
+    } else {
         const std::string out =
             session("KILN_UI_WINDOW=1 " + designer, kiln, form,
                     "winflags;click:wc-max;pump;winflags");
         check("the window is borderless", has(out, " borderless"));
         check("the maximise dot maximises", has(out, " maximized borderless"));
+    }
+    {
         const std::string closed =
             session(designer, kiln, form, "quitcheck;click:wc-close;quitcheck");
         check("the close dot asks the event loop to stop, as the manager's close does",
