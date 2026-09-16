@@ -89,8 +89,13 @@ check "builds a GUI program (links the vendored UI stack)" \
 
 check "creates a shared library" "$BIN/kiln" new shared-library slib
 check "builds a .so" "$BIN/kiln" build slib/main.kiln -o slib/libslib.so
-check "the .so exports its subroutines" bash -c \
-    "nm -D --defined-only '$WORK/project/slib/libslib.so' | grep -q ' T greet'"
+# The template's methods are public static members of a public static class,
+# which the language exports under their own names; the build also writes the
+# header the host compiles against. Those names are PascalCase now, so a check
+# left over from 1.x would pass while looking at nothing.
+check "the .so exports its methods, and the header declares them" bash -c \
+    "nm -D --defined-only '$WORK/project/slib/libslib.so' | grep -q ' T Greet' &&
+     grep -q 'Greet' '$WORK/project/slib/slib.h'"
 
 check "creates a static library" "$BIN/kiln" new static-library alib
 check "builds a .a" "$BIN/kiln" build alib/main.kiln -o alib/libalib.a
