@@ -1136,3 +1136,17 @@ fn migrate_keeps_units_inline_arrays_and_dictionary_types() {
         "the empty dictionary took the wrong value type:\n{text}"
     );
 }
+
+/// Phase 6: a handler wired at run time takes what the event hands it. A grid's
+/// `select` gives its row to a lambda and to a method alike; `-=` finds the
+/// method again, because it is bound through one remembered thunk; `activate`
+/// gives its row too. Handles: form 1, grid 2, wire 3, unwire 4; row N of the
+/// grid is `2.1.N`.
+#[test]
+fn a_handler_wired_at_run_time_takes_the_grid_row() {
+    let src = include_str!("fixtures/k2_grid_env.kiln");
+    assert_eq!(
+        run_form_clicks("gridenv", src, "3;2.1.2;4;2.1.3"),
+        "lambda select 2\nmethod select Linus\nlambda select 3"
+    );
+}

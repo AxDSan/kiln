@@ -1,0 +1,38 @@
+namespace GridEnv;
+
+using Kiln.Ui;
+
+Datasource people
+{
+    Name = "people";
+    Rows = "Ada\tLondon\nLinus\tHelsinki\nGrace\tArlington";
+}
+
+public partial form Win
+{
+    Title = "g";
+    Grid table { Name = "table"; Bind = "people"; Width = 300; Height = 120; }
+    Button wire { Text = "Wire"; Top = 150; Click += OnWire; }
+    Button unwire { Text = "Unwire"; Top = 190; Click += OnUnwire; }
+}
+
+public partial form Win
+{
+    void OnWire()
+    {
+        var tag = "lambda";
+        table.Select += (int row) => { Console.WriteLine($"{tag} select {row}"); };
+        table.Select += OnPicked;
+        table.Activate += row => { Console.WriteLine($"{tag} activate {row}"); };
+    }
+
+    void OnUnwire()
+    {
+        table.Select -= OnPicked;
+    }
+
+    void OnPicked(int row)
+    {
+        Console.WriteLine($"method select {GridCell("table", row, 1)}");
+    }
+}

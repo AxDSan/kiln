@@ -67,10 +67,10 @@ int kn_ui_on(Kiln_Widget w, const char *event, Kiln_EventFn handler);
  *
  * An event may have any number of these bound; they run in the order they were
  * added. Unbinding matches on the (fn, env) pair — the same rule a delegate's
- * `-=` follows — and removes the most recently added match. Returns 0 on
- * success; 1 when the widget or event is unknown, 2 when the event hands its
- * handler arguments (a grid's row), which an environment handler does not take
- * yet. */
+ * `-=` follows — and removes the most recently added match. An event that hands
+ * its handler values (a grid's `select` and `activate` give the row) calls it
+ * as `fn(env, row)`: the environment first, as a Kiln 2 closure takes it.
+ * Returns 0 on success; 1 when the widget or event is unknown. */
 typedef void (*Kiln_EventEnvFn)(void *env);
 int kn_ui_on_env(Kiln_Widget w, const char *event, Kiln_EventEnvFn fn, void *env);
 int kn_ui_off_env(Kiln_Widget w, const char *event, Kiln_EventEnvFn fn, void *env);

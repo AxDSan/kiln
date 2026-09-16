@@ -223,6 +223,10 @@ clang and checks stdout):
 - **`Any` and `First`** over a `List<T>`, taking a predicate lambda, beside
   `Where`/`Select`. `First` with no match stops the program by name rather than
   answering with a zero.
+- **A handler wired at run time takes the event's values**: `table.Select +=
+  (int row) => …`, `table.Select += OnPicked` for a method taking the row, and
+  `-= OnPicked` finds it again — the method is bound through one remembered
+  thunk, so the pair matches. The library calls `fn(env, row)`.
 - **Kits reach Kiln 2 whole (Phase 4)**: `using Kiln.SplitDemo;` brings in a
   kit's `.kdecl` bundle — its C records as `[CLayout]` records, its constants
   and its foreign functions — through the same converter `kiln migrate` uses,
@@ -299,15 +303,13 @@ clang and checks stdout):
 1. Richer null flow: `x != null` narrows, and `x!` and `x?.` are built, but
    narrowing through `&&`, through an early `return` and through an `is T v`
    pattern is not.
-2. A handler wired at run time cannot yet take an event's arguments (a grid's
-   row) — `kn_ui_on_env` refuses those with 2 rather than calling wrongly.
-3. Studio's code pane highlights K2 from its own line tokenizer rather than
+2. Studio's code pane highlights K2 from its own line tokenizer rather than
    from the language server's semantic tokens — the shapes are right, but the
    toolchain is not the one deciding them.
-4. `List<T>` is K2's own structure, converted to and from a runtime array at the
+3. `List<T>` is K2's own structure, converted to and from a runtime array at the
    command boundary. Re-platforming it onto `Kiln_Array` buys nothing now that
    allocation is collected.
-5. One `k2` crate holds syntax + lowering; it splits into `k2-syntax`/
+4. One `k2` crate holds syntax + lowering; it splits into `k2-syntax`/
    `k2-sema`/`k2-lower` as `k2-sema` grows.
 
 ## Milestone: the RAD half runs

@@ -187,6 +187,7 @@ pub fn lower_opts(
         c_bools: Default::default(),
         namespace_components: Vec::new(),
         components: HashMap::new(),
+        event_thunks: HashMap::new(),
         generic_types: HashMap::new(),
         type_mono: HashMap::new(),
         interfaces: HashMap::new(),
@@ -958,6 +959,10 @@ struct Cx {
     namespace_components: Vec<ast::ComponentDecl>,
     /// Component id → (global holding its runtime handle, component type).
     components: HashMap<String, (GlobalId, String)>,
+    /// The lambda a method taking an event's values is bound through, one per
+    /// method: `+=` and `-=` must hand the library the same function, or a
+    /// delegate's `-=` finds nothing to remove.
+    event_thunks: HashMap<String, FuncId>,
     /// Generic type declarations, awaiting type arguments.
     generic_types: HashMap<String, ast::TypeDecl>,
     /// Instantiated generic types: (name, type args) → the record it became.
@@ -7623,10 +7628,75 @@ impl<'a> FnLower<'a> {
         value: &ast::Expr,
         add: bool,
     ) -> Result<(), String> {
+        // What the event hands its handler — a grid's `select` gives the row —
+        // as the component library declares it.
+        let event_params: Vec<TyId> = {
+            let type_name = self
+                .cx
+                .components
+                .values()
+                .find(|(cg, _)| *cg == g)
+                .map(|(_, t)| snake_case(t));
+            let tys: Vec<kiln_ir::Ty> = match (type_name, self.cx.registry.as_ref()) {
+                (Some(t), Some(r)) => r.event_params(&t, &snake_case(event)).to_vec(),
+                _ => Vec::new(),
+            };
+            tys.into_iter().map(|t| ir_ty(t, &mut self.cx)).collect()
+        };
         let action = self.cx.b.m.types.intern(TyKind::Func {
-            params: Vec::new(),
+            params: event_params.clone(),
             ret: TyTable::VOID,
         });
+        // A method taking the event's values is bound through a lambda that
+        // passes them on: the library calls a handler with its environment
+        // first, and a method has none to take.
+        let thunk;
+        let thunk_key = match &value.kind {
+            ast::ExprKind::Ident(nm) if !event_params.is_empty() => Some(format!("{nm}/{event}")),
+            _ => None,
+        };
+        if let Some(fid) = thunk_key.as_ref().and_then(|k| self.cx.event_thunks.get(k)).copied() {
+            let symbol = if add { "kn_ui_on_env" } else { "kn_ui_off_env" };
+            self.push(Stmt::Expr(ui_call(
+                symbol,
+                vec![
+                    Expr::Global(g),
+                    Expr::Str(snake_case(event)),
+                    Expr::FuncPtr(fid),
+                    Expr::Null(TyTable::PTR),
+                ],
+                vec![TyTable::I64, TyTable::STR, TyTable::PTR, TyTable::PTR],
+                TyTable::I32,
+            )));
+            return Ok(());
+        }
+        let value = match &value.kind {
+            ast::ExprKind::Ident(nm) if !event_params.is_empty() => {
+                let names: Vec<String> = (0..event_params.len()).map(|i| format!("$ev{i}")).collect();
+                thunk = ast::Expr {
+                    span: value.span,
+                    kind: ast::ExprKind::Lambda(ast::Lambda {
+                        params: names.iter().map(|n| (n.clone(), None)).collect(),
+                        body: ast::LambdaBody::Expr(Box::new(ast::Expr {
+                            span: value.span,
+                            kind: ast::ExprKind::Call(
+                                Box::new(value.clone()),
+                                names
+                                    .iter()
+                                    .map(|n| ast::Expr {
+                                        span: value.span,
+                                        kind: ast::ExprKind::Ident(n.clone()),
+                                    })
+                                    .collect(),
+                            ),
+                        })),
+                    }),
+                };
+                let _ = nm;
+                &thunk
+            }
+            _ => value,
+        };
         let (fn_ptr, env) = match &value.kind {
             ast::ExprKind::Ident(nm) => {
                 // The component's global is `{Form}__{id}`, which names the form
@@ -7655,11 +7725,22 @@ impl<'a> FnLower<'a> {
                 (Expr::FuncPtr(sig.fid), Expr::Null(TyTable::PTR))
             }
             ast::ExprKind::Lambda(l) => {
-                if !l.params.is_empty() {
-                    return Err("an event handler lambda takes no parameters yet".into());
+                if l.params.len() != event_params.len() {
+                    return Err(format!(
+                        "`{event}` hands its handler {} value(s), and this lambda takes {}",
+                        event_params.len(),
+                        l.params.len()
+                    ));
                 }
                 let (v, _) = self.expr(value, Some(action))?;
                 match v {
+                    // A method's thunk captures nothing: bound with no
+                    // environment, and remembered, so every `+=` and `-=` of
+                    // that method names one pair.
+                    Expr::MakeClosure { func, .. } if thunk_key.is_some() => {
+                        self.cx.event_thunks.insert(thunk_key.clone().unwrap(), func);
+                        (Expr::FuncPtr(func), Expr::Null(TyTable::PTR))
+                    }
                     Expr::MakeClosure { func, env } => (
                         Expr::FuncPtr(func),
                         Expr::Cast {

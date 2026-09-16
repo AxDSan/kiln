@@ -707,6 +707,16 @@ std::vector<SpinStep*> g_spin_steps;   /* owned; freed at shutdown */
  * `tick` is in runtime/kn_component.c.
  */
 typedef void (*RowFn)(int32_t);
+/* A handler bound at run time with an environment: `grid.Select += row => ...`.
+ * Called with the environment first and the row after, which is the order a
+ * Kiln 2 closure's function takes them in. */
+typedef void (*EnvRowFn)(void*, int32_t);
+struct EnvRow {
+    Kiln_EventEnvFn fn;
+    void*           env;
+    int32_t         token;
+    bool            live = true;
+};
 
 struct Grid {
     UiEntry*        entry = nullptr;
@@ -716,6 +726,11 @@ struct Grid {
     int             drawn_selected = -1;
     Kiln_EventFn on_select = nullptr;
     Kiln_EventFn on_activate = nullptr;
+    /* Handlers bound in code, any number per event, in the order they were
+     * bound. A removed one is marked rather than erased, so a handler that
+     * unbinds itself while the list is being walked does not invalidate it. */
+    std::vector<EnvRow> env_select;
+    std::vector<EnvRow> env_activate;
     /* One listener per row position, kept across redraws: a grid refilled
      * every tick must not grow a listener per row per frame. */
     std::vector<struct GridRowEvent*> rows;
@@ -736,11 +751,25 @@ void grid_fire(Kiln_EventFn fn, int row) {
     if (fn) ((RowFn)fn)(row);
 }
 
+/* The handlers bound in code. Walked by index over a copy of the size: one may
+ * bind another, which lands after the ones this event is for. */
+void grid_fire_env(Kiln_Widget w, bool activate, int row) {
+    const size_t n = activate ? g_grids[w].env_activate.size() : g_grids[w].env_select.size();
+    for (size_t i = 0; i < n; i++) {
+        EnvRow h = activate ? g_grids[w].env_activate[i] : g_grids[w].env_select[i];
+        if (h.live && h.fn) ((EnvRowFn)h.fn)(h.env, row);
+    }
+}
+
 void grid_select(Kiln_Widget w, int n, bool announce) {
     auto it = g_grids.find(w);
     if (it == g_grids.end()) return;
     it->second.wanted = n;
-    if (announce) grid_fire(it->second.on_select, grid_selected(w));
+    if (announce) {
+        const int row = grid_selected(w);
+        grid_fire(it->second.on_select, row);
+        grid_fire_env(w, false, row);
+    }
 }
 
 struct GridRowEvent : Rml::EventListener {
@@ -757,6 +786,7 @@ struct GridRowEvent : Rml::EventListener {
         } else if (ev.GetType() == "dblclick") {
             grid_select(grid, index, false);
             grid_fire(g_grids[grid].on_activate, index);
+            grid_fire_env(grid, true, index);
         }
     }
 };
@@ -845,7 +875,10 @@ struct GridKeys : Rml::EventListener {
         const int sel = grid_selected(w);
         const int rows = ui_table_row_count(ui_entry_table(g_grids[w].entry));
         if (key == Rml::Input::KI_RETURN) {
-            if (sel) grid_fire(g_grids[w].on_activate, sel);
+            if (sel) {
+                grid_fire(g_grids[w].on_activate, sel);
+                grid_fire_env(w, true, sel);
+            }
         } else if (key == Rml::Input::KI_DOWN) {
             if (sel < rows) grid_select(w, sel + 1, true);
         } else if (key == Rml::Input::KI_UP) {
@@ -1575,14 +1608,17 @@ int kn_ui_on(Kiln_Widget w, const char* event, Kiln_EventFn handler) {
 int kn_ui_on_env(Kiln_Widget w, const char* event, Kiln_EventEnvFn fn, void* env) {
     Rml::Element* e = resolve(w);
     if (!e || !event || !fn) return 1;
-    // A grid's events hand the handler its row, and an environment handler's
-    // signature has no room for one yet. Refused rather than called wrongly.
-    if (g_grids.count(w) &&
-        (std::strcmp(event, "select") == 0 || std::strcmp(event, "activate") == 0)) {
-        return 2;
-    }
     const int32_t token = env ? kn_handler_hold(env) : -1;
     if (env && token < 0) return 1;
+    // A grid's events hand the handler its row: kept with the grid and called
+    // as (env, row) rather than bound to the element, which has no row to give.
+    if (g_grids.count(w) &&
+        (std::strcmp(event, "select") == 0 || std::strcmp(event, "activate") == 0)) {
+        auto& list = std::strcmp(event, "select") == 0 ? g_grids[w].env_select
+                                                        : g_grids[w].env_activate;
+        list.push_back(EnvRow{fn, env, token});
+        return 0;
+    }
     auto* bridge = new EnvBridge(fn, env, w, event, token);
     g_env_bridges.push_back(bridge);
     e->AddEventListener(event, bridge);
@@ -1592,6 +1628,18 @@ int kn_ui_on_env(Kiln_Widget w, const char* event, Kiln_EventEnvFn fn, void* env
 int kn_ui_off_env(Kiln_Widget w, const char* event, Kiln_EventEnvFn fn, void* env) {
     Rml::Element* e = resolve(w);
     if (!e || !event) return 1;
+    if (g_grids.count(w) &&
+        (std::strcmp(event, "select") == 0 || std::strcmp(event, "activate") == 0)) {
+        auto& list = std::strcmp(event, "select") == 0 ? g_grids[w].env_select
+                                                        : g_grids[w].env_activate;
+        for (auto it = list.rbegin(); it != list.rend(); ++it) {
+            if (!it->live || it->fn != fn || it->env != env) continue;
+            it->live = false;
+            if (it->token >= 0) kn_handler_release(it->token);
+            return 0;
+        }
+        return 1;
+    }
     // The most recent match, as a delegate's `-=` removes the last one added.
     for (auto it = g_env_bridges.rbegin(); it != g_env_bridges.rend(); ++it) {
         EnvBridge* b = *it;
