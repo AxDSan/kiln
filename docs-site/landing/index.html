@@ -383,18 +383,19 @@ footer a:hover { color: #fff; }
   <div class="wrap split">
     <div>
       <p class="eyebrow">The language</p>
-      <h2>Small, and English-first</h2>
+      <h2>C#'s expressiveness, English-first</h2>
       <p class="lede">
-        One way to call things. No pointers, no manual memory management, no
-        ceremony. Assignment is a statement rather than an expression, so
-        <code>if x = 5</code> compares — it cannot silently assign.
+        Namespaces, classes, records, interfaces and generics; lambdas and
+        capturing closures; methods and constructors; <code>switch</code>
+        expressions and <code>defer</code>. It reads like the language you
+        already know, and lowers to LLVM and one executable.
       </p>
       <p class="lede">
-        Whole numbers, doubles, booleans and text; arrays, bytes, records and
-        dictionaries; subroutines with parameters and return values. Every
-        position counts from 1, so <code>0</code> is free to mean <em>not
-        found</em>. A command that fails returns a sentinel and leaves the
-        reason in an error slot — there are no exceptions to catch.
+        Absence and failure are values rather than sentinels:
+        <code>Result&lt;T&gt;</code> with <code>?</code> to propagate and
+        <code>??</code> for a fallback, and <code>T?</code> for a value that may
+        not be there — no exceptions to catch, and no error slot to check.
+        Positions count from 1; byte offsets count from 0.
       </p>
       <p class="lede">
         Memory is reclaimed while a program runs, not at exit, so a server or a
