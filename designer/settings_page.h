@@ -59,7 +59,9 @@ constexpr int DLG_H = 470;
 constexpr int RAIL_W = 150;
 
 /// The whole document, for a window `w` x `h`, showing `category`.
-inline std::string markup(const std::string& family, int w, int h, const std::string& category) {
+/// `capturing` names the shortcut row waiting for its keys, or is empty.
+inline std::string markup(const std::string& family, int w, int h, const std::string& category,
+                          const std::string& capturing = "") {
     using namespace kiln::designer::theme;
     namespace st = kiln::settings;
 
@@ -127,6 +129,13 @@ inline std::string markup(const std::string& family, int w, int h, const std::st
       << ";color:" << TEXT << ";padding-left:7px;font-size:12px}";
     s << "input:focus{border:1px " << ACCENT << "}";
     s << "input.narrow{width:110px}";
+    // A shortcut is recorded, not typed: a keycap that listens when clicked.
+    s << ".keycap{display:inline-block;min-width:150px;height:20px;padding:4px 10px 0px 10px;"
+         "border:1px " << BORDER << ";border-radius:4px;background-color:" << PANEL
+      << ";color:" << TEXT << ";font-size:12px;cursor:pointer}";
+    s << ".keycap:hover{border:1px " << ACCENT << "}";
+    s << ".keycap.none{color:" << TEXT_MUTED << ";font-style:italic}";
+    s << ".keycap.listen{border:1px " << ACCENT << ";color:" << ACCENT << "}";
 
     s << "#foot{position:absolute;left:0;top:" << (DLG_H - 44) << "px;width:" << DLG_W
       << "px;height:44px;border-top:1px " << BORDER_SOFT << "}";
@@ -190,6 +199,17 @@ inline std::string markup(const std::string& family, int w, int h, const std::st
             s << "<input type='text' class='narrow' oe-set-field='" << esc_attr(r.key)
               << "' value='" << esc_attr(value) << "'/>";
             break;
+        case st::Kind::Shortcut: {
+            const bool listening = capturing == r.key;
+            std::string shown;
+            for (const auto& c : st::combos(value)) shown += (shown.empty() ? "" : "  or  ") + c;
+            s << "<div class='keycap" << (listening ? " listen" : shown.empty() ? " none" : "")
+              << "' oe-set-capture='" << esc_attr(r.key) << "'>"
+              << (listening ? std::string("Press the keys\u2026  Esc cancels, Backspace unbinds")
+                            : shown.empty() ? std::string("None") : shown)
+              << "</div>";
+            break;
+        }
         case st::Kind::Text:
         case st::Kind::Path:
             s << "<input type='text' oe-set-field='" << esc_attr(r.key) << "' value='"

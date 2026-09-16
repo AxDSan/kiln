@@ -63,7 +63,15 @@
 
 using namespace kiln::designer;
 
+// Defined after the anonymous namespace, and needed inside it.
+void save_or_discard_on_exit();
+void remember_window_size();
+
 namespace {
+
+/// The shortcut row waiting for a key to be pressed, or "". While it is set the
+/// settings dialog's keydown records a combination instead of acting on it.
+std::string g_settings_capture;
 
 /// Initial window size. The IDE follows the OS window after that — see
 /// relayout(), which is re-run whenever the context's dimensions change.
@@ -72,7 +80,9 @@ constexpr int INIT_W = 1440, INIT_H = 900;
 /// Components named in the design spec that the UI library does not provide
 /// yet. Shown greyed so the toolbox reads as designed while staying honest
 /// about what actually exists — clicking one says so rather than failing oddly.
-/// A menu entry: label, the action it fires, and its shortcut hint.
+/// A menu entry: label, the action it fires, and a fixed hint. The shortcut a
+/// menu shows is the binding in settings (`keys.<action>`), read when the menu
+/// opens, so a rebound key is what the menu says.
 struct MenuItem { const char* label; const char* action; const char* keys; };
 struct Menu { const char* title; std::vector<MenuItem> items; };
 
@@ -80,26 +90,30 @@ struct Menu { const char* title; std::vector<MenuItem> items; };
 /// "not implemented" is worse than no entry at all.
 inline const std::vector<Menu>& menus() {
     static const std::vector<Menu> m = {
-        {"File", {{"Save", "save", "Ctrl+S"}, {"Build Binary", "build", ""},
+        {"File", {{"New Project\u2026", "new-project", ""},
+                  {"Open Project\u2026", "open-project", ""},
+                  {"Open File\u2026", "open-file", ""},
+                  {"Close Project", "close-project", ""},
+                  {"Save", "save", ""}, {"Build Binary", "build", ""},
                   {"Run", "run", ""}, {"Exit", "exit", ""}}},
-        {"Edit", {{"Undo", "undo", "Ctrl+Z"}, {"Redo", "redo", "Ctrl+Shift+Z"},
-                  {"Copy", "copy", "Ctrl+C"}, {"Paste", "paste", "Ctrl+V"},
-                  {"Delete", "delete", "Del"}}},
+        {"Edit", {{"Undo", "undo", ""}, {"Redo", "redo", ""},
+                  {"Copy", "copy", ""}, {"Paste", "paste", ""},
+                  {"Delete", "delete", ""}}},
         {"View", {{"Designer", "view-designer", ""}, {"Code", "view-code", ""}}},
         {"Build", {{"Build Binary", "build", ""}, {"Run", "run", ""}, {"Stop", "stop", ""}}},
         // A key nobody has been told about does not exist, which is what the
         // menu is for as much as the clicking.
-        {"Debug", {{"Debug", "debug", "F5"},
-                   {"Toggle Breakpoint", "togglebp", "F9"},
-                   {"Step Over", "dbgstepover", "F10"},
-                   {"Step In", "dbgstepin", "F11"},
-                   {"Step Out", "dbgstepout", "Shift+F11"},
-                   {"Continue", "dbgcontinue", "F5"},
-                   {"Stop Debugging", "dbgstop", "Shift+F5"}}},
-        {"Tools", {{"Settings…", "settings", "Ctrl+,"}}},
-        {"Help", {{"Documentation", "help", "F1"},
+        {"Debug", {{"Debug", "debug", ""},
+                   {"Toggle Breakpoint", "togglebp", ""},
+                   {"Step Over", "dbgstepover", ""},
+                   {"Step In", "dbgstepin", ""},
+                   {"Step Out", "dbgstepout", ""},
+                   {"Continue", "dbgcontinue", ""},
+                   {"Stop Debugging", "dbgstop", ""}}},
+        {"Tools", {{"Settings…", "settings", ""}}},
+        {"Help", {{"Documentation", "help", ""},
                   {"Command Reference", "helpcommands", ""},
-                  {"Search the Handbook", "helpsearch", "Shift+F1"},
+                  {"Search the Handbook", "helpsearch", ""},
                   {"About Kiln", "about", ""}}},
     };
     return m;
@@ -1419,16 +1433,13 @@ std::string build_chrome(const std::string& family, const std::string& mono,
          "<div id='ctxmenu' style='display:none'/>";
 
     s << "<div id='toolbar'>"
-         "<div class='tb' oe-action='save'>" + icon_img("save", 16, "tbi") + "Save</div>"
-         "<div class='tb' oe-action='undo'>Undo</div>"
-         "<div class='tb' oe-action='redo'>Redo</div>"
-         "<div class='sep'/>"
+         // No Save, Undo or Redo here: the File and Edit menus and their keys
+         // carry them, and a second copy of a menu is not a toolbar.
          // Activity indicator: an indeterminate bar while the toolchain works,
          // and a pulsing lamp for as long as an app is alive.
          "<div id='activity' style='display:none'><div id='activitylabel'/>"
          "<div id='activitytrack'><div id='activitybar'/></div></div>"
          "<span id='runlamp' style='display:none'>●</span>"
-         "<div class='sep'/>"
          "<div class='tb run' id='btn_run' oe-action='run'>" + icon_img("run", 16, "tbi") + "Run</div>"
          "<div class='tb' oe-action='build'>" + icon_img("build", 16, "tbi") + "Build Binary</div>"
          "<div class='tb stop' oe-action='stop'>" + icon_img("stop", 16, "tbi") + "Stop</div>"
@@ -3641,6 +3652,59 @@ void poll_app() {
 }
 
 
+void run_action(const std::string& a);
+
+/// The canonical combination (`settings::normalize_combo`) for a key event, or
+/// "" for a key that cannot be bound — a modifier on its own, or one the
+/// schema has no name for.
+std::string combo_from_key(int key, bool ctrl, bool alt, bool shift) {
+    using KI = Rml::Input::KeyIdentifier;
+    std::string name;
+    if (key >= KI::KI_A && key <= KI::KI_Z) name = std::string(1, (char)('A' + (key - KI::KI_A)));
+    else if (key >= KI::KI_0 && key <= KI::KI_9) name = std::string(1, (char)('0' + (key - KI::KI_0)));
+    else if (key >= KI::KI_F1 && key <= KI::KI_F12) name = "F" + std::to_string(1 + key - KI::KI_F1);
+    else {
+        switch (key) {
+        case KI::KI_SPACE: name = "Space"; break;
+        case KI::KI_OEM_COMMA: name = "Comma"; break;
+        case KI::KI_OEM_PERIOD: name = "Period"; break;
+        case KI::KI_OEM_PLUS: name = "Plus"; break;
+        case KI::KI_OEM_MINUS: name = "Minus"; break;
+        case KI::KI_DELETE: name = "Delete"; break;
+        case KI::KI_TAB: name = "Tab"; break;
+        case KI::KI_RETURN: name = "Enter"; break;
+        case KI::KI_ESCAPE: name = "Escape"; break;
+        case KI::KI_BACK: name = "Backspace"; break;
+        default: return "";
+        }
+    }
+    std::string combo = name;
+    if (shift) combo = "Shift+" + combo;
+    if (alt) combo = "Alt+" + combo;
+    if (ctrl) combo = "Ctrl+" + combo;
+    return kiln::settings::normalize_combo(combo);
+}
+
+/// Run the action a key is bound to. True when one ran.
+///
+/// `target` is the element the key was pressed in, or null. Undo, redo, copy,
+/// paste and delete act on components, so inside a text control they are the
+/// control's own and are left alone; delete is a designer gesture only.
+bool dispatch_shortcut(int key, bool ctrl, bool alt, bool shift, Rml::Element* target) {
+    const std::string action = kiln::settings::action_for(combo_from_key(key, ctrl, alt, shift));
+    if (action.empty()) return false;
+    if (action == "undo" || action == "redo" || action == "copy" || action == "paste" ||
+        action == "delete") {
+        for (Rml::Element* e = target; e; e = e->GetParentNode()) {
+            const Rml::String tag = e->GetTagName();
+            if (tag == "textarea" || tag == "input") return false;
+        }
+        if (action == "delete" && g.view == "code") return false;
+    }
+    run_action(action);
+    return true;
+}
+
 /// Global keyboard shortcuts.
 ///
 /// Deliberately minimal: every key not claimed here falls through to RmlUi, and
@@ -3649,13 +3713,13 @@ void poll_app() {
 /// anything added here must require a modifier.
 bool on_key_down(Rml::Context* context, Rml::Input::KeyIdentifier key, int modifier, float, bool priority) {
     if (priority) return true;   // let RmlUi's own bindings go first
-    const bool ctrl = (modifier & Rml::Input::KM_CTRL) != 0;
-    if (ctrl && key == Rml::Input::KI_S) {
-        save();
-        return false;            // handled; don't type an 's' into the editor
-    }
+    // A key nothing in the document took — pressed with no element focused, so
+    // the document's own capture listener never heard it — still reaches its
+    // binding here.
     (void)context;
-    return true;
+    return !dispatch_shortcut((int)key, (modifier & Rml::Input::KM_CTRL) != 0,
+                              (modifier & Rml::Input::KM_ALT) != 0,
+                              (modifier & Rml::Input::KM_SHIFT) != 0, nullptr);
 }
 
 /* --- the editor's geometry ------------------------------------------------ */
@@ -4193,6 +4257,7 @@ void close_settings() {
     if (!g.settings_doc) return;
     g.settings_doc->Close();
     g.settings_doc = nullptr;
+    g_settings_capture.clear();
     if (g.doc) g.doc->Focus();
 }
 
@@ -4252,6 +4317,58 @@ struct SettingsListener : Rml::EventListener {
     void ProcessEvent(Rml::Event& ev) override {
         const std::string type = ev.GetType();
         if (type == "blur") { commit_field(ev.GetTargetElement()); return; }
+        if (type == "keydown" && !g_settings_capture.empty()) {
+            // Recording a shortcut: the keys pressed are the value. Escape
+            // abandons the recording, Backspace unbinds, a modifier alone is
+            // still being held and waits for the key it modifies.
+            const int key = ev.GetParameter<int>("key_identifier", 0);
+            ev.StopImmediatePropagation();
+            if (key == Rml::Input::KI_LCONTROL || key == Rml::Input::KI_RCONTROL ||
+                key == Rml::Input::KI_LSHIFT || key == Rml::Input::KI_RSHIFT ||
+                key == Rml::Input::KI_LMENU || key == Rml::Input::KI_RMENU ||
+                key == Rml::Input::KI_LWIN || key == Rml::Input::KI_RWIN)
+                return;
+            const std::string row = g_settings_capture;
+            g_settings_capture.clear();
+            const bool ctrl = ev.GetParameter<bool>("ctrl_key", false);
+            const bool alt = ev.GetParameter<bool>("alt_key", false);
+            const bool shift = ev.GetParameter<bool>("shift_key", false);
+            if (key == Rml::Input::KI_ESCAPE && !ctrl && !alt && !shift) {
+                open_settings(g.settings_cat);
+                return;
+            }
+            if ((key == Rml::Input::KI_BACK || key == Rml::Input::KI_DELETE) && !ctrl && !alt &&
+                !shift) {
+                kiln::settings::set(row, "");
+                kiln::settings::save();
+                set_status(row + " unbound");
+                open_settings(g.settings_cat);
+                return;
+            }
+            const std::string combo = combo_from_key(key, ctrl, alt, shift);
+            if (combo.empty()) {
+                set_status("a shortcut needs Ctrl or Alt, or a function key");
+                open_settings(g.settings_cat);
+                return;
+            }
+            // One key, one action: whatever held this combination lets it go.
+            const std::string previous = kiln::settings::action_for(combo);
+            if (!previous.empty() && "keys." + previous != row) {
+                const std::string other = "keys." + previous;
+                std::string kept;
+                for (const auto& c : kiln::settings::combos(kiln::settings::text(other)))
+                    if (c != combo) kept += (kept.empty() ? "" : " ") + c;
+                kiln::settings::set(other, kept);
+            }
+            kiln::settings::set(row, combo);
+            kiln::settings::save();
+            set_status(combo + " \u2192 " + row.substr(5) +
+                       (previous.empty() || "keys." + previous == row
+                            ? std::string()
+                            : " (taken from " + previous + ")"));
+            open_settings(g.settings_cat);
+            return;
+        }
         if (type == "keydown") {
             const int key = ev.GetParameter<int>("key_identifier", 0);
             if (key == Rml::Input::KI_RETURN || key == Rml::Input::KI_NUMPADENTER) {
@@ -4267,6 +4384,11 @@ struct SettingsListener : Rml::EventListener {
             if (e->HasAttribute("oe-set-close")) { close_settings(); return; }
             if (e->HasAttribute("oe-set-cat")) {
                 open_settings(e->GetAttribute<Rml::String>("oe-set-cat", ""));
+                return;
+            }
+            if (e->HasAttribute("oe-set-capture")) {
+                g_settings_capture = e->GetAttribute<Rml::String>("oe-set-capture", "");
+                open_settings(g.settings_cat);
                 return;
             }
             if (e->HasAttribute("oe-set-reset")) {
@@ -4310,7 +4432,8 @@ void open_settings(const std::string& category) {
     const bool reopening = g.settings_doc != nullptr;
     if (reopening) { g.settings_doc->Close(); g.settings_doc = nullptr; g.context->Update(); }
     g.settings_doc = g.context->LoadDocumentFromMemory(
-        kiln::designer::settings_page::markup(g.family, g.win_w, g.win_h, g.settings_cat));
+        kiln::designer::settings_page::markup(g.family, g.win_w, g.win_h, g.settings_cat,
+                                             g_settings_capture));
     if (!g.settings_doc) return;
     g.settings_doc->Show(Rml::ModalFlag::Modal, Rml::FocusFlag::Document);
     g.settings_doc->AddEventListener("click", &g_settings_listener);
@@ -5241,7 +5364,12 @@ void open_menu(int idx) {
     std::string html;
     for (const auto& item : menus()[(size_t)idx].items) {
         html += "<div class='mi' oe-action='" + std::string(item.action) + "'>" + item.label +
-                (item.keys[0] ? "<span class='keys'>" + std::string(item.keys) + "</span>" : "") +
+                [&] {
+                    const std::string k = kiln::settings::shortcut_for(item.action);
+                    const std::string shown = k.empty() ? std::string(item.keys) : k;
+                    return shown.empty() ? std::string()
+                                         : "<span class='keys'>" + shown + "</span>";
+                }() +
                 "</div>";
     }
     pop->SetInnerRML(html);
@@ -5412,18 +5540,10 @@ struct Listener : Rml::EventListener {
                 if (tag == "textarea" || tag == "input") return;
             }
             const int key = ev.GetParameter<int>("key_identifier", 0);
-            const bool ctrl = ev.GetParameter<bool>("ctrl_key", false);
             const bool shift = ev.GetParameter<bool>("shift_key", false);
-            // Ctrl+, — the shortcut every IDE surveyed uses for preferences.
-            if (ctrl && key == Rml::Input::KI_OEM_COMMA) { open_settings(g.settings_cat); return; }
-            if (ctrl && key == Rml::Input::KI_Z) { shift ? redo() : undo(); return; }
-            if (ctrl && key == Rml::Input::KI_Y) { redo(); return; }
-            if (ctrl && key == Rml::Input::KI_C) { copy_selection(); return; }
-            if (ctrl && key == Rml::Input::KI_V) { paste_clipboard(); return; }
-            // Not Ctrl+S: the backend's key callback saves once the context
-            // has declined the key, and a save here too would be two.
+            // Settings, undo, redo, copy, paste and delete are bindings,
+            // dispatched in `KeyGate::ProcessEvent`; see `settings.h`.
             if (g.view == "code") return;   // the rest are designer gestures
-            if (key == Rml::Input::KI_DELETE) { delete_selection(); return; }
             // Nudge the selection with the arrow keys: 1px normally, a grid
             // step with shift.
             int dx = 0, dy = 0;
@@ -5589,45 +5709,7 @@ struct Listener : Rml::EventListener {
                 }
                 if (e->HasAttribute("oe-action")) {
                     const Rml::String a = e->GetAttribute<Rml::String>("oe-action", "");
-                    if (a == "save") save();
-                    else if (a == "run") build_binary(true);
-                    else if (a == "build") build_binary(false);
-                    else if (a == "stop") stop_all();
-                    else if (a == "debug") start_debug();
-                    else if (a == "togglebp") {
-                        int line = 0, col = 0;
-                        if (caret_position(line, col)) toggle_breakpoint(line + 1);
-                    }
-                    else if (a == "dbgcontinue") g.dbg.continue_();
-                    else if (a == "dbgstepover") g.dbg.step_over();
-                    else if (a == "dbgstepin") g.dbg.step_in();
-                    else if (a == "dbgstepout") g.dbg.step_out();
-                    else if (a == "dbgpause") g.dbg.pause();
-                    else if (a == "dbgstop") stop_debug();
-                    else if (a == "undo") undo();
-                    else if (a == "redo") redo();
-                    else if (a == "copy") copy_selection();
-                    else if (a == "paste") paste_clipboard();
-                    else if (a == "delete") delete_selection();
-                    else if (a == "view-designer") set_view("designer");
-                    else if (a == "view-code") set_view("code");
-                    else if (a == "about") show_about();
-                    else if (a == "help") context_help();
-                    else if (a == "helpcommands") open_help("reference-commands", "", "");
-                    else if (a == "helpsearch") {
-                        // The menu says "search", so the caret belongs in the
-                        // search box — otherwise the entry just reopens the
-                        // last page and the user has to go find the field.
-                        open_help(g.help_page, "", "");
-                        if (g.help)
-                            if (Rml::Element* f = g.help->GetElementById("find")) f->Focus();
-                    }
-                    else if (a == "settings") open_settings(g.settings_cat);
-                    else if (a == "exit") {
-                        Backend::RequestExit();
-                    } else {
-                        set_status(a + " is not implemented yet");
-                    }
+                    run_action(a);
                     return;
                 }
                 if (e->HasAttribute("oe-jump")) {
@@ -5912,6 +5994,20 @@ struct KeyGate : Rml::EventListener {
     void ProcessEvent(Rml::Event& ev) override {
         Rml::Element* el = ev.GetTargetElement();
         if (!el) return;
+        // Every binding, first and in the capture phase: the editor's textarea
+        // stops each keydown it sees, so a listener further down never hears an
+        // F5 or a Ctrl+S pressed while typing.
+        if (ev.GetType() == "keydown" &&
+            dispatch_shortcut(ev.GetParameter<int>("key_identifier", 0),
+                              ev.GetParameter<bool>("ctrl_key", false),
+                              ev.GetParameter<bool>("alt_key", false),
+                              ev.GetParameter<bool>("shift_key", false), el)) {
+            // Ctrl+Space still delivers its space as text; the completion
+            // popup must not get it.
+            if (ev.GetParameter<int>("key_identifier", 0) == Rml::Input::KI_SPACE) g.swallow_text = " ";
+            ev.StopImmediatePropagation();
+            return;
+        }
         if (el->GetId() == "fullcode") { editor(ev); return; }
         if (el->GetId() != "log") return;
         if (ev.GetType() == "textinput") { ev.StopImmediatePropagation(); return; }
@@ -5944,63 +6040,8 @@ struct KeyGate : Rml::EventListener {
         const bool ctrl = ev.GetParameter<bool>("ctrl_key", false);
         const bool shift = ev.GetParameter<bool>("shift_key", false);
         g.swallow_text.clear();
-        // F12 and Shift+F12, as in every editor that has them. Here, in the
-        // capture phase, because the textarea stops every keydown it sees
-        // whether or not it had a use for it: a listener on the document
-        // would never hear an F12 pressed in the editor.
-        if (key == Rml::Input::KI_F12) {
-            shift ? find_references() : goto_definition();
-            ev.StopImmediatePropagation();
-            return;
-        }
-        // F1 on a name opens its reference entry; Shift+F1 searches the
-        // handbook for it. Capture phase for the same reason as F12 — the
-        // textarea swallows every keydown, and F1 is pressed in the editor.
-        if (key == Rml::Input::KI_F1) {
-            if (shift) {
-                int line = 0, col = 0;
-                std::string word;
-                if (caret_position(line, col)) {
-                    word = identifier_at(line, col);
-                    if (word.empty() && col > 0) word = identifier_at(line, col - 1);
-                }
-                open_help(g.help_page, "", word);
-            } else {
-                context_help();
-            }
-            ev.StopImmediatePropagation();
-            return;
-        }
-        // The debugging keys, in the capture phase for the same reason: the
-        // textarea swallows every keydown it sees, and these are pressed in
-        // the editor more than anywhere else.
-        if (key == Rml::Input::KI_F5) {
-            shift ? stop_debug() : (g.dbg.running() ? g.dbg.continue_() : start_debug());
-            ev.StopImmediatePropagation();
-            return;
-        }
-        if (key == Rml::Input::KI_F9) {
-            int line = 0, col = 0;
-            if (caret_position(line, col)) toggle_breakpoint(line + 1);
-            ev.StopImmediatePropagation();
-            return;
-        }
-        if (key == Rml::Input::KI_F10) {
-            g.dbg.step_over();
-            ev.StopImmediatePropagation();
-            return;
-        }
-        if (key == Rml::Input::KI_F11) {
-            shift ? g.dbg.step_out() : g.dbg.step_in();
-            ev.StopImmediatePropagation();
-            return;
-        }
-        if (ctrl && key == Rml::Input::KI_SPACE) {
-            request_completion(true);
-            g.swallow_text = " ";
-            ev.StopImmediatePropagation();
-            return;
-        }
+        // F1, F5, F9-F12 and Ctrl+Space are bindings now, dispatched in
+        // `KeyGate::ProcessEvent` before this runs; see `settings.h`.
         // Tab and Return with no popup open: the editor's own, not the
         // control's. RmlUi's textarea does not indent — Tab moves the focus
         // out of the editor entirely — and its Return starts the new line at
@@ -6045,6 +6086,119 @@ struct KeyGate : Rml::EventListener {
     }
 };
 KeyGate g_key_gate;
+
+/// Start Studio again on `args` — another project, or the welcome screen.
+///
+/// Unsaved work is handled exactly as on exit (`startup.on_exit`), and the app,
+/// the debugger and the language server are stopped first. A scripted session
+/// only reports what it would have done: a test must not replace itself.
+void relaunch_studio(std::vector<std::string> args) {
+    if (std::getenv("KILN_DESIGNER_SCRIPT")) {
+        std::printf("relaunch:");
+        for (const auto& a : args) std::printf(" %s", a.c_str());
+        std::printf("\n");
+        std::fflush(stdout);
+        return;
+    }
+    if (g.dirty) save_or_discard_on_exit();
+    stop_all();
+    g.lsp.stop();
+    remember_window_size();
+    if (!g.kiln_bin.empty()) args.push_back(g.kiln_bin);
+    Rml::Shutdown();
+    Backend::Shutdown();
+    kiln::sys::relaunch(args);
+    std::fprintf(stderr, "designer: could not start again\n");
+    std::exit(1);
+}
+
+/// File > Open Project / Open File: the platform's dialog, then Studio again
+/// on what was picked. With no dialog to show, the welcome screen's own path
+/// browser is where opening happens, so that is where this goes.
+void open_from_dialog(bool project) {
+    if (std::getenv("KILN_DESIGNER_SCRIPT") || std::getenv("KILN_NO_NATIVE_DIALOG") ||
+        !kiln::sys::has_native_file_dialog()) {
+        relaunch_studio({"--welcome"});
+        return;
+    }
+    std::string dir = kiln::sys::real_path(g.model.path);
+    const size_t slash = dir.find_last_of('/');
+    dir = slash == std::string::npos ? std::string(".") : dir.substr(0, slash);
+    const std::string picked = kiln::sys::pick_open_file(
+        project ? "Open Project" : "Open File", dir, project ? "Kiln project" : "Kiln source",
+        project ? "*.kproj *.kiln" : "*.kiln");
+    if (picked.empty()) return;   // cancelled
+    const std::string open = project ? kiln::welcome::resolve_open(g.kiln_bin, picked) : picked;
+    if (open.empty()) {
+        log("that project has no module to open: " + picked, "err");
+        return;
+    }
+    relaunch_studio({open});
+}
+
+/// Everything a menu entry, a toolbar button or a key binding can do, by the
+/// action name all three share.
+void run_action(const std::string& a) {
+    if (a == "new-project" || a == "close-project") relaunch_studio({"--welcome"});
+    else if (a == "open-project") open_from_dialog(true);
+    else if (a == "open-file") open_from_dialog(false);
+    // One key both starts a session and continues a paused one, as F5 does in
+    // every debugger; the menu's Continue is the same thing spelled out.
+    else if (a == "debug") g.dbg.running() ? g.dbg.continue_() : start_debug();
+    else if (a == "gotodef") goto_definition();
+    else if (a == "findrefs") find_references();
+    else if (a == "complete") request_completion(true);
+    else if (a == "helpsearch" && g.view == "code") {
+        // From the editor, the word at the caret is the search.
+        int line = 0, col = 0;
+        std::string word;
+        if (caret_position(line, col)) {
+            word = identifier_at(line, col);
+            if (word.empty() && col > 0) word = identifier_at(line, col - 1);
+        }
+        open_help(g.help_page, "", word);
+        if (word.empty() && g.help)
+            if (Rml::Element* f = g.help->GetElementById("find")) f->Focus();
+    }
+    else if (a == "save") save();
+    else if (a == "run") build_binary(true);
+    else if (a == "build") build_binary(false);
+    else if (a == "stop") stop_all();
+    else if (a == "togglebp") {
+        int line = 0, col = 0;
+        if (caret_position(line, col)) toggle_breakpoint(line + 1);
+    }
+    else if (a == "dbgcontinue") g.dbg.continue_();
+    else if (a == "dbgstepover") g.dbg.step_over();
+    else if (a == "dbgstepin") g.dbg.step_in();
+    else if (a == "dbgstepout") g.dbg.step_out();
+    else if (a == "dbgpause") g.dbg.pause();
+    else if (a == "dbgstop") stop_debug();
+    else if (a == "undo") undo();
+    else if (a == "redo") redo();
+    else if (a == "copy") copy_selection();
+    else if (a == "paste") paste_clipboard();
+    else if (a == "delete") delete_selection();
+    else if (a == "view-designer") set_view("designer");
+    else if (a == "view-code") set_view("code");
+    else if (a == "about") show_about();
+    else if (a == "help") context_help();
+    else if (a == "helpcommands") open_help("reference-commands", "", "");
+    else if (a == "helpsearch") {
+        // The menu says "search", so the caret belongs in the
+        // search box — otherwise the entry just reopens the
+        // last page and the user has to go find the field.
+        open_help(g.help_page, "", "");
+        if (g.help)
+            if (Rml::Element* f = g.help->GetElementById("find")) f->Focus();
+    }
+    else if (a == "settings") open_settings(g.settings_cat);
+    else if (a == "exit") {
+        Backend::RequestExit();
+    } else {
+        set_status(a + " is not implemented yet");
+    }
+}
 
 /// Render a few frames and write the framebuffer, so the chrome can be
 /// inspected without a human at the window.
@@ -6812,6 +6966,10 @@ void run_script(const char* script) {
                 else if (name == "f12") key = Rml::Input::KI_F12;
                 else if (name == "z") key = Rml::Input::KI_Z;
                 else if (name == "y") key = Rml::Input::KI_Y;
+                else if (name == "o") key = Rml::Input::KI_O;
+                else if (name == "n") key = Rml::Input::KI_N;
+                else if (name == "s") key = Rml::Input::KI_S;
+                else if (name == "f5") key = Rml::Input::KI_F5;
                 else if (name == "down") key = Rml::Input::KI_DOWN;
                 else if (name == "enter") key = Rml::Input::KI_RETURN;
                 else if (name == "tab") key = Rml::Input::KI_TAB;
@@ -7981,11 +8139,16 @@ int main(int argc, char** argv) {
     // extension rather than by position, so `kiln-designer <compiler>` works
     // without inventing a flag.
     std::string path;
+    bool force_welcome = false;
     for (int i = 1; i < argc; i++) {
         const std::string arg = argv[i];
+        if (arg == "--welcome") {   // File > New/Close: the welcome screen, never the last project
+            force_welcome = true;
+            continue;
+        }
         if (arg == "-h" || arg == "--help") {
             std::fprintf(stderr,
-                         "usage: kiln-designer [project.kiln|project.kproj|dir] [path/to/kiln]\n\n"
+                         "usage: kiln-designer [--welcome] [project.kiln|project.kproj|dir] [path/to/kiln]\n\n"
                          "With no project, Studio opens its welcome screen.\n\n"
                          "Environment:\n"
                          "  KILN_DESIGNER_SCRIPT   run a scripted session headlessly\n"
@@ -8133,7 +8296,7 @@ int main(int argc, char** argv) {
     // once, then never asked again. Guarded by an existence check, because a
     // project that has been moved or deleted must land on the welcome screen
     // rather than on an error.
-    if (path.empty() && kiln::settings::boolean("startup.reopen_last") &&
+    if (path.empty() && !force_welcome && kiln::settings::boolean("startup.reopen_last") &&
         !std::getenv("KILN_DESIGNER_SCRIPT")) {
         const auto recent =
             kiln::welcome::load_recent((size_t)kiln::settings::number("startup.recent_limit"));

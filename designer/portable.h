@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 #include <sys/stat.h>
 
 #ifdef _WIN32
@@ -427,6 +428,39 @@ inline bool has_native_file_dialog() {
 #else
     return std::system("command -v zenity >/dev/null 2>&1") == 0 ||
            std::system("command -v kdialog >/dev/null 2>&1") == 0;
+#endif
+}
+
+/// Replace this process with a fresh copy of itself run with `args`.
+///
+/// Studio's state — the model, the language server, the chrome built for one
+/// file — is set up once in `main`, so opening another project starts again
+/// rather than tearing all of it down by hand. POSIX `execv` keeps the process;
+/// Windows has no true exec, so the copy is started and this one exits. Returns
+/// only on failure.
+inline void relaunch(const std::vector<std::string>& args) {
+    const std::string self = exe_path();
+    if (self.empty()) return;
+#ifdef _WIN32
+    std::string cmd = "\"" + self + "\"";
+    for (const auto& a : args) cmd += " \"" + a + "\"";
+    STARTUPINFOA si{};
+    si.cb = sizeof si;
+    PROCESS_INFORMATION pi{};
+    std::vector<char> line(cmd.begin(), cmd.end());
+    line.push_back(0);
+    if (CreateProcessA(nullptr, line.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si,
+                       &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        std::exit(0);
+    }
+#else
+    std::vector<char*> argv;
+    argv.push_back((char*)self.c_str());
+    for (const auto& a : args) argv.push_back((char*)a.c_str());
+    argv.push_back(nullptr);
+    ::execv(self.c_str(), argv.data());
 #endif
 }
 

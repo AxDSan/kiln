@@ -24,6 +24,7 @@
 #define KILN_DESIGNER_SETTINGS_H
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -34,7 +35,7 @@
 
 namespace kiln::settings {
 
-enum class Kind { Bool, Int, Choice, Text, Path };
+enum class Kind { Bool, Int, Choice, Text, Path, Shortcut };
 
 /// One setting. `min`/`max` are meaningful for `Int` only, and they are not
 /// decoration: `snap()` divides by the grid size and the editor divides by the
@@ -101,6 +102,39 @@ inline const std::vector<Row>& schema() {
 
         {"toolchain.kiln", "Toolchain", "kiln binary", Kind::Path, "", 0, 0, true,
          "Empty uses the one beside Studio.", {}},
+
+        // Keyboard shortcuts. The key is `keys.<action>`, the action being the
+        // one a menu entry fires, so a binding and its menu entry cannot name
+        // different things. A value may hold several combinations separated by
+        // spaces; an empty one unbinds the action. The dialog records a binding
+        // by pressing it, and `menus()` shows whatever is bound here.
+        {"keys.new-project", "Keyboard shortcuts", "New project", Kind::Shortcut, "Ctrl+N", 0, 0, false, "", {}},
+        {"keys.open-project", "Keyboard shortcuts", "Open project", Kind::Shortcut, "Ctrl+Shift+O", 0, 0, false, "", {}},
+        {"keys.open-file", "Keyboard shortcuts", "Open file", Kind::Shortcut, "Ctrl+O", 0, 0, false, "", {}},
+        {"keys.close-project", "Keyboard shortcuts", "Close project", Kind::Shortcut, "Ctrl+Shift+W", 0, 0, false, "", {}},
+        {"keys.save", "Keyboard shortcuts", "Save", Kind::Shortcut, "Ctrl+S", 0, 0, false, "", {}},
+        {"keys.undo", "Keyboard shortcuts", "Undo", Kind::Shortcut, "Ctrl+Z", 0, 0, false, "In the designer; the code editor keeps its own.", {}},
+        {"keys.redo", "Keyboard shortcuts", "Redo", Kind::Shortcut, "Ctrl+Shift+Z Ctrl+Y", 0, 0, false, "In the designer; the code editor keeps its own.", {}},
+        {"keys.copy", "Keyboard shortcuts", "Copy", Kind::Shortcut, "Ctrl+C", 0, 0, false, "Components, in the designer.", {}},
+        {"keys.paste", "Keyboard shortcuts", "Paste", Kind::Shortcut, "Ctrl+V", 0, 0, false, "Components, in the designer.", {}},
+        {"keys.delete", "Keyboard shortcuts", "Delete", Kind::Shortcut, "Delete", 0, 0, false, "Components, in the designer.", {}},
+        {"keys.view-designer", "Keyboard shortcuts", "Show the designer", Kind::Shortcut, "Ctrl+1", 0, 0, false, "", {}},
+        {"keys.view-code", "Keyboard shortcuts", "Show the code", Kind::Shortcut, "Ctrl+2", 0, 0, false, "", {}},
+        {"keys.run", "Keyboard shortcuts", "Run", Kind::Shortcut, "Ctrl+F5", 0, 0, false, "", {}},
+        {"keys.build", "Keyboard shortcuts", "Build binary", Kind::Shortcut, "Ctrl+B", 0, 0, false, "", {}},
+        {"keys.stop", "Keyboard shortcuts", "Stop", Kind::Shortcut, "Ctrl+Shift+F5", 0, 0, false, "", {}},
+        {"keys.debug", "Keyboard shortcuts", "Debug / continue", Kind::Shortcut, "F5", 0, 0, false, "Starts a session, or continues the one that is paused.", {}},
+        {"keys.togglebp", "Keyboard shortcuts", "Toggle breakpoint", Kind::Shortcut, "F9", 0, 0, false, "", {}},
+        {"keys.dbgstepover", "Keyboard shortcuts", "Step over", Kind::Shortcut, "F10", 0, 0, false, "", {}},
+        {"keys.dbgstepin", "Keyboard shortcuts", "Step in", Kind::Shortcut, "F11", 0, 0, false, "", {}},
+        {"keys.dbgstepout", "Keyboard shortcuts", "Step out", Kind::Shortcut, "Shift+F11", 0, 0, false, "", {}},
+        {"keys.dbgstop", "Keyboard shortcuts", "Stop debugging", Kind::Shortcut, "Shift+F5", 0, 0, false, "", {}},
+        {"keys.gotodef", "Keyboard shortcuts", "Go to definition", Kind::Shortcut, "F12", 0, 0, false, "", {}},
+        {"keys.findrefs", "Keyboard shortcuts", "Find references", Kind::Shortcut, "Shift+F12", 0, 0, false, "", {}},
+        {"keys.complete", "Keyboard shortcuts", "Complete the word", Kind::Shortcut, "Ctrl+Space", 0, 0, false, "", {}},
+        {"keys.help", "Keyboard shortcuts", "Help for the word at the caret", Kind::Shortcut, "F1", 0, 0, false, "", {}},
+        {"keys.helpsearch", "Keyboard shortcuts", "Search the handbook", Kind::Shortcut, "Shift+F1", 0, 0, false, "", {}},
+        {"keys.settings", "Keyboard shortcuts", "Settings", Kind::Shortcut, "Ctrl+Comma", 0, 0, false, "", {}},
 
         // Not shown: state, not preference. See Row::hidden.
         {"window.width", "", "", Kind::Int, "1440", 480, 16384, false, "", {}, true},
@@ -227,6 +261,103 @@ inline int number(const std::string& key) {
     return (int)std::max((long)r->min, std::min((long)r->max, n));
 }
 
+/// One key combination in its canonical spelling — `Ctrl+Alt+Shift+Key`, in that
+/// order — or "" when it is not one.
+///
+/// A key with no Ctrl or Alt must be a function key or Delete. A plain letter or
+/// a Shift+letter is typing, and binding one would make the code editor
+/// untypeable, so it is refused here rather than discovered there.
+inline std::string normalize_combo(const std::string& combo) {
+    bool ctrl = false, alt = false, shift = false;
+    std::string key;
+    size_t start = 0;
+    while (start <= combo.size()) {
+        size_t plus = combo.find('+', start);
+        // A trailing `+` names the plus key itself: `Ctrl++`.
+        if (plus == combo.size() - 1 && plus == start) plus = std::string::npos;
+        std::string part = trim(combo.substr(start, plus == std::string::npos ? std::string::npos
+                                                                            : plus - start));
+        std::string lower = part;
+        for (char& c : lower) c = (char)std::tolower((unsigned char)c);
+        if (lower == "ctrl" || lower == "control" || lower == "cmd") ctrl = true;
+        else if (lower == "alt" || lower == "option") alt = true;
+        else if (lower == "shift") shift = true;
+        else if (!part.empty()) {
+            if (!key.empty()) return "";
+            if (part.size() == 1) {
+                const char c = (char)std::toupper((unsigned char)part[0]);
+                if (c == ',') key = "Comma";
+                else if (c == '.') key = "Period";
+                else if (c == '+' || c == '=') key = "Plus";
+                else if (c == '-') key = "Minus";
+                else if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) key = std::string(1, c);
+                else return "";
+            } else if ((lower[0] == 'f') && lower.size() <= 3 &&
+                       std::all_of(lower.begin() + 1, lower.end(), ::isdigit)) {
+                const int n = std::atoi(lower.c_str() + 1);
+                if (n < 1 || n > 12) return "";
+                key = "F" + std::to_string(n);
+            } else {
+                static const char* named[] = {"Space", "Comma", "Period", "Plus", "Minus",
+                                              "Delete", "Tab", "Enter", "Escape", "Backspace"};
+                for (const char* n : named) {
+                    std::string ln = n;
+                    for (char& c : ln) c = (char)std::tolower((unsigned char)c);
+                    if (lower == ln) key = n;
+                }
+                if (key.empty()) return "";
+            }
+        }
+        if (plus == std::string::npos) break;
+        start = plus + 1;
+    }
+    if (key.empty()) return "";
+    const bool function = key[0] == 'F' && key.size() > 1 && std::isdigit((unsigned char)key[1]);
+    if (!ctrl && !alt && !function && key != "Delete") return "";
+    std::string out;
+    if (ctrl) out += "Ctrl+";
+    if (alt) out += "Alt+";
+    if (shift) out += "Shift+";
+    return out + key;
+}
+
+/// Every combination a shortcut value holds, canonical, invalid ones dropped.
+inline std::vector<std::string> combos(const std::string& value) {
+    std::vector<std::string> out;
+    size_t i = 0;
+    while (i < value.size()) {
+        while (i < value.size() && value[i] == ' ') i++;
+        size_t j = value.find(' ', i);
+        if (j == std::string::npos) j = value.size();
+        if (j > i) {
+            const std::string c = normalize_combo(value.substr(i, j - i));
+            if (!c.empty()) out.push_back(c);
+        }
+        i = j;
+    }
+    return out;
+}
+
+/// The action bound to a canonical combination, or "".
+inline std::string action_for(const std::string& combo) {
+    if (combo.empty()) return "";
+    for (const auto& r : schema()) {
+        if (r.kind != Kind::Shortcut) continue;
+        for (const auto& c : combos(text(r.key))) {
+            if (c == combo) return std::string(r.key).substr(5);
+        }
+    }
+    return "";
+}
+
+/// What a menu shows for an action: its first binding, or "".
+inline std::string shortcut_for(const std::string& action) {
+    const Row* r = find("keys." + action);
+    if (!r) return "";
+    const auto c = combos(text(r->key));
+    return c.empty() ? "" : c.front();
+}
+
 /// Record a value. A `Choice` that is not one of its choices, and an `Int`
 /// outside its range, are refused rather than stored — the caller is a text
 /// field, and a text field can produce anything.
@@ -244,6 +375,14 @@ inline bool set(const std::string& key, const std::string& value) {
         char* end = nullptr;
         const long n = std::strtol(value.c_str(), &end, 10);
         if (*end || n < r->min || n > r->max) return false;
+    }
+    if (r->kind == Kind::Shortcut) {
+        // Stored canonical, so the file and the dialog say the same thing.
+        std::string joined;
+        for (const auto& c : combos(value)) joined += (joined.empty() ? "" : " ") + c;
+        if (joined.empty() && !trim(value).empty()) return false;
+        store().values[key] = joined;
+        return true;
     }
     store().values[key] = value;
     return true;
