@@ -223,6 +223,23 @@ clang and checks stdout):
 - **`Any` and `First`** over a `List<T>`, taking a predicate lambda, beside
   `Where`/`Select`. `First` with no match stops the program by name rather than
   answering with a zero.
+- **Kits reach Kiln 2 whole (Phase 4)**: `using Kiln.SplitDemo;` brings in a
+  kit's `.kdecl` bundle — its C records as `[CLayout]` records, its constants
+  and its foreign functions — through the same converter `kiln migrate` uses,
+  read by the one `.kdecl` reader for the machine being built for. The Win32
+  kit's 2,600 lines cross-build for x64 and x86; `CallConv.System` now emits
+  stdcall on 32-bit Windows, which it silently had not.
+- **A program spans files**: `using Accounts;` names `accounts.kiln` beside
+  the entry file, units name units, and each file's libraries are linked.
+  `kiln migrate` keeps a 1.x unit a unit.
+- **The login server runs as Kiln 2 (Phase 10's dry run)**: GBO's 1.x login
+  server, migrated by `kiln migrate` with no hand edits, builds and answers a
+  keystream client byte-for-byte as the 1.x build does — login reply, realm
+  list, the 72-byte `0x2711` handoff held past 700 ms, refusals — and its
+  27 StringShift vectors pass. What it took is in the commits of 2026-09-16:
+  units, inline `byte[N]` in migrated c-records, typed empty dictionaries, and
+  a `T?` settling into a `T` at every store. The acceptance itself — ten logins
+  in a row from a fresh launch of the real client — needs a person at the client.
 - **Written type arguments**: `Make<int>()`, `P.Two<string>(x)` — for a generic
   method with nothing to infer from, and to set the width a literal argument
   lowers to (`Pick<long>(5, 6)`). Told from `a < b` by C#'s rule: a complete
@@ -284,16 +301,13 @@ clang and checks stdout):
    pattern is not.
 2. A handler wired at run time cannot yet take an event's arguments (a grid's
    row) — `kn_ui_on_env` refuses those with 2 rather than calling wrongly.
-3. The `.kdecl` declaration bundles (2,653 lines across `kits/`) are still
-   Kiln 1.x: Kiln 2 reaches a kit's *commands*, but its declared structs and
-   constants do not cross yet. This is Phase 4's remaining exit.
-4. Studio's code pane highlights K2 from its own line tokenizer rather than
+3. Studio's code pane highlights K2 from its own line tokenizer rather than
    from the language server's semantic tokens — the shapes are right, but the
    toolchain is not the one deciding them.
-5. `List<T>` is K2's own structure, converted to and from a runtime array at the
+4. `List<T>` is K2's own structure, converted to and from a runtime array at the
    command boundary. Re-platforming it onto `Kiln_Array` buys nothing now that
    allocation is collected.
-6. One `k2` crate holds syntax + lowering; it splits into `k2-syntax`/
+5. One `k2` crate holds syntax + lowering; it splits into `k2-syntax`/
    `k2-sema`/`k2-lower` as `k2-sema` grows.
 
 ## Milestone: the RAD half runs

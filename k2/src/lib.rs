@@ -185,6 +185,11 @@ pub fn parse_units(entry: &std::path::Path, entry_src: &str) -> Result<Units, St
     Ok(Units { program, files })
 }
 
+/// A kit's `.kdecl` bundle as Kiln 2 declarations — see `migrate::declarations`.
+pub fn declarations(m: &kiln_ir::Module) -> ast::Program {
+    migrate::declarations(m)
+}
+
 /// Lower an already-parsed program — `parse_units`' — as `compile_opts` does.
 pub fn compile_program_opts(
     program: &ast::Program,

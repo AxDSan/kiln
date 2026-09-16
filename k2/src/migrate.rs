@@ -341,6 +341,21 @@ fn initial_value(v: &ir::GlobalVar) -> Expr {
 
 // ─── module ─────────────────────────────────────────────────────────────────
 
+/// A kit's declaration bundle (`.kdecl`, read by the CLI as a 1.x module) as the
+/// Kiln 2 declarations a program using the kit can name: each `record ... is c`
+/// a `[CLayout]` record, each `const` a constant and each `dll` a `[Dll]`
+/// extern on a static class named for the kit. One converter, so a kit reads
+/// the same way to a program and to `kiln migrate`.
+pub fn declarations(m: &ir::Module) -> Program {
+    TYPES.with(|t| {
+        let mut t = t.borrow_mut();
+        t.reg = ir::Registry::core();
+        t.globals.clear();
+        t.subs.clear();
+    });
+    module(m)
+}
+
 fn module(m: &ir::Module) -> Program {
     let mut items = Vec::new();
     let leading = vec![format!(
@@ -631,9 +646,25 @@ fn dll(d: &ir::DllDecl) -> Method {
             args: vec![lit_str(&d.library)],
             // The C symbol is the original name unless it was renamed; the
             // method takes Kiln 2's casing, so the entry has to be said.
-            named: match d.symbol.clone().or_else(|| (pascal(&d.name) != d.name).then(|| d.name.clone())) {
-                Some(s) => vec![("Entry".into(), lit_str(&s))],
-                None => Vec::new(),
+            named: {
+                let mut named = match d.symbol.clone().or_else(|| (pascal(&d.name) != d.name).then(|| d.name.clone())) {
+                    Some(s) => vec![("Entry".into(), lit_str(&s))],
+                    None => Vec::new(),
+                };
+                // `system` and `stdcall` decide who cleans the stack on 32-bit
+                // Windows; dropping them corrupted every Win32 call there.
+                let conv = match d.conv {
+                    Some(ir::CallConv::Stdcall) => Some("StdCall"),
+                    Some(ir::CallConv::System) => Some("System"),
+                    _ => None,
+                };
+                if let Some(c) = conv {
+                    named.push((
+                        "Convention".into(),
+                        e(ExprKind::Member(Box::new(ident("CallConv")), c.into())),
+                    ));
+                }
+                named
             },
         }],
         is_extern: true,

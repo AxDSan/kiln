@@ -179,3 +179,71 @@ fn a_kiln_2_program_cross_builds_for_windows() {
         assert_eq!(got, expected, "the {arch} Windows build printed something else");
     }
 }
+
+/// Build `src` (a Kiln 2 program) from the repository root, where `kits/`
+/// resolves as the project's kit directory.
+fn kiln_from_repo(src: &Path, out: &Path, extra: &[&str]) {
+    let o = Command::new(env!("CARGO_BIN_EXE_kiln"))
+        .args(["build", src.to_str().unwrap(), "-o", out.to_str().unwrap()])
+        .args(extra)
+        .current_dir(repo())
+        .output()
+        .expect("kiln");
+    assert!(o.status.success(), "kiln build failed:\n{}", String::from_utf8_lossy(&o.stderr));
+}
+
+/// Phase 4: a kit's `.kdecl` bundle reaches a Kiln 2 program — its constants,
+/// its foreign functions, and its C record, which a `dll` taking it receives by
+/// address. `split_demo` spreads those over two files, and `using
+/// Kiln.SplitDemo;` names it.
+#[test]
+fn a_kiln_2_program_uses_a_kits_declarations() {
+    let dir = scratch("kdecl");
+    let lib = dir.join("libdemoffi.so");
+    let status = Command::new("cc")
+        .args(["-shared", "-fPIC", "-o", lib.to_str().unwrap()])
+        .arg(repo().join("kits/demoffi/demoffi.c"))
+        .status()
+        .expect("cc");
+    assert!(status.success());
+    let src = dir.join("kit.kiln");
+    std::fs::write(
+        &src,
+        "namespace KitUse;\nusing Kiln.SplitDemo;\n\npublic static class P\n{\n    public static void Main()\n    {\n        var p = new SplitPoint(1, 2);\n        SplitMove(p, 10, 20);\n        Console.WriteLine($\"{SplitAnswer} {SplitTag} {SplitAdd(2, 3)} {p.X} {p.Y} {SplitGreeting()}\");\n    }\n}\n",
+    )
+    .unwrap();
+    let exe = dir.join("kit");
+    kiln_from_repo(&src, &exe, &[]);
+    let got = run(Command::new(&exe).env("LD_LIBRARY_PATH", &dir));
+    assert_eq!(got, "42 split_demo 5 11 22 demoffi says hello\n");
+}
+
+/// The Win32 kit's calls are declared `system`: stdcall on 32-bit Windows, where
+/// the callee pops its arguments. `CallConv.System` was emitted as cdecl, so the
+/// stack drifted twenty bytes per `SetRect` and a loop of them wrote over its
+/// own counters. x86 must print what x86_64 prints.
+#[test]
+fn a_win32_system_call_is_stdcall_on_x86() {
+    if !on_path("x86_64-w64-mingw32-gcc") || !on_path("i686-w64-mingw32-gcc") || !on_path("wine") {
+        eprintln!("mingw or wine is not installed; skipping the Win32 convention check");
+        return;
+    }
+    let dir = scratch("win32conv");
+    let src = dir.join("win.kiln");
+    std::fs::write(
+        &src,
+        "namespace WinUse;\nusing Kiln.Win;\n\npublic static class P\n{\n    public static void Main()\n    {\n        var r = new RECT();\n        int sum = 0;\n        int i = 1;\n        while (i <= 5000)\n        {\n            SetRect(r, i, 2, 3, 4);\n            sum = sum + r.Left;\n            i = i + 1;\n        }\n        Console.WriteLine($\"sum {sum} i {i}\");\n    }\n}\n",
+    )
+    .unwrap();
+    let prefix = scratch("win32conv-prefix");
+    for arch in ["x86_64", "x86"] {
+        let exe = dir.join(format!("win-{arch}.exe"));
+        kiln_from_repo(&src, &exe, &["--os", "windows", "--arch", arch]);
+        let got = run(Command::new("wine")
+            .arg(&exe)
+            .current_dir(&dir)
+            .env("WINEDEBUG", "-all")
+            .env("WINEPREFIX", &prefix));
+        assert_eq!(got, "sum 12502500 i 5001\n", "the {arch} build");
+    }
+}

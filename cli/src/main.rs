@@ -483,7 +483,23 @@ fn k2_uses(src: &str) -> Vec<String> {
         };
         let path = rest.trim_end_matches(';').trim();
         if let Some(lib) = path.strip_prefix("Kiln.") {
-            let lib = lib.split('.').next().unwrap_or(lib).to_lowercase();
+            let first = lib.split('.').next().unwrap_or(lib);
+            // `Kiln.SplitDemo` is the `split_demo` kit when one exists by that
+            // name; otherwise the name lowercased, as `Kiln.Db` is `db`.
+            let mut snake = String::new();
+            for (i, c) in first.chars().enumerate() {
+                if c.is_uppercase() && i > 0 {
+                    snake.push('_');
+                }
+                snake.extend(c.to_lowercase());
+            }
+            let lib = if snake.contains('_')
+                && find_repo_root().is_some_and(|r| kit::resolve(&r, &snake).is_some())
+            {
+                snake
+            } else {
+                first.to_lowercase()
+            };
             if !lib.is_empty() && !out.contains(&lib) {
                 out.push(lib);
             }
@@ -833,7 +849,7 @@ fn build_k2_for(
     // `using Kiln.File;` asks for the `file` library. The registry it builds is
     // what makes `File.ReadText(p)` resolve to the `file_read_text` command.
     // The program and the unit files its `using`s name beside it.
-    let units = match kiln_k2::parse_units(Path::new(&input), &src) {
+    let mut units = match kiln_k2::parse_units(Path::new(&input), &src) {
         Ok(u) => u,
         Err(e) => {
             eprintln!("kiln k2: {e}");
@@ -848,7 +864,26 @@ fn build_k2_for(
             }
         }
     }
+    // A kit's declaration bundle — its C records, constants and foreign
+    // functions — joins the program as Kiln 2 declarations, read by the one
+    // `.kdecl` reader for the machine being built for.
+    if let Some(root) = find_repo_root() {
+        for u in &uses {
+            let Some(k) = kit::resolve(&root, u) else { continue };
+            match libload::read_decls(&k.dir, &k.name, goal.arch) {
+                Ok(Some(m)) => units.program.items.extend(kiln_k2::declarations(&m).items),
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("kiln k2: kit `{u}`: {e}");
+                    return 1;
+                }
+            }
+        }
+    }
+    // A kit outside `libs/` is found through the overlay root, as a 1.x build
+    // finds it.
     let registry = find_repo_root().and_then(|root| {
+        let root = kit::overlay_root(&root, &uses).ok()?;
         libload::load_metadata(&root, &uses, goal.arch)
             .ok()
             .map(|p| p.registry)
@@ -944,6 +979,13 @@ fn build_k2_for(
         if is_gui && !uses.iter().any(|u| u == "ui") {
             uses.push("ui".to_string());
         }
+        let root = match kit::overlay_root(&root, &uses) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("kiln k2: {e}");
+                return 1;
+            }
+        };
         let plan = if goal.os == Os::host() {
             libload::load(&root, &uses)
         } else {

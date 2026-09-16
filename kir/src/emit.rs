@@ -331,7 +331,7 @@ impl<'a, 'b> FnEmit<'a, 'b> {
     fn run(&mut self) -> String {
         // Signature.
         let cc = match self.f.conv {
-            CallConv::Stdcall if self.e.m.target.windows && self.e.m.target.ptr_bits == 32 => {
+            CallConv::Stdcall | CallConv::System if self.e.m.target.windows && self.e.m.target.ptr_bits == 32 => {
                 "x86_stdcallcc "
             }
             _ => "",
@@ -1311,7 +1311,7 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                     })
                     .collect();
                 let cc = match conv {
-                    CallConv::Stdcall if self.e.m.target.windows && self.e.m.target.ptr_bits == 32 => {
+                    CallConv::Stdcall | CallConv::System if self.e.m.target.windows && self.e.m.target.ptr_bits == 32 => {
                         "x86_stdcallcc "
                     }
                     _ => "",
@@ -1389,7 +1389,7 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                 )
                 .unwrap();
                 let cc = match conv {
-                    CallConv::Stdcall if self.e.m.target.windows && self.e.m.target.ptr_bits == 32 => {
+                    CallConv::Stdcall | CallConv::System if self.e.m.target.windows && self.e.m.target.ptr_bits == 32 => {
                         "x86_stdcallcc "
                     }
                     _ => "",
@@ -1457,7 +1457,7 @@ impl<'a, 'b> FnEmit<'a, 'b> {
                     .externs
                     .insert(format!("declare {ret_ll} @{symbol}({decl_params})"));
                 let cc = match conv {
-                    CallConv::Stdcall
+                    CallConv::Stdcall | CallConv::System
                         if self.e.m.target.windows && self.e.m.target.ptr_bits == 32 =>
                     {
                         "x86_stdcallcc "
