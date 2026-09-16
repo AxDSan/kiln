@@ -251,6 +251,71 @@ A constraint is checked when the type argument is chosen: `where T : INamed`,
 `where T : class` and `where T : new()` are all enforced, and a type argument
 that does not satisfy one is a compile error naming both.
 
+A type argument is usually inferred from the call's arguments. When there is no
+argument to infer it from, write it:
+
+```k2
+namespace TypeArgs;
+
+public record Point(int X, int Y);
+
+public static class P
+{
+    public static T Make<T>() where T : new() => new T();
+
+    public static void Main()
+    {
+        var xs = Make<List<int>>();
+        xs.Add(3);
+        var p = Make<Point>();
+        long big = Max<long>(5, 6);
+        Console.WriteLine($"{xs.Count} {p.X} {big}");
+    }
+
+    public static T Max<T>(T a, T b) => a >= b ? a : b;
+}
+```
+
+A written argument also decides what a literal becomes: `Max<long>(5, 6)`
+compares two `long`s.
+
+## A program in more than one file
+
+A `using` that names a file beside the program brings that file in. `using
+Accounts;` in `main.kiln` reads `accounts.kiln` from the same directory, and
+that file can name others the same way:
+
+```
+// main.kiln
+namespace App;
+using Accounts;
+
+public static class Program
+{
+    public static void Main()
+    {
+        Console.WriteLine($"{Accounts.Total(new Account("grace", 2))}");
+    }
+}
+```
+
+```
+// accounts.kiln
+namespace Accounts;
+
+public record Account(string Name, int Logins);
+
+public static class Accounts
+{
+    public static int Total(Account a) => a.Logins + 40;
+}
+```
+
+`kiln build main.kiln` builds both into one binary. A `using` that names no file
+— `using Kiln.Text;` — is a library, as before. The debugger stops in the file
+a function is written in, so stepping into `Accounts.Total` shows
+`accounts.kiln`.
+
 ## When something fails
 
 There are no exceptions. A failure is a value: `Result<T>` for an operation
@@ -353,6 +418,16 @@ public partial form MainWindow
 public partial form MainWindow { int n; }
 ```
 
+A handler wired at run time can take the event's values. A grid's `Select` and
+`Activate` pass the row, to a lambda or to a method:
+
+```
+table.Select += (int row) => { status.Text = $"row {row}"; };
+table.Activate += OnOpen;   // void OnOpen(int row) { ... }
+```
+
+`-=` with the same method unwires it again.
+
 Studio edits the designer's half through `kiln edit`, never as text, so your
 comments and your code survive a change made in the designer.
 
@@ -387,7 +462,27 @@ public static class P
 
 `[Packed]` lays a record out with no padding and gives it `Size`, `Read` and
 `Write` — an exact wire format. `[Dll]` calls a C function directly; add
-`Convention = CallConv.StdCall` for Win32.
+`Convention = CallConv.StdCall` for a Win32 function, or `CallConv.System`, which
+is stdcall on 32-bit Windows and the platform's own convention everywhere else.
+
+A kit's declarations reach a Kiln 2 program by name. `using Kiln.Win;` brings in
+the `win` kit's records, constants and functions, declared once in its `.kdecl`
+bundle:
+
+```
+namespace WinUse;
+using Kiln.Win;
+
+public static class P
+{
+    public static void Main()
+    {
+        var r = new RECT();
+        SetRect(r, 1, 2, 3, 4);
+        Console.WriteLine($"{r.Left}");
+    }
+}
+```
 
 ## Talking to a database
 
@@ -499,8 +594,10 @@ Kiln 2 is not finished, and it is worth knowing where the edges are:
 
 - It builds for the machine it runs on and cross-builds for Windows, 64-bit and
   32-bit (`--os windows --arch x86`).
-- Studio opens, edits and saves a Kiln 2 form; its code pane highlights Kiln 2
-  from its own tokenizer rather than from the language server.
+- Studio opens, edits and saves a Kiln 2 form, and paints its code from the
+  language server's semantic tokens.
+- `docs-site/src/limitations.md` lists what the language refuses today: a
+  declaration with two names, a call through an index, a form in a unit file.
 - `kiln fmt` puts a comment written at the end of a line above the next
   construct, and normalises blank lines between constructs rather than keeping
   them.
