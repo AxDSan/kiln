@@ -259,6 +259,10 @@ sub main
 end
 "#;
     if let Err(stderr) = build("props", src) {
+        if stderr.contains("not vendored") {
+            eprintln!("the UI stack is not vendored; skipping");
+            return;
+        }
         panic!("a property read beside a method call failed to build:\n{stderr}");
     }
 }

@@ -673,8 +673,9 @@ public static class P
 }
 
 /// Build a K2 form program and run it headless, clicking the given widget
-/// handles in order. Returns stdout.
-fn run_form_clicks(name: &str, src: &str, clicks: &str) -> String {
+/// handles in order. Returns stdout, or `None` on a machine without the vendored
+/// UI stack (a fresh checkout, or CI), where there is nothing to run.
+fn run_form_clicks(name: &str, src: &str, clicks: &str) -> Option<String> {
     let path = tmp(&format!("{name}.kiln"));
     let exe = tmp(name);
     std::fs::write(&path, src).unwrap();
@@ -682,6 +683,10 @@ fn run_form_clicks(name: &str, src: &str, clicks: &str) -> String {
         .args(["k2", path.to_str().unwrap(), "--runtime", "-o", exe.to_str().unwrap()])
         .output()
         .expect("kiln k2");
+    if String::from_utf8_lossy(&out.stderr).contains("not vendored") {
+        eprintln!("the UI stack is not vendored; skipping {name}");
+        return None;
+    }
     assert!(
         out.status.success(),
         "build failed:\n{}",
@@ -702,11 +707,13 @@ fn run_form_clicks(name: &str, src: &str, clicks: &str) -> String {
         run.status.code(),
         String::from_utf8_lossy(&run.stdout)
     );
-    String::from_utf8_lossy(&run.stdout)
-        .lines()
-        .filter(|l| !l.starts_with("Loaded font") && !l.contains("a11y"))
-        .collect::<Vec<_>>()
-        .join("\n")
+    Some(
+        String::from_utf8_lossy(&run.stdout)
+            .lines()
+            .filter(|l| !l.starts_with("Loaded font") && !l.contains("a11y"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }
 
 #[test]
@@ -738,7 +745,8 @@ public partial form MainWindow
 }
 ";
     // Handles: the form is 1, `go` is 2.
-    assert_eq!(run_form_clicks("formdll", src, "2"), "true");
+    let Some(ran) = run_form_clicks("formdll", src, "2") else { return };
+    assert_eq!(ran, "true");
 }
 
 #[test]
@@ -754,7 +762,7 @@ fn a_handler_wired_at_run_time_keeps_its_environment_through_a_collection() {
     // on the stack — which is why the churn is its own click.
     let src = ROWS_FIXTURE;
     // Handles: form 1, shown 2, r1 3, r2 4, r3 5, wire 6, churn 7.
-    let out = run_form_clicks("rowsgc", src, "6;7;5;3;4");
+    let Some(out) = run_form_clicks("rowsgc", src, "6;7;5;3;4") else { return };
     let lines: Vec<&str> = out.lines().collect();
     assert!(lines[0].starts_with("live before "), "{out}");
     let freed: i64 = lines[1]
@@ -802,8 +810,9 @@ public partial form MainWindow
 ";
     // Handles: form 1, shown 2, go 3, wire 4, unwire 5.
     // Wire, click go, unwire, click go.
+    let Some(ran) = run_form_clicks("unwire", src, "4;3;5;3") else { return };
     assert_eq!(
-        run_form_clicks("unwire", src, "4;3;5;3"),
+        ran,
         "lambda 7\nmethod\nlambda 7"
     );
 }
@@ -906,7 +915,8 @@ public partial form MainWindow
 }
 ";
     // Handles: form 1, hit 2.
-    assert_eq!(run_form_clicks("formdefaults", src, "2"), "7 points");
+    let Some(ran) = run_form_clicks("formdefaults", src, "2") else { return };
+    assert_eq!(ran, "7 points");
 }
 
 #[test]
@@ -1002,7 +1012,8 @@ public partial form MainWindow
 }
 ";
     // Handles: form 1, note 2, hit 3.
-    assert_eq!(run_form_clicks("propplus", src, "3;3"), "ab\nabb");
+    let Some(ran) = run_form_clicks("propplus", src, "3;3") else { return };
+    assert_eq!(ran, "ab\nabb");
 }
 
 #[test]
@@ -1145,8 +1156,9 @@ fn migrate_keeps_units_inline_arrays_and_dictionary_types() {
 #[test]
 fn a_handler_wired_at_run_time_takes_the_grid_row() {
     let src = include_str!("fixtures/k2_grid_env.kiln");
+    let Some(ran) = run_form_clicks("gridenv", src, "3;2.1.2;4;2.1.3") else { return };
     assert_eq!(
-        run_form_clicks("gridenv", src, "3;2.1.2;4;2.1.3"),
+        ran,
         "lambda select 2\nmethod select Linus\nlambda select 3"
     );
 }

@@ -293,9 +293,16 @@ end
 /// would happen.
 #[test]
 fn without_a_client_the_commands_report_unsupported() {
-    let have_sqlite = std::path::Path::new("/usr/include/sqlite3.h").exists();
-    let have_mysql = std::path::Path::new("/usr/include/mysql/mysql.h").exists();
-    if have_sqlite && have_mysql {
+    // The same probe the library's manifest uses: pkg-config, not a header path
+    // (Ubuntu's MariaDB client keeps its header under `mariadb/`, not `mysql/`).
+    let has = |pkg: &str| {
+        Command::new("pkg-config")
+            .args(["--exists", pkg])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    };
+    if has("sqlite3") && has("libmariadb") {
         eprintln!("skipped: this machine has both clients, so the unsupported path is unreachable");
         return;
     }
