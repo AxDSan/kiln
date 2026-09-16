@@ -241,10 +241,9 @@ footer a:hover { color: #fff; }
     <img class="mark" src="assets/kiln-hero-mark.png" alt="Kiln">
     <h1>Draw an app. Wire an event.<br> Ship a native binary.</h1>
     <p class="sub">
-      An open implementation of <strong>Easy Programming Language</strong> (易语言)
-      — a RAD environment for desktop software. Lay out a window, wire a button
-      to a subroutine, press Run. What comes out is an ordinary native
-      executable.
+      A <strong>C#-shaped language</strong> and form designer that compiles to one
+      native binary — no runtime, no .NET, no metadata to reverse. Lay out a
+      window, wire a button to a method, press Run.
     </p>
     <div class="buttons">
       <a class="btn btn-primary" href="docs/quick-start.html">Get started</a>
@@ -265,38 +264,46 @@ footer a:hover { color: #fff; }
     <div class="pair">
       <div class="panel">
         <div class="head"><span class="dot"></span> counter.kiln</div>
-<pre><span class="k">module</span> counter
-<span class="k">use</span> ui
+<pre><span class="k">namespace</span> Counter;
 
-<span class="k">var</span> count: <span class="k">int</span> = <span class="n">0</span>
+<span class="c">// the designer's half — Studio owns this one</span>
+<span class="k">public</span> <span class="k">partial</span> <span class="k">form</span> MainWindow
+{
+    Title = <span class="s">"Kiln — counter"</span>;
+    Width = <span class="n">420</span>;
+    Height = <span class="n">240</span>;
+    BackgroundColor = <span class="s">"#1e2233"</span>;
 
-<span class="k">form</span> main_window
-  title  = <span class="s">"Kiln — counter"</span>
-  width  = <span class="n">420</span>
-  height = <span class="n">240</span>
-  background_color = <span class="s">"#1e2233"</span>
+    Label count_label
+    {
+        Text = <span class="s">"0"</span>;
+        Left = <span class="n">40</span>;
+        Top = <span class="n">40</span>;
+        Color = <span class="s">"#ffffff"</span>;
+    }
 
-  <span class="k">label</span> count_label
-    text  = <span class="s">"0"</span>
-    left  = <span class="n">40</span>
-    top   = <span class="n">40</span>
-    color = <span class="s">"#ffffff"</span>
-  <span class="k">end</span>
+    Button add_button
+    {
+        Text = <span class="s">"Add one"</span>;
+        Left = <span class="n">40</span>;
+        Top = <span class="n">110</span>;
+        Width = <span class="n">160</span>;
+        Height = <span class="n">44</span>;
+        Click += OnAdd;
+    }
+}
 
-  <span class="k">button</span> add_button
-    text   = <span class="s">"Add one"</span>
-    left   = <span class="n">40</span>
-    top    = <span class="n">110</span>
-    width  = <span class="n">160</span>
-    height = <span class="n">44</span>
-    <span class="k">on</span> click: on_add
-  <span class="k">end</span>
-<span class="k">end</span>
+<span class="c">// your half, in the same file</span>
+<span class="k">public</span> <span class="k">partial</span> <span class="k">form</span> MainWindow
+{
+    <span class="k">int</span> count;
 
-<span class="k">sub</span> on_add
-  <span class="k">increment</span> count
-  count_label.text = <span class="s">"{count}"</span>
-<span class="k">end</span></pre>
+    <span class="k">void</span> OnAdd()
+    {
+        count = count + <span class="n">1</span>;
+        count_label.Text = <span class="s">$"{count}"</span>;
+    }
+}</pre>
       </div>
       <div class="panel">
         <div class="head"><span class="dot live"></span> the window it builds</div>
@@ -358,12 +365,10 @@ footer a:hover { color: #fff; }
         start-up and there is no interpreter inside.</p>
       </div>
       <div class="item">
-        <h3>The EPL model, opened up</h3>
-        <p>Easy Programming Language showed that drawing an application and
-        compiling it to a real executable is the right way to build desktop
-        software. Kiln implements that model as open source, in English, on an
-        inspectable toolchain — a fresh implementation, not a clone: it does
-        not run existing EPL programs.</p>
+        <h3>C#-shaped, and native</h3>
+        <p>Classes, records, interfaces, generics, lambdas and <code>Result&lt;T&gt;</code>
+        in place of exceptions — lowering to LLVM and one executable, with no
+        runtime, no .NET and no metadata in the binary to reverse.</p>
       </div>
       <div class="item">
         <h3>One project, every artifact</h3>
@@ -395,19 +400,16 @@ footer a:hover { color: #fff; }
         Memory is reclaimed while a program runs, not at exit, so a server or a
         window that stays open for days settles at what it is actually holding.
       </p>
-      <p><a href="docs/language.html">Read the language guide →</a> · <a href="docs/quick-start.html">Quick start →</a></p>
+      <p><a href="docs/kiln-2.html">Read the language guide →</a> · <a href="docs/quick-start.html">Quick start →</a></p>
     </div>
     <div class="panel">
       <div class="head"><span class="dot"></span> hello.kiln</div>
-<pre><span class="k">module</span> hello
-<span class="k">target</span> console
+<pre><span class="k">namespace</span> Hello;
 
-<span class="k">sub</span> main
-  <span class="k">call</span> print_text(<span class="s">"Hello from Kiln."</span>)
+Console.WriteLine(<span class="s">"Hello from Kiln."</span>);
 
-  <span class="k">let</span> answer: <span class="k">int</span> = <span class="n">6</span> * <span class="n">7</span>
-  <span class="k">call</span> print_text(<span class="s">"six times seven is {answer}"</span>)
-<span class="k">end</span></pre>
+<span class="k">let</span> answer = <span class="n">6</span> * <span class="n">7</span>;
+Console.WriteLine(<span class="s">$"six times seven is {answer}"</span>);</pre>
     </div>
   </div>
 </section>
@@ -418,9 +420,10 @@ footer a:hover { color: #fff; }
       <p class="eyebrow">Build targets</p>
       <h2>Build it as anything</h2>
       <p class="lede">
-        Declare the target in the module, or override it for one build without
-        touching the source. Libraries export their subroutines under their own
-        names, so anything that can call C can link against them.
+        Name the target in the project file, or override it for one build without
+        touching anything. A library exports the public static methods of a
+        public static class under their own names, so anything that can call C
+        can link against them.
       </p>
       <p><a href="docs/build-targets.html">Read about build targets →</a></p>
     </div>

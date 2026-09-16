@@ -40,15 +40,22 @@ done
 
 # The landing page is hand-written HTML rather than Markdown, and its sample is
 # the first Kiln most visitors read. Its <pre> block is highlighted with
-# spans, so strip those and undo the entity escaping before compiling it.
+# spans, so strip those and undo the entity escaping before compiling it. The
+# first line says which language the block is in — `module` for Kiln 1.x,
+# `namespace` for Kiln 2 — and it is compiled as that one.
 python3 - docs-site/landing/index.html "$WORK" <<'PY'
 import html, re, sys
 page, work = sys.argv[1], sys.argv[2]
 text = open(page, encoding='utf-8').read()
 for i, m in enumerate(re.finditer(r'<pre>(.*?)</pre>', text, re.S)):
     body = html.unescape(re.sub(r'</?span[^>]*>', '', m.group(1)))
+    ext = None
     if re.search(r'^module\s+\w+', body, re.M):
-        open(f'{work}/landing_{i}.kiln', 'w', encoding='utf-8').write(body + '\n')
+        ext = 'kiln'
+    elif re.search(r'^namespace\s+\w+', body, re.M):
+        ext = 'k2'
+    if ext:
+        open(f'{work}/landing_{i}.{ext}', 'w', encoding='utf-8').write(body + '\n')
 PY
 
 # Kiln 2 samples are tagged ```k2 and built with `kiln k2`. They are whole

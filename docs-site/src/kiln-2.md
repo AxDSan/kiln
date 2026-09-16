@@ -495,10 +495,14 @@ locals by name, and shows a record as its fields.
 
 Kiln 2 is not finished, and it is worth knowing where the edges are:
 
-- It builds for the machine it runs on. Cross-compiling (`--os windows`) is still 1.x's.
+- It builds for the machine it runs on and cross-builds for Windows, 64-bit and
+  32-bit (`--os windows --arch x86`).
 - Non-interface generic constraints (`where T : class`, `new()`) parse and are
   ignored.
-- The designer in Studio still edits 1.x; `kiln edit` is the interface it will
-  use.
+- Studio opens, edits and saves a Kiln 2 form; its code pane highlights Kiln 2
+  from its own tokenizer rather than from the language server.
+- `kiln fmt` puts a comment written at the end of a line above the next
+  construct, and normalises blank lines between constructs rather than keeping
+  them.
 
 `design/k2/status.md` in the repository tracks this precisely.
