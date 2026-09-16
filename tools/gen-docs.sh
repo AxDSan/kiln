@@ -55,7 +55,11 @@ emit_table() {
     done
 }
 
-# One entry per documented command: what it does, and a program that calls it.
+# The library name as the namespace segment a `using` names: `db` -> `Db`.
+lib_pascal() { printf '%s' "${1^}"; }
+
+# One entry per documented command: what it does, and a Kiln 2 program that
+# calls it.
 #
 # The example is emitted as a WHOLE program, not a fragment. Two reasons, and
 # both are the point of having examples at all: `tools/check-docs.sh` compiles
@@ -81,23 +85,23 @@ emit_entries() {
         # No example is better than a wrong one, and the heading still gives
         # the reader the signature and the sentence.
         if grep -q "^example: $name " "$listing"; then
-            # Most examples are statements, and are wrapped in the module and
-            # `main` a reader would have to write around them anyway. An
-            # example that opens with `module` is a whole program already —
-            # which is the only way to show a command whose argument needs a
-            # declaration, a `record` or a component, since neither can be
-            # written inside a subroutine. Such an example carries its own
-            # `use`, because the wrapper is not there to add one.
-            if [ "$(sed -n "s/^example: $name //p" "$listing" | head -1 | cut -c1-7)" = "module " ]; then
-                printf '\n```kiln\n'
+            # Kiln 2. Most examples are statements, and are wrapped in the
+            # namespace, the `using` and the entry point a reader would have to
+            # write around them anyway. An example that opens with `namespace`
+            # is a whole program already — which is the only way to show a
+            # command whose argument needs a declaration, since one cannot be
+            # written inside a method. Such an example carries its own `using`,
+            # because the wrapper is not there to add one.
+            if [ "$(sed -n "s/^example: $name //p" "$listing" | head -1 | cut -c1-10)" = "namespace " ]; then
+                printf '\n```k2\n'
                 sed -n "s/^example: $name //p" "$listing"
                 printf '```\n'
             else
-                printf '\n```kiln\nmodule example\n'
-                [ -n "$lib" ] && printf 'use %s\n' "$lib"
-                printf '\nsub main\n'
-                sed -n "s/^example: $name //p" "$listing" | sed 's/^/  /'
-                printf 'end\n```\n'
+                printf '\n```k2\nnamespace Example;\n'
+                [ -n "$lib" ] && printf '\nusing Kiln.%s;\n' "$(lib_pascal "$lib")"
+                printf '\npublic static class P\n{\n    public static void Main()\n    {\n'
+                sed -n "s/^example: $name //p" "$listing" | sed 's/^/        /'
+                printf '    }\n}\n```\n'
             fi
         fi
     done < <(sed -n 's/^doc: //p' "$listing" | cut -d' ' -f1 | sort -u)
@@ -109,30 +113,36 @@ emit_entries() {
     cat <<'MD'
 # Commands
 
-Call one as a statement with `call`, or use its result in an expression when it
-returns a value.
+Call one as a statement, or use its result in an expression.
 
-```
-call print_text("hello")            # as a statement
-let n: int = max_int(3, 9)          # as an expression
+```k2
+Console.WriteLine("hello");         // a command as a statement
+var n = MaxInt(3, 9);               // and its result in an expression
 ```
 
 The core commands are always available. The rest come from a support library,
-which a module asks for by name:
+which a program asks for with `using`:
 
-```
-module report
-use file
+```k2
+namespace Report;
 
-sub main
-  call print_text(file_read_text("notes.txt"))
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(FileReadText("notes.txt"));
+    }
+}
 ```
 
 A command that can fail returns a sentinel — `0` for a handle or a position,
 `-1` for a count or size, `""` for text, `false` for a yes/no — and leaves the
-reason in the error slot, which `last_error_code()` and `last_error_text()`
-read. The [Language guide](./language.md#when-a-command-fails) has the rules.
+reason in the error slot, which `LastErrorCode()` and `LastErrorText()` read.
+Where a Kiln 2 program wants that failure as a value it takes one:
+`FileReadText(p) ?? "(none)"`, or `FileReadText(p)?` to hand it back to the
+caller. The [Kiln 2 guide](./kiln-2.md#when-something-fails) has the rules.
 
 ## Core
 
@@ -146,7 +156,14 @@ MD
     emit_entries /tmp/kiln-core-raw.$$ "" /tmp/kiln-core-own.$$
 
     for l in "${LIBS[@]}"; do
-        printf '\n## %s\n\n`use %s`\n\n' "$l" "$l"
+        # A bundled library is reached with Kiln 2's `using`; a project kit is
+        # named the only way it can be reached today, which is 1.x's `use` —
+        # K2 resolves a library out of `libs/`, where a project kit is not.
+        if [ -d "$ROOT/libs/$l" ]; then
+            printf '\n## %s\n\n`using Kiln.%s;`\n\n' "$l" "$(lib_pascal "$l")"
+        else
+            printf '\n## %s\n\n`use %s`\n\n' "$l" "$l"
+        fi
         "$KILN" commands --use "$l" > /tmp/kiln-lib-raw.$$
         # This library's own commands: what `--use` adds that core alone lacks.
         sed -n 's/^command: //p' /tmp/kiln-lib-raw.$$ | sort |

@@ -20,19 +20,27 @@ static const int32_t P_T[]  = { KN_SDT_TEXT };
 static const Kiln_CommandDesc ENCODING_COMMANDS[] = {
     { "encoding_decode", "encoding_decode", KN_SDT_TEXT, 2, P_BT,
       "Turn a byte-set in a named encoding into UTF-8 text, or answer \"\" and name the byte that is not of it",
-      "let raw: bytes = bytes_new(2)\ncall bytes_set(raw, 1, 214)\ncall bytes_set(raw, 2, 208)\ncall print_text(encoding_decode(raw, \"gbk\"))" },
+      "Bytes raw = BytesNew(2);\n"
+      "BytesSet(raw, 1, 214);\n"
+      "BytesSet(raw, 2, 208);\n"
+      "Console.WriteLine(EncodingDecode(raw, \"gbk\"));" },
 
     { "encoding_decode_lossy", "encoding_decode_lossy", KN_SDT_TEXT, 2, P_BT,
       "The same, but a byte that is not of the encoding becomes U+FFFD instead of failing the whole read",
-      "let raw: bytes = bytes_new(3)\ncall bytes_set(raw, 1, 65)\ncall bytes_set(raw, 2, 255)\ncall bytes_set(raw, 3, 66)\ncall print_text(encoding_decode_lossy(raw, \"gbk\"))" },
+      "Bytes raw = BytesNew(3);\n"
+      "BytesSet(raw, 1, 65);\n"
+      "BytesSet(raw, 2, 255);\n"
+      "BytesSet(raw, 3, 66);\n"
+      "Console.WriteLine(EncodingDecodeLossy(raw, \"gbk\"));" },
 
     { "encoding_encode", "encoding_encode", KN_SDT_BIN, 2, P_TT,
       "Write text back in a named encoding as a byte-set, for another program to read",
-      "call print_int(bytes_count(encoding_encode(\"\u4e2d\u6587\", \"gbk\")))" },
+      "Console.WriteLine(BytesCount(EncodingEncode(\"中文\", \"gbk\")));" },
 
     { "encoding_known", "encoding_known", KN_SDT_BOOL, 1, P_T,
       "Whether this build can convert a named encoding, so a start-up check can say so before a program asks",
-      "let ok: bool = encoding_known(\"gbk\")\ncall print_text(\"gbk: {ok}\")" },
+      "bool ok = EncodingKnown(\"gbk\");\n"
+      "Console.WriteLine($\"gbk: {ok}\");" },
 };
 
 static const Kiln_LibInfo ENCODING_INFO = {

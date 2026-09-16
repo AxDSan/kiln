@@ -2,30 +2,36 @@
 
 # Commands
 
-Call one as a statement with `call`, or use its result in an expression when it
-returns a value.
+Call one as a statement, or use its result in an expression.
 
-```
-call print_text("hello")            # as a statement
-let n: int = max_int(3, 9)          # as an expression
+```k2
+Console.WriteLine("hello");         // a command as a statement
+var n = MaxInt(3, 9);               // and its result in an expression
 ```
 
 The core commands are always available. The rest come from a support library,
-which a module asks for by name:
+which a program asks for with `using`:
 
-```
-module report
-use file
+```k2
+namespace Report;
 
-sub main
-  call print_text(file_read_text("notes.txt"))
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(FileReadText("notes.txt"));
+    }
+}
 ```
 
 A command that can fail returns a sentinel — `0` for a handle or a position,
 `-1` for a count or size, `""` for text, `false` for a yes/no — and leaves the
-reason in the error slot, which `last_error_code()` and `last_error_text()`
-read. The [Language guide](./language.md#when-a-command-fails) has the rules.
+reason in the error slot, which `LastErrorCode()` and `LastErrorText()` read.
+Where a Kiln 2 program wants that failure as a value it takes one:
+`FileReadText(p) ?? "(none)"`, or `FileReadText(p)?` to hand it back to the
+caller. The [Kiln 2 guide](./kiln-2.md#when-something-fails) has the rules.
 
 ## Core
 
@@ -140,14 +146,18 @@ read. The [Language guide](./language.md#when-a-command-fails) has the rules.
 
 Two byte-sets end to end, as one.
 
-```kiln
-module example
+```k2
+namespace Example;
 
-sub main
-  let head: bytes = bytes_new(2)
-  let body: bytes = bytes_from_text("hi")
-  call print_int(bytes_count(bytes_concat(head, body)))
-end
+public static class P
+{
+    public static void Main()
+    {
+        Bytes head = BytesNew(2);
+        Bytes body = BytesFromText("hi");
+        Console.WriteLine(BytesCount(BytesConcat(head, body)));
+    }
+}
 ```
 
 ### `bytes_copy_to_ptr`
@@ -156,22 +166,19 @@ end
 
 Copy a byte-set to an address; answers how many bytes that was.
 
-```kiln
-module frame
-target console
+```k2
+namespace Frame;
 
-record point is c
-  x: int
-  y: int
-end
-
-sub main
-  var raw: bytes = bytes_new(8)
-  call bytes_set(raw, 1, 7)
-  var p: point
-  call print_int(bytes_copy_to_ptr(raw, address of p))
-  call print_int(p.x)
-end
+public static class P
+{
+    public static void Main()
+    {
+        var raw = BytesFromText("kiln");
+        var dst = MemAlloc(4);
+        Console.WriteLine(BytesCopyToPtr(raw, dst));
+        MemFree(dst);
+    }
+}
 ```
 
 ### `bytes_from_ptr`
@@ -180,21 +187,17 @@ end
 
 Copy a run of bytes out of an address, into a byte-set.
 
-```kiln
-module frame
-target console
+```k2
+namespace Frame;
 
-record point is c
-  x: int
-  y: int
-end
-
-sub main
-  var p: point
-  p.x = 7
-  let raw: bytes = bytes_from_ptr(address of p, 8)
-  call print_int(bytes_at(raw, 1))
-end
+public static class P
+{
+    public static void Main()
+    {
+        var raw = BytesFromPtr(PtrOfText("kiln"), 4);
+        Console.WriteLine(BytesAt(raw, 1));
+    }
+}
 ```
 
 ### `collect_garbage`
@@ -203,15 +206,20 @@ end
 
 Reclaim unreachable memory now, and answer how many bytes came back..
 
-```kiln
-module example
+```k2
+namespace Example;
 
-sub main
-  for i = 1 to 100000
-    let s: text = "scratch {i}"
-  end
-  call print_text("reclaimed {collect_garbage()} bytes")
-end
+public static class P
+{
+    public static void Main()
+    {
+        foreach (var i in 1..100000)
+        {
+            string s = $"scratch {i}";
+        }
+        Console.WriteLine($"reclaimed {CollectGarbage()} bytes");
+    }
+}
 ```
 
 ### `memory_in_use`
@@ -220,21 +228,26 @@ end
 
 How many bytes of program data the runtime is currently holding..
 
-```kiln
-module example
+```k2
+namespace Example;
 
-sub main
-  let before: int64 = memory_in_use()
-  for i = 1 to 10000
-    let s: text = "row {i}"
-  end
-  call print_text("held {memory_in_use() - before} more bytes")
-end
+public static class P
+{
+    public static void Main()
+    {
+        long before = MemoryInUse();
+        foreach (var i in 1..10000)
+        {
+            string s = $"row {i}";
+        }
+        Console.WriteLine($"held {MemoryInUse() - before} more bytes");
+    }
+}
 ```
 
 ## config
 
-`use config`
+`using Kiln.Config;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -263,7 +276,7 @@ end
 
 ## db
 
-`use db`
+`using Kiln.Db;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -305,18 +318,23 @@ end
 
 Start a transaction; every statement until db_commit or db_rollback is part of it.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (n int)", [])
-  call db_begin(h)
-  call db_exec(h, "insert into t values (?)", ["1"])
-  call db_commit(h)
-  call print_text("committed")
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (n int)", []);
+        DbBegin(h);
+        DbExec(h, "insert into t values (?)", ["1"]);
+        DbCommit(h);
+        Console.WriteLine("committed");
+    }
+}
 ```
 
 ### `db_bool`
@@ -325,19 +343,25 @@ end
 
 The current row's column as a bool: 1, true or any non-zero number; false for NULL.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (banned int)", [])
-  call db_exec(h, "insert into t values (?)", ["1"])
-  let rows: int = db_query(h, "select banned from t", [])
-  if db_next(rows)
-    call print_text("banned: {db_bool(rows, 1)}")
-  end
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (banned int)", []);
+        DbExec(h, "insert into t values (?)", ["1"]);
+        int rows = DbQuery(h, "select banned from t", []);
+        if (DbNext(rows))
+        {
+            Console.WriteLine($"banned: {DbBool(rows, 1)}");
+        }
+    }
+}
 ```
 
 ### `db_close`
@@ -346,16 +370,22 @@ end
 
 Close a database handle.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  if db_close(h)
-    call print_text("closed")
-  end
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        if (DbClose(h))
+        {
+            Console.WriteLine("closed");
+        }
+    }
+}
 ```
 
 ### `db_column_name`
@@ -364,16 +394,21 @@ end
 
 The name of a result column, counting from 1.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (a int, b int)", [])
-  let rows: int = db_query(h, "select a, b as total from t", [])
-  call print_text(db_column_name(rows, 2))
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (a int, b int)", []);
+        int rows = DbQuery(h, "select a, b as total from t", []);
+        Console.WriteLine(DbColumnName(rows, 2));
+    }
+}
 ```
 
 ### `db_columns`
@@ -382,16 +417,21 @@ end
 
 How many columns the result has; -1 when the handle is not one.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (a int, b int)", [])
-  let rows: int = db_query(h, "select a, b from t", [])
-  call print_int(db_columns(rows))
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (a int, b int)", []);
+        int rows = DbQuery(h, "select a, b from t", []);
+        Console.WriteLine(DbColumns(rows));
+    }
+}
 ```
 
 ### `db_commit`
@@ -400,19 +440,25 @@ end
 
 Make the transaction's changes permanent.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (n int)", [])
-  call db_begin(h)
-  call db_exec(h, "insert into t values (?)", ["1"])
-  if db_commit(h)
-    call print_text("kept")
-  end
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (n int)", []);
+        DbBegin(h);
+        DbExec(h, "insert into t values (?)", ["1"]);
+        if (DbCommit(h))
+        {
+            Console.WriteLine("kept");
+        }
+    }
+}
 ```
 
 ### `db_double`
@@ -421,19 +467,25 @@ end
 
 The current row's column as a double; 0.0 for NULL.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (x real)", [])
-  call db_exec(h, "insert into t values (?)", ["2.5"])
-  let rows: int = db_query(h, "select x from t", [])
-  if db_next(rows)
-    call print_double(db_double(rows, 1))
-  end
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (x real)", []);
+        DbExec(h, "insert into t values (?)", ["2.5"]);
+        int rows = DbQuery(h, "select x from t", []);
+        if (DbNext(rows))
+        {
+            Console.WriteLine(DbDouble(rows, 1));
+        }
+    }
+}
 ```
 
 ### `db_exec`
@@ -442,15 +494,20 @@ end
 
 Run a statement with bound parameters; answers rows changed, -1 on failure.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (name text)", [])
-  call print_int(db_exec(h, "insert into t values (?)", ["Ada"]))
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (name text)", []);
+        Console.WriteLine(DbExec(h, "insert into t values (?)", ["Ada"]));
+    }
+}
 ```
 
 ### `db_exec_async`
@@ -459,15 +516,20 @@ end
 
 Queue an INSERT, UPDATE or DELETE on a worker thread and answer a request id, so the pump keeps turning.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  let job: int = db_exec_async(h, "create table t (a int)", [])
-  call print_text("queued {job}")
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        int job = DbExecAsync(h, "create table t (a int)", []);
+        Console.WriteLine($"queued {job}");
+    }
+}
 ```
 
 ### `db_exec_async_n`
@@ -476,15 +538,20 @@ end
 
 The same, with a bool per parameter saying which of them bind SQL NULL.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  let job: int = db_exec_async_n(h, "insert into t values (?)", ["1"], [true])
-  call print_text("queued {job}")
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        int job = DbExecAsyncN(h, "insert into t values (?)", ["1"], [true]);
+        Console.WriteLine($"queued {job}");
+    }
+}
 ```
 
 ### `db_exec_n`
@@ -493,16 +560,21 @@ end
 
 As db_exec, with a second list saying which parameters bind as SQL NULL.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (name text, ip text)", [])
-  let ok: int = db_exec_n(h, "insert into t values (?, ?)", ["Ada", ""], [false, true])
-  call print_int(ok)
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (name text, ip text)", []);
+        int ok = DbExecN(h, "insert into t values (?, ?)", ["Ada", ""], [false, true]);
+        Console.WriteLine(ok);
+    }
+}
 ```
 
 ### `db_int`
@@ -511,19 +583,25 @@ end
 
 The current row's column as a whole number; 0 for NULL.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (n int)", [])
-  call db_exec(h, "insert into t values (?)", ["42"])
-  let rows: int = db_query(h, "select n from t", [])
-  if db_next(rows)
-    call print_int(db_int(rows, 1))
-  end
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (n int)", []);
+        DbExec(h, "insert into t values (?)", ["42"]);
+        int rows = DbQuery(h, "select n from t", []);
+        if (DbNext(rows))
+        {
+            Console.WriteLine(DbInt(rows, 1));
+        }
+    }
+}
 ```
 
 ### `db_int64`
@@ -532,19 +610,25 @@ end
 
 The current row's column as a wide whole number; 0 for NULL.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (n int)", [])
-  call db_exec(h, "insert into t values (?)", ["9000000000"])
-  let rows: int = db_query(h, "select n from t", [])
-  if db_next(rows)
-    call print_int64(db_int64(rows, 1))
-  end
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (n int)", []);
+        DbExec(h, "insert into t values (?)", ["9000000000"]);
+        int rows = DbQuery(h, "select n from t", []);
+        if (DbNext(rows))
+        {
+            PrintInt64(DbInt64(rows, 1));
+        }
+    }
+}
 ```
 
 ### `db_is_null`
@@ -553,19 +637,25 @@ end
 
 Is the current row's column SQL NULL, rather than an empty value.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (ip text)", [])
-  call db_exec_n(h, "insert into t values (?)", [""], [true])
-  let rows: int = db_query(h, "select ip from t", [])
-  if db_next(rows)
-    call print_text("null: {db_is_null(rows, 1)}")
-  end
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (ip text)", []);
+        DbExecN(h, "insert into t values (?)", [""], [true]);
+        int rows = DbQuery(h, "select ip from t", []);
+        if (DbNext(rows))
+        {
+            Console.WriteLine($"null: {DbIsNull(rows, 1)}");
+        }
+    }
+}
 ```
 
 ### `db_last_insert_id`
@@ -574,16 +664,21 @@ end
 
 The id the last INSERT on this connection produced; 0 when there has been none.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (id integer primary key, name text)", [])
-  call db_exec(h, "insert into t (name) values (?)", ["Ada"])
-  call print_int64(db_last_insert_id(h))
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (id integer primary key, name text)", []);
+        DbExec(h, "insert into t (name) values (?)", ["Ada"]);
+        PrintInt64(DbLastInsertId(h));
+    }
+}
 ```
 
 ### `db_next`
@@ -592,19 +687,25 @@ end
 
 Advance to the next row; false at the end, with no error set.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (n int)", [])
-  call db_exec(h, "insert into t values (?)", ["1"])
-  let rows: int = db_query(h, "select n from t", [])
-  while db_next(rows)
-    call print_int(db_int(rows, 1))
-  end
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (n int)", []);
+        DbExec(h, "insert into t values (?)", ["1"]);
+        int rows = DbQuery(h, "select n from t", []);
+        while (DbNext(rows))
+        {
+            Console.WriteLine(DbInt(rows, 1));
+        }
+    }
+}
 ```
 
 ### `db_open`
@@ -613,18 +714,24 @@ end
 
 Open a database and answer its handle; 0 when it could not be opened.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  if h = 0
-    call print_text("could not open: {last_error_text()}")
-    return
-  end
-  call print_text("open")
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        if (h == 0)
+        {
+            Console.WriteLine($"could not open: {LastErrorText()}");
+            return;
+        }
+        Console.WriteLine("open");
+    }
+}
 ```
 
 ### `db_query`
@@ -633,20 +740,26 @@ end
 
 Run a query with bound parameters; answers a result handle, 0 on failure.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (name text)", [])
-  call db_exec(h, "insert into t values (?)", ["Ada"])
-  let rows: int = db_query(h, "select name from t where name = ?", ["Ada"])
-  if db_next(rows)
-    call print_text(db_text(rows, 1))
-  end
-  call db_result_close(rows)
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (name text)", []);
+        DbExec(h, "insert into t values (?)", ["Ada"]);
+        int rows = DbQuery(h, "select name from t where name = ?", ["Ada"]);
+        if (DbNext(rows))
+        {
+            Console.WriteLine(DbText(rows, 1));
+        }
+        DbResultClose(rows);
+    }
+}
 ```
 
 ### `db_query_async`
@@ -655,15 +768,20 @@ end
 
 Queue a SELECT on a worker thread and answer a request id; the rows are collected by the time it is ready.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  let job: int = db_query_async(h, "select 1", [])
-  call print_text("queued {job}")
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        int job = DbQueryAsync(h, "select 1", []);
+        Console.WriteLine($"queued {job}");
+    }
+}
 ```
 
 ### `db_query_async_n`
@@ -672,15 +790,20 @@ end
 
 The same, with a bool per parameter saying which of them bind SQL NULL.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  let job: int = db_query_async_n(h, "select ?", ["ada"], [false])
-  call print_text("queued {job}")
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        int job = DbQueryAsyncN(h, "select ?", ["ada"], [false]);
+        Console.WriteLine($"queued {job}");
+    }
+}
 ```
 
 ### `db_query_n`
@@ -689,17 +812,22 @@ end
 
 As db_query, with a second list saying which parameters bind as SQL NULL.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (ip text)", [])
-  let rows: int = db_query_n(h, "select ip from t where ip is ?", [""], [true])
-  call print_int(db_columns(rows))
-  call db_result_close(rows)
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (ip text)", []);
+        int rows = DbQueryN(h, "select ip from t where ip is ?", [""], [true]);
+        Console.WriteLine(DbColumns(rows));
+        DbResultClose(rows);
+    }
+}
 ```
 
 ### `db_req_columns`
@@ -708,15 +836,20 @@ end
 
 How many columns a finished query collected.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  let job: int = db_query_async(h, "select 1", [])
-  call print_int(db_req_columns(job))
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        int job = DbQueryAsync(h, "select 1", []);
+        Console.WriteLine(DbReqColumns(job));
+    }
+}
 ```
 
 ### `db_req_error`
@@ -725,15 +858,20 @@ end
 
 Why a finished statement failed, or "" when it succeeded.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  let job: int = db_exec_async(h, "select * from nosuchtable", [])
-  call print_text(db_req_error(job))
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        int job = DbExecAsync(h, "select * from nosuchtable", []);
+        Console.WriteLine(DbReqError(job));
+    }
+}
 ```
 
 ### `db_req_free`
@@ -742,15 +880,20 @@ end
 
 Release a finished request and everything it collected; refused while it is still running.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  let job: int = db_exec_async(h, "create table t (a int)", [])
-  call print_text("freed: {db_req_free(job)}")
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        int job = DbExecAsync(h, "create table t (a int)", []);
+        Console.WriteLine($"freed: {DbReqFree(job)}");
+    }
+}
 ```
 
 ### `db_req_is_null`
@@ -759,15 +902,20 @@ end
 
 Whether a cell of a finished query is SQL NULL, which an empty string cannot say.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  let job: int = db_query_async(h, "select null", [])
-  call print_text("null: {db_req_is_null(job, 1, 1)}")
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        int job = DbQueryAsync(h, "select null", []);
+        Console.WriteLine($"null: {DbReqIsNull(job, 1, 1)}");
+    }
+}
 ```
 
 ### `db_req_ready`
@@ -776,16 +924,21 @@ end
 
 Whether a queued statement has finished; false while it is still running, and the error slot stays clear.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  let job: int = db_exec_async(h, "create table t (a int)", [])
-  let done: bool = db_req_ready(job)
-  call print_text("finished: {done}")
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        int job = DbExecAsync(h, "create table t (a int)", []);
+        bool done = DbReqReady(job);
+        Console.WriteLine($"finished: {done}");
+    }
+}
 ```
 
 ### `db_req_rows`
@@ -794,15 +947,20 @@ end
 
 Rows changed by a finished execute, rows in a finished query, and -1 when it failed.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  let job: int = db_exec_async(h, "create table t (a int)", [])
-  call print_int(db_req_rows(job))
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        int job = DbExecAsync(h, "create table t (a int)", []);
+        Console.WriteLine(DbReqRows(job));
+    }
+}
 ```
 
 ### `db_req_text`
@@ -811,15 +969,20 @@ end
 
 One cell of a finished query, rows and columns counting from 1, and "" for SQL NULL.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  let job: int = db_query_async(h, "select 1", [])
-  call print_text(db_req_text(job, 1, 1))
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        int job = DbQueryAsync(h, "select 1", []);
+        Console.WriteLine(DbReqText(job, 1, 1));
+    }
+}
 ```
 
 ### `db_result_close`
@@ -828,18 +991,24 @@ end
 
 Close a result handle.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (n int)", [])
-  let rows: int = db_query(h, "select n from t", [])
-  if db_result_close(rows)
-    call print_text("closed")
-  end
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (n int)", []);
+        int rows = DbQuery(h, "select n from t", []);
+        if (DbResultClose(rows))
+        {
+            Console.WriteLine("closed");
+        }
+    }
+}
 ```
 
 ### `db_rollback`
@@ -848,21 +1017,27 @@ end
 
 Undo everything since db_begin.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (n int)", [])
-  call db_begin(h)
-  call db_exec(h, "insert into t values (?)", ["1"])
-  call db_rollback(h)
-  let rows: int = db_query(h, "select count(*) from t", [])
-  if db_next(rows)
-    call print_int(db_int(rows, 1))
-  end
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (n int)", []);
+        DbBegin(h);
+        DbExec(h, "insert into t values (?)", ["1"]);
+        DbRollback(h);
+        int rows = DbQuery(h, "select count(*) from t", []);
+        if (DbNext(rows))
+        {
+            Console.WriteLine(DbInt(rows, 1));
+        }
+    }
+}
 ```
 
 ### `db_text`
@@ -871,19 +1046,25 @@ end
 
 The current row's column as text, counting columns from 1.
 
-```kiln
-module example
-use db
+```k2
+namespace Example;
 
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table t (name text)", [])
-  call db_exec(h, "insert into t values (?)", ["Ada"])
-  let rows: int = db_query(h, "select name from t", [])
-  if db_next(rows)
-    call print_text(db_text(rows, 1))
-  end
-end
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = DbOpen("sqlite::memory:");
+        DbExec(h, "create table t (name text)", []);
+        DbExec(h, "insert into t values (?)", ["Ada"]);
+        int rows = DbQuery(h, "select name from t", []);
+        if (DbNext(rows))
+        {
+            Console.WriteLine(DbText(rows, 1));
+        }
+    }
+}
 ```
 
 ## demoffi
@@ -895,7 +1076,7 @@ end
 
 ## encoding
 
-`use encoding`
+`using Kiln.Encoding;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -910,16 +1091,21 @@ end
 
 Turn a byte-set in a named encoding into UTF-8 text, or answer "" and name the byte that is not of it.
 
-```kiln
-module example
-use encoding
+```k2
+namespace Example;
 
-sub main
-  let raw: bytes = bytes_new(2)
-  call bytes_set(raw, 1, 214)
-  call bytes_set(raw, 2, 208)
-  call print_text(encoding_decode(raw, "gbk"))
-end
+using Kiln.Encoding;
+
+public static class P
+{
+    public static void Main()
+    {
+        Bytes raw = BytesNew(2);
+        BytesSet(raw, 1, 214);
+        BytesSet(raw, 2, 208);
+        Console.WriteLine(EncodingDecode(raw, "gbk"));
+    }
+}
 ```
 
 ### `encoding_decode_lossy`
@@ -928,17 +1114,22 @@ end
 
 The same, but a byte that is not of the encoding becomes U+FFFD instead of failing the whole read.
 
-```kiln
-module example
-use encoding
+```k2
+namespace Example;
 
-sub main
-  let raw: bytes = bytes_new(3)
-  call bytes_set(raw, 1, 65)
-  call bytes_set(raw, 2, 255)
-  call bytes_set(raw, 3, 66)
-  call print_text(encoding_decode_lossy(raw, "gbk"))
-end
+using Kiln.Encoding;
+
+public static class P
+{
+    public static void Main()
+    {
+        Bytes raw = BytesNew(3);
+        BytesSet(raw, 1, 65);
+        BytesSet(raw, 2, 255);
+        BytesSet(raw, 3, 66);
+        Console.WriteLine(EncodingDecodeLossy(raw, "gbk"));
+    }
+}
 ```
 
 ### `encoding_encode`
@@ -947,13 +1138,18 @@ end
 
 Write text back in a named encoding as a byte-set, for another program to read.
 
-```kiln
-module example
-use encoding
+```k2
+namespace Example;
 
-sub main
-  call print_int(bytes_count(encoding_encode("中文", "gbk")))
-end
+using Kiln.Encoding;
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(BytesCount(EncodingEncode("中文", "gbk")));
+    }
+}
 ```
 
 ### `encoding_known`
@@ -962,19 +1158,24 @@ end
 
 Whether this build can convert a named encoding, so a start-up check can say so before a program asks.
 
-```kiln
-module example
-use encoding
+```k2
+namespace Example;
 
-sub main
-  let ok: bool = encoding_known("gbk")
-  call print_text("gbk: {ok}")
-end
+using Kiln.Encoding;
+
+public static class P
+{
+    public static void Main()
+    {
+        bool ok = EncodingKnown("gbk");
+        Console.WriteLine($"gbk: {ok}");
+    }
+}
 ```
 
 ## file
 
-`use file`
+`using Kiln.File;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -1016,13 +1217,18 @@ end
 
 Create a directory and any parent it needs; false on failure.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call dir_create("reports/2026")
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        DirCreate("reports/2026");
+    }
+}
 ```
 
 ### `dir_current`
@@ -1031,13 +1237,18 @@ end
 
 The directory the program is running in.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call print_text(dir_current())
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(DirCurrent());
+    }
+}
 ```
 
 ### `dir_delete`
@@ -1046,13 +1257,18 @@ end
 
 Remove an empty directory; false if it was not empty or not there.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call dir_delete("reports/2026")
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        DirDelete("reports/2026");
+    }
+}
 ```
 
 ### `dir_entry`
@@ -1061,16 +1277,22 @@ end
 
 One entry from the snapshot dir_entry_count took, counting from 1.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  let n: int = dir_entry_count("reports")
-  for i in 1..n
-    call print_text(dir_entry("reports", i))
-  end
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        int n = DirEntryCount("reports");
+        foreach (var i in 1..n)
+        {
+            Console.WriteLine(DirEntry("reports", i));
+        }
+    }
+}
 ```
 
 ### `dir_entry_count`
@@ -1079,13 +1301,18 @@ end
 
 How many entries a directory holds, or -1 on failure. It re-reads the directory and snapshots it, which is what makes a loop over dir_entry stable.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call print_int(dir_entry_count("reports"))
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(DirEntryCount("reports"));
+    }
+}
 ```
 
 ### `dir_exists`
@@ -1094,15 +1321,21 @@ end
 
 Whether a directory exists.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  if dir_exists("reports")
-    call print_text("ready")
-  end
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        if (DirExists("reports"))
+        {
+            Console.WriteLine("ready");
+        }
+    }
+}
 ```
 
 ### `dir_set_current`
@@ -1111,13 +1344,18 @@ end
 
 Change the directory the program is running in; false on failure.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call dir_set_current("reports")
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        DirSetCurrent("reports");
+    }
+}
 ```
 
 ### `file_append_bytes`
@@ -1126,13 +1364,18 @@ end
 
 Add raw bytes to the end of a file; false on failure.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call file_append_bytes("out.bin", bytes_from_text("tail"))
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        FileAppendBytes("out.bin", BytesFromText("tail"));
+    }
+}
 ```
 
 ### `file_append_text`
@@ -1141,13 +1384,18 @@ end
 
 Add text to the end of a file, creating it if absent; false on failure.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call file_append_text("log.txt", "started")
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        FileAppendText("log.txt", "started");
+    }
+}
 ```
 
 ### `file_at_end`
@@ -1156,17 +1404,23 @@ end
 
 Whether an open file has no more lines, which is the predicate a blank line needs.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  let h: int = file_open("big.txt", "read")
-  while file_at_end(h) = false
-    call print_text(file_read_line(h))
-  end
-  call file_close(h)
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = FileOpen("big.txt", "read");
+        while (FileAtEnd(h) == false)
+        {
+            Console.WriteLine(FileReadLine(h));
+        }
+        FileClose(h);
+    }
+}
 ```
 
 ### `file_close`
@@ -1175,14 +1429,19 @@ end
 
 Close an open file; false if the handle was already closed or never valid.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  let h: int = file_open("out.txt", "write")
-  call file_close(h)
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = FileOpen("out.txt", "write");
+        FileClose(h);
+    }
+}
 ```
 
 ### `file_close_all`
@@ -1191,13 +1450,18 @@ end
 
 Close every file this program still has open, and say how many that was.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call print_int(file_close_all())
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(FileCloseAll());
+    }
+}
 ```
 
 ### `file_copy`
@@ -1206,13 +1470,18 @@ end
 
 Copy a file, replacing the destination; false on failure.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call file_copy("notes.txt", "notes.bak")
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        FileCopy("notes.txt", "notes.bak");
+    }
+}
 ```
 
 ### `file_delete`
@@ -1221,13 +1490,18 @@ end
 
 Remove a file; false if it was not there or could not be removed.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call file_delete("scratch.txt")
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        FileDelete("scratch.txt");
+    }
+}
 ```
 
 ### `file_exists`
@@ -1236,15 +1510,21 @@ end
 
 Whether a file exists and can be read.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  if file_exists("notes.txt")
-    call print_text("found it")
-  end
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        if (FileExists("notes.txt"))
+        {
+            Console.WriteLine("found it");
+        }
+    }
+}
 ```
 
 ### `file_line_count`
@@ -1253,13 +1533,18 @@ end
 
 How many lines a text file holds, or -1 on failure.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call print_int(file_line_count("notes.txt"))
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(FileLineCount("notes.txt"));
+    }
+}
 ```
 
 ### `file_modified`
@@ -1268,13 +1553,18 @@ end
 
 When a file was last written, in Unix seconds, or -1 on failure.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call print_int64(file_modified("notes.txt"))
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        PrintInt64(FileModified("notes.txt"));
+    }
+}
 ```
 
 ### `file_move`
@@ -1283,13 +1573,18 @@ end
 
 Move or rename a file; false on failure.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call file_move("notes.txt", "archive/notes.txt")
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        FileMove("notes.txt", "archive/notes.txt");
+    }
+}
 ```
 
 ### `file_open`
@@ -1298,14 +1593,19 @@ end
 
 Open a file for streaming in mode "read", "write" or "append"; 0 on failure.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  let h: int = file_open("big.txt", "read")
-  call file_close(h)
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = FileOpen("big.txt", "read");
+        FileClose(h);
+    }
+}
 ```
 
 ### `file_read_bytes`
@@ -1314,14 +1614,19 @@ end
 
 Read a whole file as raw bytes, which is what a picture or an archive needs.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  let raw: bytes = file_read_bytes("logo.png")
-  call print_int(bytes_count(raw))
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        Bytes raw = FileReadBytes("logo.png");
+        Console.WriteLine(BytesCount(raw));
+    }
+}
 ```
 
 ### `file_read_line`
@@ -1330,15 +1635,20 @@ end
 
 Read the next line from an open file, without its newline.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  let h: int = file_open("big.txt", "read")
-  call print_text(file_read_line(h))
-  call file_close(h)
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = FileOpen("big.txt", "read");
+        Console.WriteLine(FileReadLine(h));
+        FileClose(h);
+    }
+}
 ```
 
 ### `file_read_text`
@@ -1347,14 +1657,19 @@ end
 
 Read a whole text file, or "" if it could not be read.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  let notes: text = file_read_text("notes.txt")
-  call print_text(notes)
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        string notes = FileReadText("notes.txt");
+        Console.WriteLine(notes);
+    }
+}
 ```
 
 ### `file_size`
@@ -1363,13 +1678,18 @@ end
 
 How many bytes a file holds, or -1 if it could not be measured.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call print_int64(file_size("notes.txt"))
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        PrintInt64(FileSize("notes.txt"));
+    }
+}
 ```
 
 ### `file_write_bytes`
@@ -1378,13 +1698,18 @@ end
 
 Write raw bytes to a file, replacing what was there; false on failure.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call file_write_bytes("copy.png", file_read_bytes("logo.png"))
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        FileWriteBytes("copy.png", FileReadBytes("logo.png"));
+    }
+}
 ```
 
 ### `file_write_line`
@@ -1393,15 +1718,20 @@ end
 
 Write one line to an open file, adding the newline; false on failure.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  let h: int = file_open("out.txt", "write")
-  call file_write_line(h, "first")
-  call file_close(h)
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = FileOpen("out.txt", "write");
+        FileWriteLine(h, "first");
+        FileClose(h);
+    }
+}
 ```
 
 ### `file_write_text`
@@ -1410,15 +1740,21 @@ end
 
 Write text to a file, replacing what was there; false on failure.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  if file_write_text("notes.txt", "hello") = false
-    call print_text(last_error_text())
-  end
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        if (FileWriteText("notes.txt", "hello") == false)
+        {
+            Console.WriteLine(LastErrorText());
+        }
+    }
+}
 ```
 
 ### `path_absolute`
@@ -1427,13 +1763,18 @@ end
 
 A path resolved against the current directory.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call print_text(path_absolute("june.txt"))
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(PathAbsolute("june.txt"));
+    }
+}
 ```
 
 ### `path_extension`
@@ -1442,13 +1783,18 @@ end
 
 A file name's extension, without the dot, or "" if it has none.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call print_text(path_extension("reports/june.txt"))
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(PathExtension("reports/june.txt"));
+    }
+}
 ```
 
 ### `path_join`
@@ -1457,13 +1803,18 @@ end
 
 Join two path pieces with the separator this platform uses.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call print_text(path_join("reports", "june.txt"))
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(PathJoin("reports", "june.txt"));
+    }
+}
 ```
 
 ### `path_name`
@@ -1472,13 +1823,18 @@ end
 
 The last piece of a path, which is the file name.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call print_text(path_name("reports/june.txt"))
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(PathName("reports/june.txt"));
+    }
+}
 ```
 
 ### `path_parent`
@@ -1487,18 +1843,23 @@ end
 
 Everything before the last piece of a path.
 
-```kiln
-module example
-use file
+```k2
+namespace Example;
 
-sub main
-  call print_text(path_parent("reports/june.txt"))
-end
+using Kiln.File;
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(PathParent("reports/june.txt"));
+    }
+}
 ```
 
 ## hash
 
-`use hash`
+`using Kiln.Hash;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -1514,7 +1875,7 @@ end
 
 ## json
 
-`use json`
+`using Kiln.Json;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -1546,7 +1907,7 @@ end
 
 ## math
 
-`use math`
+`using Kiln.Math;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -1584,7 +1945,7 @@ end
 
 ## net
 
-`use net`
+`using Kiln.Net;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -1632,17 +1993,23 @@ end
 
 Send a byte-set to the server, every byte of it.
 
-```kiln
-module example
-use net
+```k2
+namespace Example;
 
-sub main
-  var frame: bytes = bytes_new(4)
-  call bytes_set(frame, 1, 4)
-  if tcpclient_send_bytes("feed", frame)
-    call print_text("sent")
-  end
-end
+using Kiln.Net;
+
+public static class P
+{
+    public static void Main()
+    {
+        Bytes frame = BytesNew(4);
+        BytesSet(frame, 1, 4);
+        if (TcpclientSendBytes("feed", frame))
+        {
+            Console.WriteLine("sent");
+        }
+    }
+}
 ```
 
 ### `tcpserver_send_bytes`
@@ -1651,22 +2018,28 @@ end
 
 Send a byte-set to one client, every byte of it.
 
-```kiln
-module example
-use net
+```k2
+namespace Example;
 
-sub main
-  var frame: bytes = bytes_new(4)
-  call bytes_set(frame, 1, 4)
-  if tcpserver_send_bytes("chat", 1, frame)
-    call print_text("sent")
-  end
-end
+using Kiln.Net;
+
+public static class P
+{
+    public static void Main()
+    {
+        Bytes frame = BytesNew(4);
+        BytesSet(frame, 1, 4);
+        if (TcpserverSendBytes("chat", 1, frame))
+        {
+            Console.WriteLine("sent");
+        }
+    }
+}
 ```
 
 ## process
 
-`use process`
+`using Kiln.Process;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -1684,7 +2057,7 @@ end
 
 ## random
 
-`use random`
+`using Kiln.Random;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -1707,7 +2080,7 @@ end
 
 ## system
 
-`use system`
+`using Kiln.System;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -1734,7 +2107,7 @@ end
 
 ## text
 
-`use text`
+`using Kiln.Text;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -1761,7 +2134,7 @@ end
 
 ## time
 
-`use time`
+`using Kiln.Time;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -1784,7 +2157,7 @@ end
 
 ## ui
 
-`use ui`
+`using Kiln.Ui;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -1817,7 +2190,7 @@ end
 
 ## xml
 
-`use xml`
+`using Kiln.Xml;`
 
 | Command | Parameters | Returns |
 | --- | --- | --- |
@@ -1846,14 +2219,19 @@ end
 
 An attribute's value, or "" when it is not there — xml_has_attr tells those apart.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<row id="1007" Attack="396,428"/>"""))
-  call print_text(xml_attr(h, xml_root(h), "Attack"))
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<row id=\"1007\" Attack=\"396,428\"/>"));
+        Console.WriteLine(XmlAttr(h, XmlRoot(h), "Attack"));
+    }
+}
 ```
 
 ### `xml_attr_at`
@@ -1862,14 +2240,19 @@ end
 
 The value of an element's i-th attribute, counting from 1.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<row id="1007"/>"""))
-  call print_text(xml_attr_at(h, xml_root(h), 1))
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<row id=\"1007\"/>"));
+        Console.WriteLine(XmlAttrAt(h, XmlRoot(h), 1));
+    }
+}
 ```
 
 ### `xml_attr_count`
@@ -1878,14 +2261,19 @@ end
 
 How many attributes an element carries.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<row id="1007" Attack="1"/>"""))
-  call print_int(xml_attr_count(h, xml_root(h)))
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<row id=\"1007\" Attack=\"1\"/>"));
+        Console.WriteLine(XmlAttrCount(h, XmlRoot(h)));
+    }
+}
 ```
 
 ### `xml_attr_name`
@@ -1894,14 +2282,19 @@ end
 
 The name of an element's i-th attribute, counting from 1.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<row id="1007"/>"""))
-  call print_text(xml_attr_name(h, xml_root(h), 1))
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<row id=\"1007\"/>"));
+        Console.WriteLine(XmlAttrName(h, XmlRoot(h), 1));
+    }
+}
 ```
 
 ### `xml_child`
@@ -1910,14 +2303,19 @@ end
 
 The i-th child element, counting from 1, or 0 when there is none.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<items><row id="1"/></items>"""))
-  call print_int(xml_child(h, xml_root(h), 1))
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<items><row id=\"1\"/></items>"));
+        Console.WriteLine(XmlChild(h, XmlRoot(h), 1));
+    }
+}
 ```
 
 ### `xml_close`
@@ -1926,15 +2324,20 @@ end
 
 Close a document and free it; false when the handle was not one.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<a/>"""))
-  let ok: bool = xml_close(h)
-  call print_text("closed: {ok}")
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<a/>"));
+        bool ok = XmlClose(h);
+        Console.WriteLine($"closed: {ok}");
+    }
+}
 ```
 
 ### `xml_close_all`
@@ -1943,13 +2346,18 @@ end
 
 Close every open document and answer how many there were.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  call print_int(xml_close_all())
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(XmlCloseAll());
+    }
+}
 ```
 
 ### `xml_count`
@@ -1958,14 +2366,19 @@ end
 
 How many child elements a node has; -1 on a bad handle or node id.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<items><row id="1"/><row id="2"/></items>"""))
-  call print_int(xml_count(h, xml_root(h)))
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<items><row id=\"1\"/><row id=\"2\"/></items>"));
+        Console.WriteLine(XmlCount(h, XmlRoot(h)));
+    }
+}
 ```
 
 ### `xml_descend`
@@ -1974,14 +2387,19 @@ end
 
 The first element at any depth under a node with that name, or 0 when there is none.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<root><group><row id="7"/></group></root>"""))
-  call print_int(xml_descend(h, xml_root(h), "row"))
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<root><group><row id=\"7\"/></group></root>"));
+        Console.WriteLine(XmlDescend(h, XmlRoot(h), "row"));
+    }
+}
 ```
 
 ### `xml_first`
@@ -1990,14 +2408,19 @@ end
 
 The first child of a node with that name — "" meaning any name — or 0 when there is none.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<items><row id="1"/></items>"""))
-  call print_int(xml_first(h, xml_root(h), "row"))
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<items><row id=\"1\"/></items>"));
+        Console.WriteLine(XmlFirst(h, XmlRoot(h), "row"));
+    }
+}
 ```
 
 ### `xml_has_attr`
@@ -2006,16 +2429,22 @@ end
 
 Whether an element carries an attribute, which an empty value cannot say.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<row id="1007"/>"""))
-  if xml_has_attr(h, xml_root(h), "Attack") = false
-    call print_text("no Attack")
-  end
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<row id=\"1007\"/>"));
+        if (XmlHasAttr(h, XmlRoot(h), "Attack") == false)
+        {
+            Console.WriteLine("no Attack");
+        }
+    }
+}
 ```
 
 ### `xml_line`
@@ -2024,17 +2453,20 @@ end
 
 The 1-based line an element's start tag begins on, for diagnostics.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<items>
-  <row/>
-  </items>"""))
-  let r: int = xml_first(h, xml_root(h), "row")
-  call print_int(xml_line(h, r))
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<items>\n  <row/>\n  </items>"));
+        int r = XmlFirst(h, XmlRoot(h), "row");
+        Console.WriteLine(XmlLine(h, r));
+    }
+}
 ```
 
 ### `xml_name`
@@ -2043,15 +2475,20 @@ end
 
 An element's own name, which is the tag it was written with.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<items><row id="1"/></items>"""))
-  let r: int = xml_first(h, xml_root(h), "row")
-  call print_text(xml_name(h, r))
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<items><row id=\"1\"/></items>"));
+        int r = XmlFirst(h, XmlRoot(h), "row");
+        Console.WriteLine(XmlName(h, r));
+    }
+}
 ```
 
 ### `xml_parent`
@@ -2060,15 +2497,20 @@ end
 
 The element a node sits inside, or 0 when it is top level.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<items><row id="1"/></items>"""))
-  let r: int = xml_first(h, xml_root(h), "row")
-  call print_int(xml_parent(h, r))
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<items><row id=\"1\"/></items>"));
+        int r = XmlFirst(h, XmlRoot(h), "row");
+        Console.WriteLine(XmlParent(h, r));
+    }
+}
 ```
 
 ### `xml_parse`
@@ -2077,14 +2519,19 @@ end
 
 Parse a document from a byte-set and answer its handle, or 0 with the line and reason in the error slot.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<items count="2"/>"""))
-  call print_int(h)
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<items count=\"2\"/>"));
+        Console.WriteLine(h);
+    }
+}
 ```
 
 ### `xml_root`
@@ -2093,14 +2540,19 @@ end
 
 The first top-level element, or 0 for a document that holds none.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<items><row id="1"/></items>"""))
-  call print_int(xml_root(h))
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<items><row id=\"1\"/></items>"));
+        Console.WriteLine(XmlRoot(h));
+    }
+}
 ```
 
 ### `xml_sibling`
@@ -2109,16 +2561,21 @@ end
 
 The next element after a node with that name, which is how the next row is found.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<items><row id="1"/><row id="2"/></items>"""))
-  var r: int = xml_first(h, xml_root(h), "row")
-  r = xml_sibling(h, r, "row")
-  call print_text(xml_attr(h, r, "id"))
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<items><row id=\"1\"/><row id=\"2\"/></items>"));
+        int r = XmlFirst(h, XmlRoot(h), "row");
+        r = XmlSibling(h, r, "row");
+        Console.WriteLine(XmlAttr(h, r, "id"));
+    }
+}
 ```
 
 ### `xml_text`
@@ -2127,12 +2584,17 @@ end
 
 An element's own text with the surrounding whitespace removed, or "" when it holds only elements.
 
-```kiln
-module example
-use xml
+```k2
+namespace Example;
 
-sub main
-  let h: int = xml_parse(bytes_from_text(r"""<name>Kryss</name>"""))
-  call print_text(xml_text(h, xml_root(h)))
-end
+using Kiln.Xml;
+
+public static class P
+{
+    public static void Main()
+    {
+        int h = XmlParse(BytesFromText("<name>Kryss</name>"));
+        Console.WriteLine(XmlText(h, XmlRoot(h)));
+    }
+}
 ```

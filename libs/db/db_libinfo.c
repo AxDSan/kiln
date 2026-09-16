@@ -50,181 +50,194 @@ static const int32_t P_III[]  = { KN_SDT_INT, KN_SDT_INT, KN_SDT_INT };
 static const Kiln_CommandDesc DB_COMMANDS[] = {
     { "db_open", "db_open", KN_SDT_INT, 1, P_T,
       "Open a database and answer its handle; 0 when it could not be opened",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "if h = 0\n"
-      "  call print_text(\"could not open: {last_error_text()}\")\n"
-      "  return\n"
-      "end\n"
-      "call print_text(\"open\")" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "if (h == 0)\n"
+      "{\n"
+      "    Console.WriteLine($\"could not open: {LastErrorText()}\");\n"
+      "    return;\n"
+      "}\n"
+      "Console.WriteLine(\"open\");" },
 
     { "db_close", "db_close", KN_SDT_BOOL, 1, P_I,
       "Close a database handle",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "if db_close(h)\n"
-      "  call print_text(\"closed\")\n"
-      "end" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "if (DbClose(h))\n"
+      "{\n"
+      "    Console.WriteLine(\"closed\");\n"
+      "}" },
 
     { "db_exec", "db_exec", KN_SDT_INT, 3, P_ITA,
       "Run a statement with bound parameters; answers rows changed, -1 on failure",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (name text)\", [])\n"
-      "call print_int(db_exec(h, \"insert into t values (?)\", [\"Ada\"]))" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (name text)\", []);\n"
+      "Console.WriteLine(DbExec(h, \"insert into t values (?)\", [\"Ada\"]));" },
 
     { "db_exec_n", "db_exec_n", KN_SDT_INT, 4, P_ITAA,
       "As db_exec, with a second list saying which parameters bind as SQL NULL",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (name text, ip text)\", [])\n"
-      "let ok: int = db_exec_n(h, \"insert into t values (?, ?)\", [\"Ada\", \"\"], [false, true])\n"
-      "call print_int(ok)" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (name text, ip text)\", []);\n"
+      "int ok = DbExecN(h, \"insert into t values (?, ?)\", [\"Ada\", \"\"], [false, true]);\n"
+      "Console.WriteLine(ok);" },
 
     { "db_query", "db_query", KN_SDT_INT, 3, P_ITA,
       "Run a query with bound parameters; answers a result handle, 0 on failure",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (name text)\", [])\n"
-      "call db_exec(h, \"insert into t values (?)\", [\"Ada\"])\n"
-      "let rows: int = db_query(h, \"select name from t where name = ?\", [\"Ada\"])\n"
-      "if db_next(rows)\n"
-      "  call print_text(db_text(rows, 1))\n"
-      "end\n"
-      "call db_result_close(rows)" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (name text)\", []);\n"
+      "DbExec(h, \"insert into t values (?)\", [\"Ada\"]);\n"
+      "int rows = DbQuery(h, \"select name from t where name = ?\", [\"Ada\"]);\n"
+      "if (DbNext(rows))\n"
+      "{\n"
+      "    Console.WriteLine(DbText(rows, 1));\n"
+      "}\n"
+      "DbResultClose(rows);" },
 
     { "db_query_n", "db_query_n", KN_SDT_INT, 4, P_ITAA,
       "As db_query, with a second list saying which parameters bind as SQL NULL",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (ip text)\", [])\n"
-      "let rows: int = db_query_n(h, \"select ip from t where ip is ?\", [\"\"], [true])\n"
-      "call print_int(db_columns(rows))\n"
-      "call db_result_close(rows)" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (ip text)\", []);\n"
+      "int rows = DbQueryN(h, \"select ip from t where ip is ?\", [\"\"], [true]);\n"
+      "Console.WriteLine(DbColumns(rows));\n"
+      "DbResultClose(rows);" },
 
     { "db_next", "db_next", KN_SDT_BOOL, 1, P_I,
       "Advance to the next row; false at the end, with no error set",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (n int)\", [])\n"
-      "call db_exec(h, \"insert into t values (?)\", [\"1\"])\n"
-      "let rows: int = db_query(h, \"select n from t\", [])\n"
-      "while db_next(rows)\n"
-      "  call print_int(db_int(rows, 1))\n"
-      "end" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (n int)\", []);\n"
+      "DbExec(h, \"insert into t values (?)\", [\"1\"]);\n"
+      "int rows = DbQuery(h, \"select n from t\", []);\n"
+      "while (DbNext(rows))\n"
+      "{\n"
+      "    Console.WriteLine(DbInt(rows, 1));\n"
+      "}" },
 
     { "db_text", "db_text_cmd", KN_SDT_TEXT, 2, P_II,
       "The current row's column as text, counting columns from 1",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (name text)\", [])\n"
-      "call db_exec(h, \"insert into t values (?)\", [\"Ada\"])\n"
-      "let rows: int = db_query(h, \"select name from t\", [])\n"
-      "if db_next(rows)\n"
-      "  call print_text(db_text(rows, 1))\n"
-      "end" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (name text)\", []);\n"
+      "DbExec(h, \"insert into t values (?)\", [\"Ada\"]);\n"
+      "int rows = DbQuery(h, \"select name from t\", []);\n"
+      "if (DbNext(rows))\n"
+      "{\n"
+      "    Console.WriteLine(DbText(rows, 1));\n"
+      "}" },
 
     { "db_int", "db_int", KN_SDT_INT, 2, P_II,
       "The current row's column as a whole number; 0 for NULL",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (n int)\", [])\n"
-      "call db_exec(h, \"insert into t values (?)\", [\"42\"])\n"
-      "let rows: int = db_query(h, \"select n from t\", [])\n"
-      "if db_next(rows)\n"
-      "  call print_int(db_int(rows, 1))\n"
-      "end" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (n int)\", []);\n"
+      "DbExec(h, \"insert into t values (?)\", [\"42\"]);\n"
+      "int rows = DbQuery(h, \"select n from t\", []);\n"
+      "if (DbNext(rows))\n"
+      "{\n"
+      "    Console.WriteLine(DbInt(rows, 1));\n"
+      "}" },
 
     { "db_int64", "db_int64", KN_SDT_INT64, 2, P_II,
       "The current row's column as a wide whole number; 0 for NULL",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (n int)\", [])\n"
-      "call db_exec(h, \"insert into t values (?)\", [\"9000000000\"])\n"
-      "let rows: int = db_query(h, \"select n from t\", [])\n"
-      "if db_next(rows)\n"
-      "  call print_int64(db_int64(rows, 1))\n"
-      "end" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (n int)\", []);\n"
+      "DbExec(h, \"insert into t values (?)\", [\"9000000000\"]);\n"
+      "int rows = DbQuery(h, \"select n from t\", []);\n"
+      "if (DbNext(rows))\n"
+      "{\n"
+      "    PrintInt64(DbInt64(rows, 1));\n"
+      "}" },
 
     { "db_is_null", "db_is_null", KN_SDT_BOOL, 2, P_II,
       "Is the current row's column SQL NULL, rather than an empty value",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (ip text)\", [])\n"
-      "call db_exec_n(h, \"insert into t values (?)\", [\"\"], [true])\n"
-      "let rows: int = db_query(h, \"select ip from t\", [])\n"
-      "if db_next(rows)\n"
-      "  call print_text(\"null: {db_is_null(rows, 1)}\")\n"
-      "end" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (ip text)\", []);\n"
+      "DbExecN(h, \"insert into t values (?)\", [\"\"], [true]);\n"
+      "int rows = DbQuery(h, \"select ip from t\", []);\n"
+      "if (DbNext(rows))\n"
+      "{\n"
+      "    Console.WriteLine($\"null: {DbIsNull(rows, 1)}\");\n"
+      "}" },
 
     { "db_columns", "db_columns", KN_SDT_INT, 1, P_I,
       "How many columns the result has; -1 when the handle is not one",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (a int, b int)\", [])\n"
-      "let rows: int = db_query(h, \"select a, b from t\", [])\n"
-      "call print_int(db_columns(rows))" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (a int, b int)\", []);\n"
+      "int rows = DbQuery(h, \"select a, b from t\", []);\n"
+      "Console.WriteLine(DbColumns(rows));" },
 
     { "db_result_close", "db_result_close", KN_SDT_BOOL, 1, P_I,
       "Close a result handle",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (n int)\", [])\n"
-      "let rows: int = db_query(h, \"select n from t\", [])\n"
-      "if db_result_close(rows)\n"
-      "  call print_text(\"closed\")\n"
-      "end" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (n int)\", []);\n"
+      "int rows = DbQuery(h, \"select n from t\", []);\n"
+      "if (DbResultClose(rows))\n"
+      "{\n"
+      "    Console.WriteLine(\"closed\");\n"
+      "}" },
     { "db_begin", "db_begin", KN_SDT_BOOL, 1, P_I,
       "Start a transaction; every statement until db_commit or db_rollback is part of it",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (n int)\", [])\n"
-      "call db_begin(h)\n"
-      "call db_exec(h, \"insert into t values (?)\", [\"1\"])\n"
-      "call db_commit(h)\n"
-      "call print_text(\"committed\")" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (n int)\", []);\n"
+      "DbBegin(h);\n"
+      "DbExec(h, \"insert into t values (?)\", [\"1\"]);\n"
+      "DbCommit(h);\n"
+      "Console.WriteLine(\"committed\");" },
 
     { "db_commit", "db_commit", KN_SDT_BOOL, 1, P_I,
       "Make the transaction's changes permanent",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (n int)\", [])\n"
-      "call db_begin(h)\n"
-      "call db_exec(h, \"insert into t values (?)\", [\"1\"])\n"
-      "if db_commit(h)\n"
-      "  call print_text(\"kept\")\n"
-      "end" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (n int)\", []);\n"
+      "DbBegin(h);\n"
+      "DbExec(h, \"insert into t values (?)\", [\"1\"]);\n"
+      "if (DbCommit(h))\n"
+      "{\n"
+      "    Console.WriteLine(\"kept\");\n"
+      "}" },
 
     { "db_rollback", "db_rollback", KN_SDT_BOOL, 1, P_I,
       "Undo everything since db_begin",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (n int)\", [])\n"
-      "call db_begin(h)\n"
-      "call db_exec(h, \"insert into t values (?)\", [\"1\"])\n"
-      "call db_rollback(h)\n"
-      "let rows: int = db_query(h, \"select count(*) from t\", [])\n"
-      "if db_next(rows)\n"
-      "  call print_int(db_int(rows, 1))\n"
-      "end" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (n int)\", []);\n"
+      "DbBegin(h);\n"
+      "DbExec(h, \"insert into t values (?)\", [\"1\"]);\n"
+      "DbRollback(h);\n"
+      "int rows = DbQuery(h, \"select count(*) from t\", []);\n"
+      "if (DbNext(rows))\n"
+      "{\n"
+      "    Console.WriteLine(DbInt(rows, 1));\n"
+      "}" },
 
     { "db_last_insert_id", "db_last_insert_id", KN_SDT_INT64, 1, P_I,
       "The id the last INSERT on this connection produced; 0 when there has been none",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (id integer primary key, name text)\", [])\n"
-      "call db_exec(h, \"insert into t (name) values (?)\", [\"Ada\"])\n"
-      "call print_int64(db_last_insert_id(h))" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (id integer primary key, name text)\", []);\n"
+      "DbExec(h, \"insert into t (name) values (?)\", [\"Ada\"]);\n"
+      "PrintInt64(DbLastInsertId(h));" },
 
     { "db_double", "db_double", KN_SDT_DOUBLE, 2, P_II,
       "The current row's column as a double; 0.0 for NULL",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (x real)\", [])\n"
-      "call db_exec(h, \"insert into t values (?)\", [\"2.5\"])\n"
-      "let rows: int = db_query(h, \"select x from t\", [])\n"
-      "if db_next(rows)\n"
-      "  call print_double(db_double(rows, 1))\n"
-      "end" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (x real)\", []);\n"
+      "DbExec(h, \"insert into t values (?)\", [\"2.5\"]);\n"
+      "int rows = DbQuery(h, \"select x from t\", []);\n"
+      "if (DbNext(rows))\n"
+      "{\n"
+      "    Console.WriteLine(DbDouble(rows, 1));\n"
+      "}" },
 
     { "db_bool", "db_bool", KN_SDT_BOOL, 2, P_II,
       "The current row's column as a bool: 1, true or any non-zero number; false for NULL",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (banned int)\", [])\n"
-      "call db_exec(h, \"insert into t values (?)\", [\"1\"])\n"
-      "let rows: int = db_query(h, \"select banned from t\", [])\n"
-      "if db_next(rows)\n"
-      "  call print_text(\"banned: {db_bool(rows, 1)}\")\n"
-      "end" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (banned int)\", []);\n"
+      "DbExec(h, \"insert into t values (?)\", [\"1\"]);\n"
+      "int rows = DbQuery(h, \"select banned from t\", []);\n"
+      "if (DbNext(rows))\n"
+      "{\n"
+      "    Console.WriteLine($\"banned: {DbBool(rows, 1)}\");\n"
+      "}" },
 
     { "db_column_name", "db_column_name", KN_SDT_TEXT, 2, P_II,
       "The name of a result column, counting from 1",
-      "let h: int = db_open(\"sqlite::memory:\")\n"
-      "call db_exec(h, \"create table t (a int, b int)\", [])\n"
-      "let rows: int = db_query(h, \"select a, b as total from t\", [])\n"
-      "call print_text(db_column_name(rows, 2))" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "DbExec(h, \"create table t (a int, b int)\", []);\n"
+      "int rows = DbQuery(h, \"select a, b as total from t\", []);\n"
+      "Console.WriteLine(DbColumnName(rows, 2));" },
     /* --- asynchronous: the statement runs on a worker thread -------------
      * Everything here follows one rule, stated once in db_cmds.c: the worker
      * never calls into the runtime, and every handle a program sees is built by
@@ -232,47 +245,70 @@ static const Kiln_CommandDesc DB_COMMANDS[] = {
      * makes a 10 Hz tick able to write to a database without holding the pump. */
     { "db_exec_async", "db_exec_async", KN_SDT_INT, 3, P_ITA,
       "Queue an INSERT, UPDATE or DELETE on a worker thread and answer a request id, so the pump keeps turning",
-      "let h: int = db_open(\"sqlite::memory:\")\nlet job: int = db_exec_async(h, \"create table t (a int)\", [])\ncall print_text(\"queued {job}\")" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "int job = DbExecAsync(h, \"create table t (a int)\", []);\n"
+      "Console.WriteLine($\"queued {job}\");" },
 
     { "db_exec_async_n", "db_exec_async_n", KN_SDT_INT, 4, P_ITAA,
       "The same, with a bool per parameter saying which of them bind SQL NULL",
-      "let h: int = db_open(\"sqlite::memory:\")\nlet job: int = db_exec_async_n(h, \"insert into t values (?)\", [\"1\"], [true])\ncall print_text(\"queued {job}\")" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "int job = DbExecAsyncN(h, \"insert into t values (?)\", [\"1\"], [true]);\n"
+      "Console.WriteLine($\"queued {job}\");" },
 
     { "db_query_async", "db_query_async", KN_SDT_INT, 3, P_ITA,
       "Queue a SELECT on a worker thread and answer a request id; the rows are collected by the time it is ready",
-      "let h: int = db_open(\"sqlite::memory:\")\nlet job: int = db_query_async(h, \"select 1\", [])\ncall print_text(\"queued {job}\")" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "int job = DbQueryAsync(h, \"select 1\", []);\n"
+      "Console.WriteLine($\"queued {job}\");" },
 
     { "db_query_async_n", "db_query_async_n", KN_SDT_INT, 4, P_ITAA,
       "The same, with a bool per parameter saying which of them bind SQL NULL",
-      "let h: int = db_open(\"sqlite::memory:\")\nlet job: int = db_query_async_n(h, \"select ?\", [\"ada\"], [false])\ncall print_text(\"queued {job}\")" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "int job = DbQueryAsyncN(h, \"select ?\", [\"ada\"], [false]);\n"
+      "Console.WriteLine($\"queued {job}\");" },
 
     { "db_req_ready", "db_req_ready", KN_SDT_BOOL, 1, P_I,
       "Whether a queued statement has finished; false while it is still running, and the error slot stays clear",
-      "let h: int = db_open(\"sqlite::memory:\")\nlet job: int = db_exec_async(h, \"create table t (a int)\", [])\nlet done: bool = db_req_ready(job)\ncall print_text(\"finished: {done}\")" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "int job = DbExecAsync(h, \"create table t (a int)\", []);\n"
+      "bool done = DbReqReady(job);\n"
+      "Console.WriteLine($\"finished: {done}\");" },
 
     { "db_req_rows", "db_req_rows", KN_SDT_INT, 1, P_I,
       "Rows changed by a finished execute, rows in a finished query, and -1 when it failed",
-      "let h: int = db_open(\"sqlite::memory:\")\nlet job: int = db_exec_async(h, \"create table t (a int)\", [])\ncall print_int(db_req_rows(job))" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "int job = DbExecAsync(h, \"create table t (a int)\", []);\n"
+      "Console.WriteLine(DbReqRows(job));" },
 
     { "db_req_columns", "db_req_columns", KN_SDT_INT, 1, P_I,
       "How many columns a finished query collected",
-      "let h: int = db_open(\"sqlite::memory:\")\nlet job: int = db_query_async(h, \"select 1\", [])\ncall print_int(db_req_columns(job))" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "int job = DbQueryAsync(h, \"select 1\", []);\n"
+      "Console.WriteLine(DbReqColumns(job));" },
 
     { "db_req_text", "db_req_text", KN_SDT_TEXT, 3, P_III,
       "One cell of a finished query, rows and columns counting from 1, and \"\" for SQL NULL",
-      "let h: int = db_open(\"sqlite::memory:\")\nlet job: int = db_query_async(h, \"select 1\", [])\ncall print_text(db_req_text(job, 1, 1))" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "int job = DbQueryAsync(h, \"select 1\", []);\n"
+      "Console.WriteLine(DbReqText(job, 1, 1));" },
 
     { "db_req_is_null", "db_req_is_null", KN_SDT_BOOL, 3, P_III,
       "Whether a cell of a finished query is SQL NULL, which an empty string cannot say",
-      "let h: int = db_open(\"sqlite::memory:\")\nlet job: int = db_query_async(h, \"select null\", [])\ncall print_text(\"null: {db_req_is_null(job, 1, 1)}\")" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "int job = DbQueryAsync(h, \"select null\", []);\n"
+      "Console.WriteLine($\"null: {DbReqIsNull(job, 1, 1)}\");" },
 
     { "db_req_error", "db_req_error", KN_SDT_TEXT, 1, P_I,
       "Why a finished statement failed, or \"\" when it succeeded",
-      "let h: int = db_open(\"sqlite::memory:\")\nlet job: int = db_exec_async(h, \"select * from nosuchtable\", [])\ncall print_text(db_req_error(job))" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "int job = DbExecAsync(h, \"select * from nosuchtable\", []);\n"
+      "Console.WriteLine(DbReqError(job));" },
 
     { "db_req_free", "db_req_free", KN_SDT_BOOL, 1, P_I,
       "Release a finished request and everything it collected; refused while it is still running",
-      "let h: int = db_open(\"sqlite::memory:\")\nlet job: int = db_exec_async(h, \"create table t (a int)\", [])\ncall print_text(\"freed: {db_req_free(job)}\")" },
+      "int h = DbOpen(\"sqlite::memory:\");\n"
+      "int job = DbExecAsync(h, \"create table t (a int)\", []);\n"
+      "Console.WriteLine($\"freed: {DbReqFree(job)}\");" },
 
 };
 

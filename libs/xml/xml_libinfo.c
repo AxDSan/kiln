@@ -37,75 +37,101 @@ static const int32_t P_HNT[]     = { KN_SDT_INT, KN_SDT_INT, KN_SDT_TEXT };
 static const Kiln_CommandDesc XML_COMMANDS[] = {
     { "xml_parse", "xml_parse", KN_SDT_INT, 1, P_BIN,
       "Parse a document from a byte-set and answer its handle, or 0 with the line and reason in the error slot",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<items count=\"2\"/>\"\"\"))\ncall print_int(h)" },
+      "int h = XmlParse(BytesFromText(\"<items count=\\\"2\\\"/>\"));\n"
+      "Console.WriteLine(h);" },
 
     { "xml_close", "xml_close", KN_SDT_BOOL, 1, P_H,
       "Close a document and free it; false when the handle was not one",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<a/>\"\"\"))\nlet ok: bool = xml_close(h)\ncall print_text(\"closed: {ok}\")" },
+      "int h = XmlParse(BytesFromText(\"<a/>\"));\n"
+      "bool ok = XmlClose(h);\n"
+      "Console.WriteLine($\"closed: {ok}\");" },
 
     { "xml_close_all", "xml_close_all", KN_SDT_INT, 0, NULL,
       "Close every open document and answer how many there were",
-      "call print_int(xml_close_all())" },
+      "Console.WriteLine(XmlCloseAll());" },
 
     { "xml_root", "xml_root", KN_SDT_INT, 1, P_H,
       "The first top-level element, or 0 for a document that holds none",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<items><row id=\"1\"/></items>\"\"\"))\ncall print_int(xml_root(h))" },
+      "int h = XmlParse(BytesFromText(\"<items><row id=\\\"1\\\"/></items>\"));\n"
+      "Console.WriteLine(XmlRoot(h));" },
 
     { "xml_parent", "xml_parent", KN_SDT_INT, 2, P_HN,
       "The element a node sits inside, or 0 when it is top level",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<items><row id=\"1\"/></items>\"\"\"))\nlet r: int = xml_first(h, xml_root(h), \"row\")\ncall print_int(xml_parent(h, r))" },
+      "int h = XmlParse(BytesFromText(\"<items><row id=\\\"1\\\"/></items>\"));\n"
+      "int r = XmlFirst(h, XmlRoot(h), \"row\");\n"
+      "Console.WriteLine(XmlParent(h, r));" },
 
     { "xml_line", "xml_line", KN_SDT_INT, 2, P_HN,
       "The 1-based line an element's start tag begins on, for diagnostics",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<items>\n<row/>\n</items>\"\"\"))\nlet r: int = xml_first(h, xml_root(h), \"row\")\ncall print_int(xml_line(h, r))" },
+      "int h = XmlParse(BytesFromText(\"<items>\\n  <row/>\\n  </items>\"));\n"
+      "int r = XmlFirst(h, XmlRoot(h), \"row\");\n"
+      "Console.WriteLine(XmlLine(h, r));" },
 
     { "xml_count", "xml_count", KN_SDT_INT, 2, P_HN,
       "How many child elements a node has; -1 on a bad handle or node id",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<items><row id=\"1\"/><row id=\"2\"/></items>\"\"\"))\ncall print_int(xml_count(h, xml_root(h)))" },
+      "int h = XmlParse(BytesFromText(\"<items><row id=\\\"1\\\"/><row id=\\\"2\\\"/></items>\"));\n"
+      "Console.WriteLine(XmlCount(h, XmlRoot(h)));" },
 
     { "xml_child", "xml_child", KN_SDT_INT, 3, P_HNI,
       "The i-th child element, counting from 1, or 0 when there is none",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<items><row id=\"1\"/></items>\"\"\"))\ncall print_int(xml_child(h, xml_root(h), 1))" },
+      "int h = XmlParse(BytesFromText(\"<items><row id=\\\"1\\\"/></items>\"));\n"
+      "Console.WriteLine(XmlChild(h, XmlRoot(h), 1));" },
 
     { "xml_name", "xml_name", KN_SDT_TEXT, 2, P_HN,
       "An element's own name, which is the tag it was written with",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<items><row id=\"1\"/></items>\"\"\"))\nlet r: int = xml_first(h, xml_root(h), \"row\")\ncall print_text(xml_name(h, r))" },
+      "int h = XmlParse(BytesFromText(\"<items><row id=\\\"1\\\"/></items>\"));\n"
+      "int r = XmlFirst(h, XmlRoot(h), \"row\");\n"
+      "Console.WriteLine(XmlName(h, r));" },
 
     { "xml_attr", "xml_attr", KN_SDT_TEXT, 3, P_HNT,
       "An attribute's value, or \"\" when it is not there — xml_has_attr tells those apart",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<row id=\"1007\" Attack=\"396,428\"/>\"\"\"))\ncall print_text(xml_attr(h, xml_root(h), \"Attack\"))" },
+      "int h = XmlParse(BytesFromText(\"<row id=\\\"1007\\\" Attack=\\\"396,428\\\"/>\"));\n"
+      "Console.WriteLine(XmlAttr(h, XmlRoot(h), \"Attack\"));" },
 
     { "xml_has_attr", "xml_has_attr", KN_SDT_BOOL, 3, P_HNT,
       "Whether an element carries an attribute, which an empty value cannot say",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<row id=\"1007\"/>\"\"\"))\nif xml_has_attr(h, xml_root(h), \"Attack\") = false\n  call print_text(\"no Attack\")\nend" },
+      "int h = XmlParse(BytesFromText(\"<row id=\\\"1007\\\"/>\"));\n"
+      "if (XmlHasAttr(h, XmlRoot(h), \"Attack\") == false)\n"
+      "{\n"
+      "    Console.WriteLine(\"no Attack\");\n"
+      "}" },
 
     { "xml_attr_count", "xml_attr_count", KN_SDT_INT, 2, P_HN,
       "How many attributes an element carries",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<row id=\"1007\" Attack=\"1\"/>\"\"\"))\ncall print_int(xml_attr_count(h, xml_root(h)))" },
+      "int h = XmlParse(BytesFromText(\"<row id=\\\"1007\\\" Attack=\\\"1\\\"/>\"));\n"
+      "Console.WriteLine(XmlAttrCount(h, XmlRoot(h)));" },
 
     { "xml_attr_name", "xml_attr_name", KN_SDT_TEXT, 3, P_HNI,
       "The name of an element's i-th attribute, counting from 1",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<row id=\"1007\"/>\"\"\"))\ncall print_text(xml_attr_name(h, xml_root(h), 1))" },
+      "int h = XmlParse(BytesFromText(\"<row id=\\\"1007\\\"/>\"));\n"
+      "Console.WriteLine(XmlAttrName(h, XmlRoot(h), 1));" },
 
     { "xml_attr_at", "xml_attr_at", KN_SDT_TEXT, 3, P_HNI,
       "The value of an element's i-th attribute, counting from 1",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<row id=\"1007\"/>\"\"\"))\ncall print_text(xml_attr_at(h, xml_root(h), 1))" },
+      "int h = XmlParse(BytesFromText(\"<row id=\\\"1007\\\"/>\"));\n"
+      "Console.WriteLine(XmlAttrAt(h, XmlRoot(h), 1));" },
 
     { "xml_text", "xml_text", KN_SDT_TEXT, 2, P_HN,
       "An element's own text with the surrounding whitespace removed, or \"\" when it holds only elements",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<name>Kryss</name>\"\"\"))\ncall print_text(xml_text(h, xml_root(h)))" },
+      "int h = XmlParse(BytesFromText(\"<name>Kryss</name>\"));\n"
+      "Console.WriteLine(XmlText(h, XmlRoot(h)));" },
 
     { "xml_first", "xml_first", KN_SDT_INT, 3, P_HNT,
       "The first child of a node with that name — \"\" meaning any name — or 0 when there is none",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<items><row id=\"1\"/></items>\"\"\"))\ncall print_int(xml_first(h, xml_root(h), \"row\"))" },
+      "int h = XmlParse(BytesFromText(\"<items><row id=\\\"1\\\"/></items>\"));\n"
+      "Console.WriteLine(XmlFirst(h, XmlRoot(h), \"row\"));" },
 
     { "xml_sibling", "xml_sibling", KN_SDT_INT, 3, P_HNT,
       "The next element after a node with that name, which is how the next row is found",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<items><row id=\"1\"/><row id=\"2\"/></items>\"\"\"))\nvar r: int = xml_first(h, xml_root(h), \"row\")\nr = xml_sibling(h, r, \"row\")\ncall print_text(xml_attr(h, r, \"id\"))" },
+      "int h = XmlParse(BytesFromText(\"<items><row id=\\\"1\\\"/><row id=\\\"2\\\"/></items>\"));\n"
+      "int r = XmlFirst(h, XmlRoot(h), \"row\");\n"
+      "r = XmlSibling(h, r, \"row\");\n"
+      "Console.WriteLine(XmlAttr(h, r, \"id\"));" },
 
     { "xml_descend", "xml_descend", KN_SDT_INT, 3, P_HNT,
       "The first element at any depth under a node with that name, or 0 when there is none",
-      "let h: int = xml_parse(bytes_from_text(r\"\"\"<root><group><row id=\"7\"/></group></root>\"\"\"))\ncall print_int(xml_descend(h, xml_root(h), \"row\"))" },
+      "int h = XmlParse(BytesFromText(\"<root><group><row id=\\\"7\\\"/></group></root>\"));\n"
+      "Console.WriteLine(XmlDescend(h, XmlRoot(h), \"row\"));" },
 };
 
 static const Kiln_LibInfo XML_INFO = {

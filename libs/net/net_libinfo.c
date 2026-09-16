@@ -109,11 +109,12 @@ static const Kiln_CommandDesc NET_COMMANDS[] = {
     { "tcpserver_send",           "tcpserver_send",           KN_SDT_BOOL, 3, P_TIT },
     { "tcpserver_send_bytes",     "tcpserver_send_bytes",     KN_SDT_BOOL, 3, P_TIB,
       "Send a byte-set to one client, every byte of it",
-      "var frame: bytes = bytes_new(4)\n"
-      "call bytes_set(frame, 1, 4)\n"
-      "if tcpserver_send_bytes(\"chat\", 1, frame)\n"
-      "  call print_text(\"sent\")\n"
-      "end" },
+      "Bytes frame = BytesNew(4);\n"
+      "BytesSet(frame, 1, 4);\n"
+      "if (TcpserverSendBytes(\"chat\", 1, frame))\n"
+      "{\n"
+      "    Console.WriteLine(\"sent\");\n"
+      "}" },
     { "tcpserver_send_all",       "tcpserver_send_all",       KN_SDT_INT,  2, P_TT  },
     { "tcpserver_disconnect",     "tcpserver_disconnect",     KN_SDT_BOOL, 2, P_TI  },
     { "tcpserver_client_count",   "tcpserver_client_count",   KN_SDT_INT,  1, P_T   },
@@ -122,11 +123,12 @@ static const Kiln_CommandDesc NET_COMMANDS[] = {
     { "tcpclient_send",           "tcpclient_send",           KN_SDT_BOOL, 2, P_TT  },
     { "tcpclient_send_bytes",     "tcpclient_send_bytes",     KN_SDT_BOOL, 2, P_TB,
       "Send a byte-set to the server, every byte of it",
-      "var frame: bytes = bytes_new(4)\n"
-      "call bytes_set(frame, 1, 4)\n"
-      "if tcpclient_send_bytes(\"feed\", frame)\n"
-      "  call print_text(\"sent\")\n"
-      "end" },
+      "Bytes frame = BytesNew(4);\n"
+      "BytesSet(frame, 1, 4);\n"
+      "if (TcpclientSendBytes(\"feed\", frame))\n"
+      "{\n"
+      "    Console.WriteLine(\"sent\");\n"
+      "}" },
     { "tcpclient_connect",        "tcpclient_connect",        KN_SDT_BOOL, 1, P_T   },
     { "tcpclient_disconnect",     "tcpclient_disconnect",     KN_SDT_BOOL, 1, P_T   },
     { "tcpclient_connected",      "tcpclient_connected",      KN_SDT_BOOL, 1, P_T   },

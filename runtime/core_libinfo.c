@@ -80,17 +80,19 @@ static const Kiln_CommandDesc CORE_COMMANDS[] = {
        for saying "now is a good moment" */
     DCMD("memory_in_use", kn_memory_in_use, KN_SDT_INT64, 0, NULL,
          "How many bytes of program data the runtime is currently holding.",
-         "let before: int64 = memory_in_use()\n"
-         "for i = 1 to 10000\n"
-         "  let s: text = \"row {i}\"\n"
-         "end\n"
-         "call print_text(\"held {memory_in_use() - before} more bytes\")"),
+         "long before = MemoryInUse();\n"
+         "foreach (var i in 1..10000)\n"
+         "{\n"
+         "    string s = $\"row {i}\";\n"
+         "}\n"
+         "Console.WriteLine($\"held {MemoryInUse() - before} more bytes\");"),
     DCMD("collect_garbage", kn_collect_garbage, KN_SDT_INT64, 0, NULL,
          "Reclaim unreachable memory now, and answer how many bytes came back.",
-         "for i = 1 to 100000\n"
-         "  let s: text = \"scratch {i}\"\n"
-         "end\n"
-         "call print_text(\"reclaimed {collect_garbage()} bytes\")"),
+         "foreach (var i in 1..100000)\n"
+         "{\n"
+         "    string s = $\"scratch {i}\";\n"
+         "}\n"
+         "Console.WriteLine($\"reclaimed {CollectGarbage()} bytes\");"),
     /* integer math */
     CMD("abs_int", kn_abs_int, KN_SDT_INT, 1, P_I),
     CMD("min_int", kn_min_int, KN_SDT_INT, 2, P_II),
@@ -161,42 +163,35 @@ static const Kiln_CommandDesc CORE_COMMANDS[] = {
     CMD("bytes_slice",     kn_bin_slice,     KN_SDT_BIN,  3, P_BII),
     DCMD("bytes_concat",   kn_bin_concat,    KN_SDT_BIN,  2, P_BB,
          "Two byte-sets end to end, as one",
-         "let head: bytes = bytes_new(2)\n"
-         "let body: bytes = bytes_from_text(\"hi\")\n"
-         "call print_int(bytes_count(bytes_concat(head, body)))"),
+         "Bytes head = BytesNew(2);\n"
+         "Bytes body = BytesFromText(\"hi\");\n"
+         "Console.WriteLine(BytesCount(BytesConcat(head, body)));"),
     DCMD("bytes_from_ptr", kn_bin_from_ptr,  KN_SDT_BIN,  2, P_PI,
          "Copy a run of bytes out of an address, into a byte-set",
-         "module frame\n"
-         "target console\n"
+         "namespace Frame;\n"
          "\n"
-         "record point is c\n"
-         "  x: int\n"
-         "  y: int\n"
-         "end\n"
-         "\n"
-         "sub main\n"
-         "  var p: point\n"
-         "  p.x = 7\n"
-         "  let raw: bytes = bytes_from_ptr(address of p, 8)\n"
-         "  call print_int(bytes_at(raw, 1))\n"
-         "end"),
+         "public static class P\n"
+         "{\n"
+         "    public static void Main()\n"
+         "    {\n"
+         "        var raw = BytesFromPtr(PtrOfText(\"kiln\"), 4);\n"
+         "        Console.WriteLine(BytesAt(raw, 1));\n"
+         "    }\n"
+         "}"),
     DCMD("bytes_copy_to_ptr", kn_bin_to_ptr, KN_SDT_INT,  2, P_BP,
          "Copy a byte-set to an address; answers how many bytes that was",
-         "module frame\n"
-         "target console\n"
+         "namespace Frame;\n"
          "\n"
-         "record point is c\n"
-         "  x: int\n"
-         "  y: int\n"
-         "end\n"
-         "\n"
-         "sub main\n"
-         "  var raw: bytes = bytes_new(8)\n"
-         "  call bytes_set(raw, 1, 7)\n"
-         "  var p: point\n"
-         "  call print_int(bytes_copy_to_ptr(raw, address of p))\n"
-         "  call print_int(p.x)\n"
-         "end"),
+         "public static class P\n"
+         "{\n"
+         "    public static void Main()\n"
+         "    {\n"
+         "        var raw = BytesFromText(\"kiln\");\n"
+         "        var dst = MemAlloc(4);\n"
+         "        Console.WriteLine(BytesCopyToPtr(raw, dst));\n"
+         "        MemFree(dst);\n"
+         "    }\n"
+         "}"),
     /* dictionaries — values found by name.  `dict_get` on a key that is not
      * there answers the sentinel for its value type and sets the error slot;
      * `dict_has` is the predicate that tells that apart from a stored 0. */

@@ -15,7 +15,7 @@ static const Kiln_CommandDesc HELLO_COMMANDS[] = {
      * `tools/check-docs.sh` compiles every one of them. */
     { "greet", "hello_greet", KN_SDT_TEXT, 1, P_T,
       "Greet someone by name",
-      "call print_text(greet(\"world\"))" },
+      "Console.WriteLine(Greet(\"world\"));" },
 };
 
 static const Kiln_LibInfo HELLO_INFO = {
