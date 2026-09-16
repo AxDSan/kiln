@@ -15,6 +15,14 @@ fn scratch(name: &str) -> PathBuf {
     d
 }
 
+/// The Wine prefix every Windows run shares. A prefix is a gigabyte or more,
+/// and `/tmp` is often RAM, so it lives under the build tree and is made once.
+fn wine_prefix() -> PathBuf {
+    let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("k2-wineprefix");
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
 fn on_path(tool: &str) -> bool {
     Command::new(tool)
         .arg("--version")
@@ -170,7 +178,7 @@ fn a_kiln_2_program_cross_builds_for_windows() {
             eprintln!("wine is not installed; the Windows image was built but not run");
             continue;
         }
-        let prefix = scratch("wineprefix");
+        let prefix = wine_prefix();
         let got = run(Command::new("wine")
             .arg(&exe)
             .current_dir(&dir)
@@ -235,7 +243,7 @@ fn a_win32_system_call_is_stdcall_on_x86() {
         "namespace WinUse;\nusing Kiln.Win;\n\npublic static class P\n{\n    public static void Main()\n    {\n        var r = new RECT();\n        int sum = 0;\n        int i = 1;\n        while (i <= 5000)\n        {\n            SetRect(r, i, 2, 3, 4);\n            sum = sum + r.Left;\n            i = i + 1;\n        }\n        Console.WriteLine($\"sum {sum} i {i}\");\n    }\n}\n",
     )
     .unwrap();
-    let prefix = scratch("win32conv-prefix");
+    let prefix = wine_prefix();
     for arch in ["x86_64", "x86"] {
         let exe = dir.join(format!("win-{arch}.exe"));
         kiln_from_repo(&src, &exe, &["--os", "windows", "--arch", arch]);
