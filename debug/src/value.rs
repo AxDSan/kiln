@@ -14,6 +14,15 @@
 //!   they are a pair, which is why `nothing` can be printed at all.
 //! - **Record field names do not reach a shipped binary.** They exist here
 //!   only because the compiler wrote them into the debug information.
+//! - **A Kiln 2 record is a C-layout struct behind a pointer**, with no header
+//!   in front of its fields — not the runtime's heap object 1.x builds. The
+//!   pointer looks the same in both, so the member offsets decide which read
+//!   to make.
+//! - **A Kiln 2 `string` is a pointer with no name.** DWARF has no `string`, so
+//!   the characters are read from what the pointer addresses. A `T?` and a raw
+//!   `ptr` are described by that same bare pointer, so a value-type optional's
+//!   `{value, present}` pair cannot be told from a string or an address here —
+//!   describing one would be the emitter's job, and it does not yet.
 //! - **Compiler-invented locals are hidden.** They are the only names
 //!   containing `$`, and `$` is not a character an identifier may contain, so
 //!   filtering them is exact rather than a guess.

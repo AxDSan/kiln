@@ -140,7 +140,9 @@ fn a_kiln2_string_reads_through_its_unnamed_pointer() {
     let mut ram = Ram::new();
     ram.put_u64(0, BASE + 16).put_text(16, "hello");
     assert_eq!(
-        value::read(&local("s", "", 0), BASE, &ram).unwrap().to_string(),
+        value::read(&local("s", "", 0), BASE, &ram)
+            .unwrap()
+            .to_string(),
         "\"hello\""
     );
 
@@ -182,7 +184,10 @@ fn a_kiln2_list_shows_its_length_and_not_a_walk_through_its_elements() {
     );
     // The compiler's instance number is not the name of anything the user
     // wrote, so the type is shown under the language's own spelling.
-    assert_eq!(value.to_string(), format!("List {{ len: 2, cap: 4, data: {} }}", BASE + 48));
+    assert_eq!(
+        value.to_string(),
+        format!("List {{ len: 2, cap: 4, data: {} }}", BASE + 48)
+    );
 }
 
 /// `Result<T>` is the compiler's `{ok, value, err}` record, and every field is
@@ -208,7 +213,10 @@ fn a_kiln2_result_shows_its_value_and_its_error() {
         BASE,
         &ram,
     );
-    assert_eq!(value.to_string(), "Result { ok: true, value: 2, err: \"\" }");
+    assert_eq!(
+        value.to_string(),
+        "Result { ok: true, value: 2, err: \"\" }"
+    );
 }
 
 /// A null reference is a value, not a read that failed: `null` is what the
@@ -333,9 +341,7 @@ fn session(dir: &std::path::Path, source: &str, line: u32, requests: &[(&str, &s
     send("launch", &format!(r#"{{"program":"{source}"}}"#));
     send(
         "setBreakpoints",
-        &format!(
-            r#"{{"source":{{"path":"{source}"}},"breakpoints":[{{"line":{line}}}]}}"#
-        ),
+        &format!(r#"{{"source":{{"path":"{source}"}},"breakpoints":[{{"line":{line}}}]}}"#),
     );
     send("configurationDone", "");
     for (command, arguments) in requests {

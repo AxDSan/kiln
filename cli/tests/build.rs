@@ -2650,7 +2650,7 @@ fn a_documented_command_carries_its_doc_and_example() {
         "the sentence did not survive the ABI:\n{stdout}"
     );
     assert!(
-        stdout.contains("example: file_read_text let notes: text = file_read_text(\"notes.txt\")"),
+        stdout.contains("example: file_read_text string notes = FileReadText(\"notes.txt\");"),
         "the example did not survive the ABI:\n{stdout}"
     );
     // Multi-line examples arrive as several lines, in order.
