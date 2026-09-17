@@ -323,6 +323,12 @@ page's three counts, the counts and unpack lines here, and the book's table of
 contents. [`RELEASING.md`](RELEASING.md) is the list, in order, and
 `tools/check-release.sh` is the part of it a script can hold to account.
 
+## Contributing
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) covers building, the checks a change has to
+pass, and the conventions. Security problems go through
+[`SECURITY.md`](SECURITY.md), not a public issue.
+
 ## Licence
 
 MIT OR BSD-3-Clause, at your option. See [`LICENSE`](LICENSE), and
