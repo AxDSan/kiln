@@ -1,39 +1,24 @@
 # Build targets
 
-> **The samples on this page are Kiln 1.x.** Kiln 1.x still builds, so they run
-> as written. [Kiln 2](./kiln-2.md) is the current language, and it calls the
-> same libraries and components with different syntax.
-
 The same source builds as any of these. It is a build option, not a rewrite:
 the language, the type checking and the component model are identical across
 all of them. Only the entry contract changes.
 
-| `target` | Produces | Entry |
+| `--target` | Produces | Entry |
 | --- | --- | --- |
-| `console` | a terminal program | `main` |
-| `gui` | a windowed program | the form, then `main`, then the event loop |
-| `sharedlib` | `.so` (`.dll` + `.lib` on Windows), and a C header | none — subroutines are exported |
-| `staticlib` | `.a` archive, and a C header | none — subroutines are exported |
+| `console` | a terminal program | `Main` |
+| `gui` | a windowed program | the form, then `Main`, then the event loop |
+| `sharedlib` | `.so` (`.dll` + `.lib` on Windows), and a C header | none — methods are exported |
+| `staticlib` | `.a` archive, and a C header | none — methods are exported |
 
-Declare it in the module:
-
-```
-module greet
-target sharedlib
-
-sub greet
-  call print_text("Hello from a shared library.")
-end
-```
-
-…or override it for one build, without touching the source:
+The target is a build option, so the source does not name it:
 
 ```sh
 kiln build greet.kiln --target sharedlib -o libgreet.so
 ```
 
-Left out entirely, the target is inferred: a module with a form is `gui`,
-anything else is `console`.
+Left out, the target is inferred: a program with a `form` is `gui`, anything
+else is `console`.
 
 ## Programs
 
@@ -53,8 +38,8 @@ kiln build hello.kiln --release -o hello
 It compiles at `-O2` and adds the hardening a shipped program wants: `_FORTIFY_SOURCE`,
 `-fstack-protector-strong`, position-independent code, read-only relocations
 with every symbol bound at load time, and no symbol table — the names of your
-subroutines, module variables and the runtime commands you linked are gone from
-the file. Dead-stripping still applies, so the program is smaller than the debug
+methods, static fields and the runtime commands you linked are gone from the
+file. Dead-stripping still applies, so the program is smaller than the debug
 one as well as faster.
 
 Each flag is offered to the local `clang` before it is used, and one the
@@ -70,41 +55,44 @@ UI stack is not built `-fPIC` — and the build tells you when it links without 
 
 ## Libraries
 
-A library has no entry point. Every subroutine is exported under its own name,
-so a C host — or anything that can call C — links against it directly, and
-the build writes the header that declares them beside the artifact.
+A library has no entry point. Every `public static` method of a
+`public static class` is exported under its own name, so a C host — or anything
+that can call C — links against it directly, and the build writes the header
+that declares them beside the artifact.
 
 ```
-module greet
-target sharedlib
+namespace Greet;
 
-var greetings: int = 0
+public static class Library
+{
+    static int greetings = 0;
 
-sub greet
-  call print_text("Hello from a shared library.")
-end
+    public static void Hello()
+    {
+        Console.WriteLine("Hello from a shared library.");
+    }
 
-sub add(a: int, b: int): int
-  return a + b
-end
+    public static int Add(int a, int b) => a + b;
 
-sub greeting(name: text): text
-  greetings += 1
-  return "Hello, {name}!"
-end
+    public static string Greeting(string name)
+    {
+        greetings = greetings + 1;
+        return $"Hello, {name}!";
+    }
+}
 ```
 
 ```sh
-kiln build greet.kiln -o libgreet.so     # writes libgreet.so and greet.h
+kiln build greet.kiln --target sharedlib -o libgreet.so     # writes libgreet.so and Greet.h
 ```
 
 ### The header
 
-`greet.h` is generated from the same code the library was lowered from, so
-what it declares is what was linked. It is named after the module, not the
-output — `-o libgreet.so` still gives `greet.h` — and `--header <path>` puts
-it elsewhere. It compiles as C and as C++, and it looks like the header a
-Windows DLL author would have written by hand:
+`Greet.h` is generated from the same code the library was lowered from, so
+what it declares is what was linked. It is named after the namespace, not the
+output — `-o libgreet.so` still gives `Greet.h` — and `--header <path>` puts it
+elsewhere. It compiles as C and as C++, and it looks like the header a Windows
+DLL author would have written by hand:
 
 ```c
 #pragma once
@@ -126,62 +114,62 @@ extern "C" {
 #  define GREET_API __attribute__((visibility("default")))
 #endif
 
-GREET_API void greet_init(void); /* initialises module variables; call once, first */
-GREET_API void greet(void);
-GREET_API int32_t add(int32_t a, int32_t b);
-GREET_API const char *greeting(const char *name);
+GREET_API void Greet_init(void); /* initialises static fields; call once, first */
+GREET_API void Hello(void);
+GREET_API int32_t Add(int32_t a, int32_t b);
+GREET_API const char *Greeting(const char *name);
 
 #ifdef __cplusplus
 }
 #endif
 ```
 
-The macro prefix is the module name in capitals: `GREET_API` marks each
-export, `GREET_EXPORTS` is what the DLL's own build would define (nothing
-you write needs it — the library's objects come from the compiler, not from
-this header — so a consumer always sees `dllimport`), and `GREET_STATIC`
-switches the imports off. A static library's header defines `GREET_STATIC`
-itself, because its symbols are linked in, not imported, and a `dllimport`
-on them would send a Windows link looking for an import library that does
-not exist.
+The macro prefix is the namespace in capitals: `GREET_API` marks each export,
+`GREET_EXPORTS` is what the DLL's own build would define (nothing you write
+needs it — the library's objects come from the compiler, not from this header —
+so a consumer always sees `dllimport`), and `GREET_STATIC` switches the imports
+off. A static library's header defines `GREET_STATIC` itself, because its
+symbols are linked in, not imported, and a `dllimport` on them would send a
+Windows link looking for an import library that does not exist.
 
 The types are the ones the exported wrappers actually take:
 
 | Kiln | C |
 | --- | --- |
 | `int` | `int32_t` |
-| `int64` | `int64_t` |
+| `long` | `int64_t` |
 | `double` | `double` |
 | `bool` | `int32_t` — 0 or 1; never a C `bool`, which is one byte |
-| `text` | `const char *` — NUL-terminated, `NULL` means empty |
+| `string` | `const char *` — NUL-terminated, `NULL` means empty |
+| `Ptr` | `void *` |
 
-Text a subroutine returns belongs to the library: copy it if you keep it,
-and never free it. A subroutine that takes or returns a byte-set, an array,
-a record or a dictionary is a pointer to a runtime-owned object C cannot
-build or read, so it gets no prototype; the header lists it in a comment
-instead, so the omission is a fact you can see rather than a name that is
-simply missing.
+A string a method returns belongs to the library: copy it if you keep it, and
+never free it. A method that takes or returns a byte-set, a `List<T>`, a class
+or a dictionary passes a pointer to a runtime-owned object C cannot build or
+read, so it gets no prototype; the header lists it in a comment instead, so the
+omission is a fact you can see rather than a name that is simply missing.
 
-`<module>_init` initialises the module's variables. It is exported rather
-than run automatically, because a library should not run your code before
-the host is ready for it.
+`<Namespace>_init` initialises the static fields. It is exported rather than
+run automatically, because a library should not run your code before the host
+is ready for it.
 
 ### A loader hook
 
 A shared library can also run *without* a host asking — the moment the OS maps
-it into a process — by defining a specially-named subroutine:
+it into a process — by defining a specially-named method:
 
 ```
-sub dll_attach   # runs when the library is mapped into a process
-sub dll_detach   # runs when it is unmapped
+public static void DllAttach() { ... }   // runs when the library is mapped into a process
+public static void DllDetach() { ... }   // runs when it is unmapped
 ```
 
 Each takes no parameters and returns nothing. Define one in a `sharedlib` and
 the build wires it to the platform's loader entry: a real `DllMain`
 (`DLL_PROCESS_ATTACH` / `DLL_PROCESS_DETACH`) on Windows, an ELF
-constructor/destructor on Linux. `<module>_init` runs first, before
-`dll_attach`, so module variables are ready. A library that defines neither is
-unchanged — it gets no loader entry, and the host calls `<module>_init` itself.
+constructor/destructor on Linux. `<Namespace>_init` runs first, before
+`DllAttach`, so static fields are ready. A library that defines neither is
+unchanged — it gets no loader entry, and the host calls `<Namespace>_init`
+itself.
 
 This is what a library loaded for effect needs — one injected into a process, or
 brought in with `LoadLibrary`/`dlopen` for what it does rather than what it
@@ -193,19 +181,19 @@ that installs a function-pointer hook the instant it loads.
 ### A consumer
 
 `kiln new shared-library` writes a `consumer.cpp` beside the source; this
-is it, for a module named `greet`:
+is it, for the library above:
 
 ```cpp
 #include <stdio.h>
-#include "greet.h"
+#include "Greet.h"
 
 #if defined(_WIN32) && defined(_MSC_VER)
 #  pragma comment(lib, "greet.lib")
 #endif
 
 int main(void) {
-    greet_init();                          /* module variables, once, first */
-    greet();
+    Greet_init();                          /* static fields, once, first */
+    Hello();
     printf("%d\n", (int)add(2, 3));
     printf("%s\n", greeting("world"));      /* the text belongs to the library */
     return 0;
@@ -215,7 +203,7 @@ int main(void) {
 On Linux, with clang:
 
 ```sh
-kiln build greet.kiln -o libgreet.so
+kiln build greet.kiln --target sharedlib -o libgreet.so
 clang++ consumer.cpp -I. -L. -lgreet -Wl,-rpath,. -o consumer && ./consumer
 ```
 
@@ -226,7 +214,7 @@ it.
 A static library is the same, built as an archive and linked in:
 
 ```sh
-kiln build greet.kiln --target staticlib -o libgreet.a    # and greet.h
+kiln build greet.kiln --target staticlib -o libgreet.a    # and Greet.h
 clang++ consumer.cpp -I. libgreet.a -lm -o consumer
 ```
 
@@ -251,18 +239,18 @@ kiln build hello.kiln --os windows --arch x86              # hello.exe, i386
 kiln build hook.kiln  --os windows --arch x86 --target sharedlib   # hook.dll
 ```
 
-The language is unchanged. A c-record's pointer-sized fields are four bytes,
-and a `system` declaration is `stdcall` — which is what a Win32 call is on
-32-bit, and what keeps the stack balanced. `--target gui` is refused on x86
-(the UI stack is x86-64 only).
+The language is unchanged. A `[Packed]` record's pointer-sized fields are four
+bytes, and a `[Dll]` declared `Convention = CallConv.System` is `stdcall` —
+which is what a Win32 call is on 32-bit, and what keeps the stack balanced.
+`--target gui` is refused on x86 (the UI stack is x86-64 only).
 
 A shared library built for Windows comes as three files: `greet.dll`,
-`greet.h`, and the import library `greet.lib` that a Windows link goes
+`Greet.h`, and the import library `greet.lib` that a Windows link goes
 through — the one the consumer's `#pragma comment(lib, "greet.lib")` names.
 The consumer above builds against them with either Windows toolchain:
 
 ```sh
-kiln build greet.kiln --os windows -o greet.dll     # greet.dll, greet.lib, greet.h
+kiln build greet.kiln --os windows --target sharedlib -o greet.dll   # greet.dll, greet.lib, Greet.h
 cl /EHsc consumer.cpp greet.lib                        # MSVC, x64
 x86_64-w64-mingw32-g++ consumer.cpp -L. -lgreet -o consumer.exe   # MinGW
 ```
@@ -294,8 +282,8 @@ the layout of C++ type information and mingw's linker will not merge them.
 
 ### A windowed program
 
-A module with a form builds to a `.exe` for the Windows GUI subsystem — no
-console window opens behind it — and its `print_text` output goes nowhere,
+A program with a form builds to a `.exe` for the Windows GUI subsystem — no
+console window opens behind it — and its `Console.WriteLine` output goes nowhere,
 as it does for any Windows GUI program. The UI stack is linked in: RmlUi
 statically, and SDL2, SDL2_image and freetype as the DLLs the distribution's
 mingw packages provide. Those DLLs and everything they in turn import are
@@ -365,7 +353,7 @@ puts a window on a developer's screen — the program loads with every DLL
 resolved, runs the runtime's entry, and stops where SDL asks for a window,
 with `SDL error on create window` on stderr and exit status 1. That is
 exactly what the suite checks, and no further: a console program that says
-`use ui` runs to completion under wine the same way, which is what proves
+`using Kiln.Ui;` runs to completion under wine the same way, which is what proves
 the DLL list complete. The drawn window itself has not been seen under wine
 or on Windows.
 
@@ -377,7 +365,7 @@ The limits, stated plainly:
 - **A windowed program for Windows has been run under wine, not on Windows.**
   See above for what that proves.
 - **`https://` is off in a Windows build.** The vendored mbedTLS was built
-  for Linux, so a cross build leaves it out and `net_http_get` says so at run
+  for Linux, so a cross build leaves it out and `Net.HttpGet` says so at run
   time; `http://` works.
 - `kiln run --os windows` refuses: the machine you are on cannot run the
   result. Run it under `wine`, or on Windows.
@@ -390,7 +378,7 @@ stem, and libraries follow the platform convention (`libgreet.so`,
 Windows, a program is `hello.exe`, a shared library `greet.dll`, and a static
 library keeps mingw's `libgreet.a`. A Windows program given `-o hello` gets
 its `.exe` added — Windows will not run a file without one. A library's
-header is `<module>.h` beside it whatever the artifact was called, and a
+header is `<Namespace>.h` beside it whatever the artifact was called, and a
 Windows DLL's import library takes the DLL's name with `.lib` in place of
 `.dll`.
 

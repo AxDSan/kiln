@@ -162,8 +162,8 @@ nothing to link. A program that registers a window class, pumps a message loop,
 reads its own memory through `ReadProcessMemory` or writes the registry does it
 with that one kit as its only foreign declaration. It is Windows-only,
 cross-built from Linux with `--os windows`, and tested by running under wine.
-A Kiln 2 program reaches it with `using Kiln.Win;`; the guide's samples are
-still Kiln 1.x. See the
+A Kiln 2 program reaches it with `using Kiln.Win;`, by the API's own names.
+See the
 [`win` kit guide](https://axdsan.github.io/kiln/win-kit.html).
 
 ## Editing

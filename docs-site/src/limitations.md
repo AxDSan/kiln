@@ -97,6 +97,17 @@ what `--release` is for.
   wired to a grid's `Select` or `Activate` receives the row; a key's code and the
   other components' event arguments do not cross yet, so such a handler reads the
   component's state instead.
+- **An event handler's parameters are not checked against the event.** A
+  `Tick += OnTick` whose method takes a `string` compiles; it receives the tick
+  count as whatever that type makes of it. The table in
+  [Components](./components.md#events-that-hand-something-over) is what each
+  event hands over. A non-visual component placed inside a form is not refused
+  either.
+- **A method C calls back is `cdecl`.** A `[Dll]` function takes
+  `Convention = CallConv.System`, but a method passed to C as a callback — a
+  WNDPROC, a ThreadProc — has no way to say `stdcall`, so on 32-bit Windows it
+  unbalances the stack. On 64-bit Windows and on Linux there is one convention
+  and nothing is lost.
 - **A declaration has one name.** `int a = 2, b = 3;` is refused; write two
   declarations.
 - **A call goes through a name, not an index.** `handlers[2](4)` is refused;

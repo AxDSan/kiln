@@ -1,29 +1,33 @@
 # The `win` kit
 
-> **The samples on this page are Kiln 1.x.** Kiln 1.x still builds, so they run
-> as written. [Kiln 2](./kiln-2.md) is the current language, and it calls the
-> same libraries and components with different syntax. A Kiln 2 program reaches
-> this kit with `using Kiln.Win;` — its records, constants and functions by the
-> same names.
-
-`use win` is the Win32 API. One line at the top of a module, and a program has
-`CreateWindowExA`, `WNDCLASSEXA`, `WM_PAINT`, `ReadProcessMemory`,
+`using Kiln.Win;` is the Win32 API. One line at the top of a file, and a program
+has `CreateWindowExA`, `WNDCLASSEXA`, `WM_PAINT`, `ReadProcessMemory`,
 `RegOpenKeyExA` and 1,300 more names, without transcribing a single
 declaration.
 
-```text
-module hello
-use win
+```
+namespace Hello;
 
-sub main
-  call MessageBoxA(ptr_null(), "Built with Kiln.", "Hello", MB_OK)
-end
+using Kiln.Win;
+
+public static class P
+{
+    public static void Main()
+    {
+        MessageBoxA(PtrNull(), "Built with Kiln.", "Hello", MB_OK);
+    }
+}
 ```
 
+The names are the API's own. A function, a struct and a constant are spelled
+the way Microsoft's documentation spells them — `MessageBoxA`, `RECT`,
+`MB_OK` — and a struct's fields are spelled the Kiln way: `WNDCLASSEXA`'s
+`cbSize` is `wc.CbSize`.
+
 It is a [declaration kit](./interop.md#declaration-kits): a directory of `.kdecl`
-files holding `dll` lines, `is c` records and `const` numbers and nothing else.
-The kit does not ship code — there is nothing to link, nothing to install, and
-no wrapper between a program and the API. `CreateWindowExA` in a Kiln
+files holding foreign functions, C-layout records and constants and nothing
+else. The kit does not ship code — there is nothing to link, nothing to install,
+and no wrapper between a program and the API. `CreateWindowExA` in a Kiln
 program is `CreateWindowExA` in `user32.dll`, called with the arguments the
 documentation lists, in the order it lists them.
 
@@ -40,7 +44,7 @@ Five files, split the way the API is:
 | `advapi32.kdecl` | `advapi32.dll` | the registry, access tokens, privileges |
 
 The split is for reading, not for using: every file in a kit directory is
-merged into one bundle, so `use win` is the whole of asking for all five. A
+merged into one bundle, so `using Kiln.Win;` is the whole of asking for all five. A
 name belongs to exactly one file — `RECT` is declared once, in `gdi32.kdecl`, and
 `user32.kdecl` uses it without redeclaring it.
 
@@ -73,11 +77,11 @@ kiln build app.kiln --os windows -o app.exe
 
 ## The two examples
 
-`examples/win/` holds six programs. None of them contains a `dll` or a `record`
-line: if the kit were short of a declaration they need, they would not build.
-(They do declare a few of their own `const`s — a window class name, a frame
-budget — which is a program naming its own values, not a gap in the kit.) Two
-are worth reading first.
+`examples/win/` holds six programs. None of them declares a `[Dll]` function or
+a record: if the kit were short of a declaration they need, they would not
+build. (They do declare a few constants of their own — a window class name, a
+frame budget — which is a program naming its own values, not a gap in the kit.)
+Two are worth reading first.
 
 ### A window
 
@@ -85,50 +89,58 @@ are worth reading first.
 a class, create a window, pump messages, handle them in a window procedure —
 and it is the one that proves the callback direction works.
 
-The WNDPROC is a subroutine, and the class carries its address:
+The WNDPROC is a method, and the class carries its address:
 
-```text
-sub wndproc(hwnd: ptr, msg: int, wparam: int64, lparam: int64): int64 system
-  if msg = WM_PAINT
-    var ps: PAINTSTRUCT
-    let dc: ptr = BeginPaint(hwnd, ps)
-    call TextOutA(dc, 10, 10, "Built with Kiln.", 19)
-    call EndPaint(hwnd, ps)
-    return int_to_int64(0)
-  end
-  if msg = WM_DESTROY
-    call PostQuitMessage(0)
-    return int_to_int64(0)
-  end
-  return DefWindowProcA(hwnd, msg, wparam, lparam)
-end
+```
+public static long Wndproc(Ptr hwnd, int msg, long wparam, long lparam)
+{
+    if (msg == WM_PAINT)
+    {
+        var ps = new PAINTSTRUCT();
+        Ptr dc = BeginPaint(hwnd, ps);
+        TextOutA(dc, 10, 10, "Built with Kiln.", 19);
+        EndPaint(hwnd, ps);
+        return 0;
+    }
+    if (msg == WM_DESTROY)
+    {
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProcA(hwnd, msg, wparam, lparam);
+}
 ```
 
-`WPARAM`, `LPARAM` and `LRESULT` are pointer-width, so the kit spells them
-`intptr` — 64-bit on a 64-bit target, 32-bit on `--arch x86`; the
-message is a `UINT`, so it is an `int`; the `HWND` is a `ptr`. `address of
-wndproc` is the function pointer the class stores, and Windows calls it — not
-Kiln.
+`WPARAM`, `LPARAM` and `LRESULT` are pointer-width, which is a `long` on 64-bit
+Windows; the message is a `UINT`, so it is an `int`; the `HWND` is a `Ptr`.
+Naming the method where a pointer is wanted — `wc.WndProc = Wndproc;` — is the
+function pointer the class stores, and Windows calls it, not Kiln.
 
-The class is a `WNDCLASSEXA`, a c-record that starts zeroed, which is exactly
-what the API wants of every field a program does not set:
+The class is a `WNDCLASSEXA`, a C-layout record that starts zeroed, which is
+exactly what the API wants of every field a program does not set:
 
-```text
-var wc: WNDCLASSEXA
-wc.cb_size = int64_to_int(size of WNDCLASSEXA)
-wc.style = CS_HREDRAW bor CS_VREDRAW             # redraw on either resize
-wc.wnd_proc = address of wndproc
-wc.instance = GetModuleHandleNull(ptr_null())
-wc.cursor = LoadCursorA(ptr_null(), ptr_from_int(int_to_int64(IDC_ARROW)))
-wc.background = ptr_from_int(int_to_int64(COLOR_WINDOW + 1))
-wc.class_name = "KilnWindowClass"
-let atom: int = RegisterClassExA(wc)
+```
+var wc = new WNDCLASSEXA();
+wc.CbSize = (int)WNDCLASSEXA.Size;
+wc.Style = CS_HREDRAW | CS_VREDRAW;              // redraw on either resize
+wc.WndProc = Wndproc;
+wc.Instance = GetModuleHandleNull(PtrNull());
+wc.Cursor = LoadCursorA(PtrNull(), PtrFromInt(IDC_ARROW));
+wc.Background = PtrFromInt(COLOR_WINDOW + 1);
+wc.ClassName = "KilnWindowClass";
+int atom = RegisterClassExA(wc);
 ```
 
 The example ends by itself: it pumps with `PeekMessageA` rather than blocking
 in `GetMessageA`, destroys its own window after a fixed number of turns, and
 leaves through the `WM_QUIT` that `PostQuitMessage` posts — the real exit path,
 so a test can run it to completion.
+
+A callback is a 64-bit Windows program's for now. On 32-bit Windows a WNDPROC
+or a ThreadProc is `stdcall`, and a Kiln 2 method has no way yet to say so; a
+`[Dll]` function can (`Convention = CallConv.System`), a method C calls back
+cannot. The console examples that call *into* Windows build and run on
+`--arch x86`.
 
 ### Reading a process's memory
 
@@ -138,75 +150,75 @@ the process and memory halves are bound to the real thing. It opens itself with
 it, and then reads that value back *through kernel32* rather than off the
 pointer:
 
-```text
-let access: int = PROCESS_VM_READ bor PROCESS_VM_WRITE bor PROCESS_QUERY_INFORMATION
-let process: ptr = OpenProcess(access, false, pid)
-let read_ok: bool = ReadProcessMemory(process, page, into, 4, moved)
+```
+int access = PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_QUERY_INFORMATION;
+Ptr process = OpenProcess(access, false, pid);
+bool readOk = ReadProcessMemory(process, page, into, 4, moved);
 ```
 
 `lpNumberOfBytesRead` is a `SIZE_T *`, so `moved` is an eight-byte cell read
-back with `ptr_read_int64` — four would overwrite the byte after it. Then
+back with `PtrReadInt64` — four would overwrite the byte after it. Then
 `VirtualQuery` fills a `MEMORY_BASIC_INFORMATION` and the program checks the
 state and the protection Windows reports for the page it just made, which is
 the first thing a wrong struct layout gets wrong.
 
 The other four: `registry.kiln` creates a key under `HKEY_CURRENT_USER`, writes
 a `REG_DWORD` and a `REG_SZ`, reads both back and deletes the key again;
-`spawn.kiln` starts a thread whose ThreadProc is a Kiln subroutine and a
-child process through the `STARTUPINFOA` / `PROCESS_INFORMATION` pair;
-`flags.kiln` calls an address `GetProcAddress` handed back and reads the kit's
-constants a bit at a time; `msgbox.kiln` is the four-line one at the top of this
-page.
+`spawn.kiln` starts a thread whose ThreadProc is a Kiln method and a child
+process through the `STARTUPINFOA` / `PROCESS_INFORMATION` pair; `flags.kiln`
+calls an address `GetProcAddress` handed back and reads the kit's constants a
+bit at a time; `msgbox.kiln` is the one at the top of this page.
 
 ## How the declarations are spelled
 
 A transcription has to decide how each Win32 type crosses, and the kit decides
 it the same way everywhere.
 
-| Win32 | In the kit | Why |
+| Win32 | In Kiln 2 | Why |
 | --- | --- | --- |
-| `HWND`, `HANDLE`, `HDC`, `HKEY`, `HMODULE`, any pointer | `ptr` | all pointer-width |
+| `HWND`, `HANDLE`, `HDC`, `HKEY`, `HMODULE`, any pointer | `Ptr` | all pointer-width |
 | `DWORD`, `UINT`, `LONG`, `int`, `ATOM` | `int` | 32 bits |
 | `BOOL` | `bool` | a C `int`; any non-zero is true |
-| `WPARAM`, `LPARAM`, `LRESULT`, `SIZE_T`, `ULONG_PTR` | `intptr` | pointer-width: `int64` on x64, `int` on x86 |
-| `LPCSTR` the API always wants | `text` | crosses as the `char *` it is |
-| `LPCSTR`/`LPSTR` that is routinely `NULL`, or an out buffer | `ptr` | a `text` has no `NULL` |
-| a struct the callee fills | the c-record itself | the pointer is taken for you |
-| `WORD` inside a struct | `word` | a 16-bit field, read as an `int` `0`..`65535` |
+| `WPARAM`, `LPARAM`, `LRESULT`, `SIZE_T`, `ULONG_PTR` | pointer-width | `long` on x64, `int` on x86 |
+| `LPCSTR` the API always wants | `string` | crosses as the `char *` it is |
+| `LPCSTR`/`LPSTR` that is routinely `NULL`, or an out buffer | `Ptr` | a `string` has no `NULL` |
+| a struct the callee fills | the record itself | the pointer is taken for you |
+| `WORD` inside a struct | a 16-bit field | read as an `int` `0`..`65535` |
 
 Two consequences worth knowing before writing against it.
 
-**There is no `NULL` for a `text`.** Where a Win32 function is normally called
-with a null string, the kit binds a `ptr`-taking sibling under a second name
-with `as` pointing at the same export — `GetModuleHandleNull(ptr_null())` is
+**There is no `NULL` for a `string`.** Where a Win32 function is normally called
+with a null string, the kit binds a `Ptr`-taking sibling under a second name
+pointing at the same export — `GetModuleHandleNull(PtrNull())` is
 `GetModuleHandleA(NULL)`. Where both a string and `NULL` are ordinary, the
-parameter is a `ptr` and a program passes `ptr_of_text(...)`.
+parameter is a `Ptr` and a program passes `PtrOfText(...)`.
 
 **A struct parameter is the record, not its address.** `RegisterClassExA(wc)`
-hands C `&wc`: a `dll` parameter typed as a c-record passes the record's
-pointer automatically. Where the declaration says `ptr` instead — because
-`NULL` is a normal argument there — pass `address of` the record yourself.
+hands C `&wc`: a parameter typed as a C-layout record passes the record's
+pointer automatically. Where the declaration says `Ptr` instead — because
+`NULL` is a normal argument there — pass the record itself, which is already
+held by reference.
 
 ## `...A`, not `...W`
 
 Every entry point that takes or answers a string is bound under its ANSI name:
 `MessageBoxA`, `CreateWindowExA`, `RegQueryValueExA`. That is not a shortcut —
-it is the only spelling that works. A Kiln `text` is a NUL-terminated byte
+it is the only spelling that works. A Kiln `string` is a NUL-terminated byte
 string, which is exactly the `char *` an `...A` entry point takes. The `...W`
-entries take UTF-16, and there is no `text` that is UTF-16, so binding them
+entries take UTF-16, and there is no `string` that is UTF-16, so binding them
 would hand Windows bytes it would read as the wrong encoding.
 
 The practical cost is characters outside the process's ANSI code page: a window
 title or a registry value in Japanese, on a machine whose code page is not
-Japanese, will not survive the round trip. A UTF-16 text type is what would fix
-it, and the kit is written so the `...W` half can be added beside the `...A`
+Japanese, will not survive the round trip. A UTF-16 string type is what would
+fix it, and the kit is written so the `...W` half can be added beside the `...A`
 half rather than instead of it.
 
-## Constants are still spelled in decimal
+## Constants are spelled in decimal in the kit
 
-The kit was transcribed before the language had a hexadecimal literal, so every
-constant in the `.kdecl` files is written as the decimal number it is, with the
-hex a C header would show in the comment beside it:
+The kit was transcribed before Kiln had a hexadecimal literal, so every constant
+in the `.kdecl` files is written as the decimal number it is, with the hex a C
+header would show in the comment beside it:
 
 ```text
 const PAGE_READWRITE = 4                   # 0x04
@@ -217,47 +229,37 @@ const WS_OVERLAPPEDWINDOW = 13565952       # 0x00CF0000
 Those are the same numbers either way, so nothing is wrong — the spelling is
 simply older than the language. **A program that uses the kit is under no such
 constraint**: `0x00CF_0000` is a number like any other, and flags combine and
-are tested with the [bitwise
-operators](./language.md#bitwise-operators-and-hex-literals).
+are tested with `|`, `&` and `~`:
 
-```text
-var style: int = WS_VISIBLE bor WS_POPUP        # combine
-if style band WS_BORDER <> 0                    # test one bit
-var low: int64 = wparam band 0xFFFF             # LOWORD
+```
+int style = WS_VISIBLE | WS_POPUP;               // combine
+if ((style & WS_BORDER) != 0) { }                // test one bit
+long low = wparam & 0xFFFF;                      // LOWORD
 ```
 
 `examples/win/flags.kiln` does that against the kit itself and checks every
-answer: `MEM_COMMIT bor MEM_RESERVE` is shown to be the same word as the
+answer: `MEM_COMMIT | MEM_RESERVE` is shown to be the same word as the
 pre-combined `MEM_COMMIT_RESERVE`, `VirtualAlloc` and `OpenProcess` are handed
-words built with `bor` rather than pre-combined ones, and
-`WS_OVERLAPPEDWINDOW` is asked which of its bits are set.
-
-The one place the old spelling shows through is a constant above `0x7FFF_FFFF`.
-Written as decimal `2147483648` it is a *number*, so it types `int64`;
-written as `0x8000_0000` it is a *bit pattern*, so it is an `int` on its own
-and an `int64` where one is wanted. The `HKEY_*` constants in `advapi32.kdecl`
-are the decimal kind, and `RegOpenKeyExA` takes their `ptr` through
-`ptr_from_int`, which wants an `int64` — so they work as written. Rewriting one
-to hex changes its bare type, which is a thing to do deliberately rather than
-by search and replace.
+words built with `|` rather than pre-combined ones, and `WS_OVERLAPPEDWINDOW` is
+asked which of its bits are set.
 
 ## What it does not reach
 
-- **A struct with a union or a bitfield** has no c-record. `BITMAPFILEHEADER`
+- **A struct with a union or a bitfield** has no C-layout record. `BITMAPFILEHEADER`
   is `#pragma pack(2)` — 14 bytes where natural alignment gives 16 — so it is
   deliberately absent rather than present and wrong. Lay those out by hand with
-  `mem_alloc` and `ptr_write_*` at counted offsets.
+  `MemAlloc` and `PtrWrite*` at counted offsets, or declare a `[Packed]` record.
 - **`...W` entry points**, for the reason above.
-- **COM, as declarations.** The mechanism is there —
-  [`call through`](./interop.md#calling-a-function-pointer) calls the function
-  pointer a vtable slot holds, which is what every COM method call is — but
+- **COM, as declarations.** The mechanism is there — a
+  [function pointer](./interop.md#calling-a-function-pointer) calls what a
+  vtable slot holds, which is what every COM method call is — but
   the kit binds nothing for it. `ole32` is absent, so `CoInitializeEx` and
   `CoCreateInstance` are not declared, and `IUnknown`, the `HRESULT`
   conventions and the `this` argument are written out by hand.
-- **A GUI-subsystem image.** A program written against `use win` alone builds
-  for the console subsystem, so on a real Windows desktop it has a console
-  window beside the one it made. `--target gui` is Kiln's own UI stack
-  rather than a subsystem switch, and it refuses a module with no `form`, so
+- **A GUI-subsystem image.** A program written against `using Kiln.Win;` alone
+  builds for the console subsystem, so on a real Windows desktop it has a
+  console window beside the one it made. `--target gui` is Kiln's own UI stack
+  rather than a subsystem switch, and it refuses a program with no `form`, so
   there is currently no way to ask for the GUI subsystem and nothing else.
 - **Structured exception handling**, `__try`/`__except`: there is no way to
   install a handler frame from Kiln.
@@ -265,17 +267,17 @@ by search and replace.
   advapi32. Not in it: `comctl32` (the common controls — list views, tree
   views, `InitCommonControlsEx`), `comdlg32` (`GetOpenFileNameA` and the rest
   of the common dialogs), `shell32` (`ShellExecuteA`, the known folders),
-  `psapi` (`EnumProcessModules`), `ws2_32` (sockets — Kiln's own `net` kit
+  `psapi` (`EnumProcessModules`), `ws2_32` (sockets — Kiln's own `Kiln.Net`
   is the portable answer), `winmm`, `ole32`, the CryptoAPI, and the service
   control manager. Also absent from kernel32 itself: the console API
   (`GetStdHandle`, `WriteConsoleA`, `AllocConsole`), the high-resolution
   timers (`QueryPerformanceCounter`), and the debug loop
   (`WaitForDebugEvent`, `GetThreadContext` — `CONTEXT` is 1,232 bytes of
-  unions and 16-byte alignment, and has no c-record).
+  unions and 16-byte alignment, and has no C-layout record).
 
-  A `dll` line written by hand still reaches every one of those: the kit is a
-  convenience, not a wall. `use win` plus a couple of local declarations is
-  the normal way to use a library the kit has not covered yet.
+  A `[Dll]` declaration written by hand still reaches every one of those: the
+  kit is a convenience, not a wall. `using Kiln.Win;` plus a couple of local
+  declarations is the normal way to use a library the kit has not covered yet.
 
 ## How it is tested
 

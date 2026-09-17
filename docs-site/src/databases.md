@@ -1,77 +1,84 @@
 # Databases
 
-> **The samples on this page are Kiln 1.x.** Kiln 1.x still builds, so they run
-> as written. [Kiln 2](./kiln-2.md) is the current language, and it calls the
-> same libraries and components with different syntax.
+`using Kiln.Db;` opens a database, runs statements with bound parameters, and
+walks rows. Two backends — SQLite and MySQL — behind one set of commands, chosen
+by the DSN's prefix so a program does not change between them.
 
-`use db` opens a database, runs statements with bound parameters, and walks
-rows. Two backends — SQLite and MySQL — behind one set of commands, chosen by
-the DSN's prefix so a program does not change between them.
+```k2
+namespace Accounts;
 
+using Kiln.Db;
+
+public static class P
+{
+    public static void Main()
+    {
+        var h = Db.Open("sqlite:accounts.db");
+        if (h == 0)
+        {
+            Console.WriteLine($"could not open: {LastErrorText()}");
+            return;
+        }
+
+        Db.Exec(h, "create table if not exists people (name text, age int)", []);
+        Db.Exec(h, "insert into people values (?, ?)", ["Ada", "36"]);
+
+        var rows = Db.Query(h, "select name, age from people where name = ?", ["Ada"]);
+        while (Db.Next(rows))
+            Console.WriteLine($"{Db.Text(rows, 1)} is {Db.Int(rows, 2)}");
+        Db.ResultClose(rows);
+        Db.Close(h);
+    }
+}
 ```
-module accounts
-target console
-use db
 
-sub main
-  let h: int = db_open("sqlite:accounts.db")
-  if h = 0
-    call print_text("could not open: {last_error_text()}")
-    return
-  end
-
-  call db_exec(h, "create table if not exists people (name text, age int)", [])
-  call db_exec(h, "insert into people values (?, ?)", ["Ada", "36"])
-
-  let rows: int = db_query(h, "select name, age from people where name = ?", ["Ada"])
-  while db_next(rows)
-    call print_text("{db_text(rows, 1)} is {db_int(rows, 2)}")
-  end
-  call db_result_close(rows)
-  call db_close(h)
-end
-```
+A record can also be the table: `[Table]` on a record gives it `Insert` and
+`Select`, and a `Select` predicate written as a lambda is translated to SQL while
+compiling. The [language guide](./kiln-2.md#talking-to-a-database) shows it.
+This page is the layer underneath, which a program reaches for when the SQL is
+its own.
 
 ## Every value is a bound parameter
 
-There is no `db_exec(h, sql)` without a parameter list, and that is the whole
+There is no `Db.Exec(h, sql)` without a parameter list, and that is the whole
 design. A library whose shortest call concatenates is a library that teaches
 injection; here the shortest call binds, so the easy path and the safe path are
 the same path.
 
 ```
-# The value is a value, whatever it looks like.
-let rows: int = db_query(h, "select id from accounts where username = ?",
-                         ["ada' or '1'='1"])
+// The value is a value, whatever it looks like.
+var rows = Db.Query(h, "select id from accounts where username = ?",
+                    ["ada' or '1'='1"]);
 ```
 
 That query matches nothing. The text never reaches the server as syntax — it is
 bound, so the database compares a column against a string that happens to
 contain quotes.
 
-Parameters are `text[]` whatever the column's type is, and the driver coerces:
-`["36"]` into an INTEGER column stores 36. One type keeps the surface one call
-wide. Read a column back as whatever it is — `db_int`, `db_int64`, `db_text`.
+Parameters are a `List<string>` whatever the column's type is, and the driver
+coerces: `["36"]` into an INTEGER column stores 36. One type keeps the surface
+one call wide. Read a column back as whatever it is — `Db.Int`, `Db.Int64`,
+`Db.Text`.
 
 ## NULL is not an empty string
 
 A database distinguishes "no value" from "the empty value", and so does
 everything that reads it afterwards — a blank IP address on an admin page means
-something different from "never logged in". `text[]` cannot say NULL, so the
-`_n` forms take a second list that can:
+something different from "never logged in". A list of strings cannot say NULL,
+so the `N` forms take a second list that can:
 
 ```
-# last_login_ip binds as SQL NULL; the id binds as the text it is.
-call db_exec_n(h, "update accounts set last_login_ip = ? where id = ?",
-               ["", "1"], [true, false])
+// last_login_ip binds as SQL NULL; the id binds as the string it is.
+Db.ExecN(h, "update accounts set last_login_ip = ? where id = ?",
+         ["", "1"], [true, false]);
 ```
 
 `nulls[i] = true` binds parameter `i` as NULL whatever `params[i]` holds. A
 shorter `nulls` list is not an error — the rest are not null, which is what
 passing none already meant.
 
-On the way back, `db_is_null` is the only thing that separates a stored empty
-string from a missing value, because both answer `""` from `db_text`.
+On the way back, `Db.IsNull` is the only thing that separates a stored empty
+string from a missing value, because both answer `""` from `Db.Text`.
 
 ## Connecting
 
@@ -89,51 +96,49 @@ configured is a program that works until it is deployed.
 
 ## Rows
 
-`db_query` answers a result handle; `db_next` advances to a row and answers
+`Db.Query` answers a result handle; `Db.Next` advances to a row and answers
 false at the end. False at the end is not a failure — the error slot is clear
 — and false *with* a code set is. Columns count from 1, as everything in Kiln
 does.
 
 ```
-let rows: int = db_query(h, "select name, age from people", [])
-while db_next(rows)
-  call print_text(db_text(rows, 1))
-end
-call db_result_close(rows)
+var rows = Db.Query(h, "select name, age from people", []);
+while (Db.Next(rows))
+    Console.WriteLine(Db.Text(rows, 1));
+Db.ResultClose(rows);
 ```
 
-A result handle is closed by `db_result_close`, and closing the connection
+A result handle is closed by `Db.ResultClose`, and closing the connection
 closes what it opened. Both are runtime handles: a stale one is rejected rather
 than reused, a connection handle passed where a result handle goes is refused
 by kind, and `0` is never valid.
 
 ## Transactions
 
-`db_begin` starts one; every statement on that handle until `db_commit` or
-`db_rollback` is part of it. A second `db_begin` before either is refused
+`Db.Begin` starts one; every statement on that handle until `Db.Commit` or
+`Db.Rollback` is part of it. A second `Db.Begin` before either is refused
 rather than flattened, and a commit or rollback with no transaction open is
 refused too — both are bugs in the program, and the library says so instead of
 guessing.
 
 ```
-call db_begin(h)
-call db_exec(h, "update bags set slot = ? where id = ?", ["7", "41"])
-call db_exec(h, "update bags set slot = ? where id = ?", ["3", "42"])
-if db_commit(h)
-  call print_text("swapped")
-end
+Db.Begin(h);
+Db.Exec(h, "update bags set slot = ? where id = ?", ["7", "41"]);
+Db.Exec(h, "update bags set slot = ? where id = ?", ["3", "42"]);
+if (Db.Commit(h))
+    Console.WriteLine("swapped");
 ```
 
-`db_last_insert_id(h)` answers the id the last INSERT on that connection
+`Db.LastInsertId(h)` answers the id the last INSERT on that connection
 produced — the AUTO_INCREMENT value on MySQL, the rowid on SQLite — and 0 when
 there has been none. Like MySQL's own `LAST_INSERT_ID()`, a statement that
 inserts nothing leaves it as it was.
 
 ## Typed reads
 
-`db_text`, `db_int` and `db_int64` are joined by `db_double` for a FLOAT,
-DOUBLE or DECIMAL column and `db_bool` for a BOOLEAN or TINYINT(1) — `1`,
-`true` and any non-zero number read as true, NULL as false. `db_column_name`
+`Db.Text`, `Db.Int` and `Db.Int64` are joined by `Db.Double` for a FLOAT,
+DOUBLE or DECIMAL column and `Db.Bool` for a BOOLEAN or TINYINT(1) — `1`,
+`true` and any non-zero number read as true, NULL as false. `Db.ColumnName`
 answers a column's name or alias, for a program reading a row whose SELECT it
 did not write.
 
@@ -144,45 +149,53 @@ holds every other client until it answers. On loopback that is a millisecond
 and invisible, which is how a timing bug survives every local test. A server
 that writes on every kill, pickup or equip wants the other shape:
 
+```k2
+namespace Poll;
+
+using Kiln.Db;
+
+Timer poller
+{
+    Interval = 20;
+    Tick += OnTick;
+}
+
+public static class P
+{
+    static int job = 0;
+
+    public static void Main()
+    {
+        var h = Db.Open("sqlite::memory:");
+        Db.Exec(h, "create table items (id int)", []);
+        job = Db.QueryAsync(h, "select count(*) from items", []);
+    }
+
+    public static void OnTick(int n)
+    {
+        if (!Db.ReqReady(job))
+        {
+            return;
+        }
+        int rows = Db.ReqRows(job);
+        string cell = Db.ReqText(job, 1, 1);
+        Console.WriteLine($"{rows} row(s), first cell {cell}");
+        Db.ReqFree(job);
+    }
+}
 ```
-var job: int = 0
 
-timer poller
-  interval = 20
-  on tick: on_tick
-end
-
-sub main
-  let h: int = db_open("sqlite::memory:")
-  call db_exec(h, "create table items (id int)", [])
-  job = db_query_async(h, "select count(*) from items", [])
-  # the loop carries on from here; the answer is collected on a tick
-end
-
-sub on_tick(n: int)
-  if db_req_ready(job) = false
-    return
-  end
-  let rows: int = db_req_rows(job)
-  let cols: int = db_req_columns(job)
-  let cell: text = db_req_text(job, 1, 1)
-  let bad: text = db_req_error(job)
-  call print_text("{rows} row(s), {cols} column(s), first cell {cell}, error '{bad}'")
-  call db_req_free(job)
-end
-```
-
-`db_exec_async`, `db_exec_async_n`, `db_query_async` and `db_query_async_n`
-queue a statement on a worker thread and answer a request id, then return.
-`db_req_ready` is the poll; `db_req_rows`, `db_req_columns`, `db_req_text`,
-`db_req_is_null` and `db_req_error` are the reading side; `db_req_free`
-releases it, and is refused while it is still running.
+`Db.ExecAsync`, `Db.ExecAsyncN`, `Db.QueryAsync` and `Db.QueryAsyncN` queue a
+statement on a worker thread and answer a request id, then return.
+`Db.ReqReady` is the poll; `Db.ReqRows`, `Db.ReqColumns`, `Db.ReqText`,
+`Db.ReqIsNull` and `Db.ReqError` are the reading side; `Db.ReqFree` releases it,
+and is refused while it is still running.
 
 **The worker never touches the runtime**, so the answer is a value the program
 claims rather than a cursor over a driver that is gone — which is why the
 reading surface above did not change, and why a query's rows are all in memory
 by the time it is ready. **A connection with a request in flight belongs to the
-worker**: `db_exec`, `db_query`, the transactions and `db_close` refuse it by
+worker**: `Db.Exec`, `Db.Query`, the transactions and `Db.Close` refuse it by
 name. Two threads on one connection is a crash in one client and corruption in
 the other, not a race to be survived.
 
@@ -206,8 +219,8 @@ a large table is not one of them yet.
 
 ## When the client libraries are missing
 
-`db` builds without SQLite or MySQL installed. Every command then answers its
-failure sentinel with `last_error_code()` of `10006` (`KN_ERR_UNSUPPORTED`) and
+`Kiln.Db` builds without SQLite or MySQL installed. Every command then answers
+its failure sentinel with `LastErrorCode()` of `10006` (`KN_ERR_UNSUPPORTED`) and
 a message naming what to install, so a checkout with no database headers still
 builds and a program that never opens a database never notices. Install your
 distribution's `sqlite3` and `libmariadb` development packages and rebuild.

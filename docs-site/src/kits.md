@@ -1,9 +1,5 @@
 # Kits
 
-> **The samples on this page are Kiln 1.x.** Kiln 1.x still builds, so they run
-> as written. [Kiln 2](./kiln-2.md) is the current language, and it calls the
-> same libraries and components with different syntax.
-
 A kit is a support library together with what an IDE needs to present it: a
 display name, a toolbox section, an icon for each component it contributes, a
 version, and the project templates it ships.
@@ -19,17 +15,23 @@ only. Your program has no idea a kit was involved.
 
 ## Using one
 
-```
-module report
-use units
+```k2
+namespace Report;
 
-sub main
-  call print_double(units_c_to_f(21.5))
-end
+using Kiln.Units;
+
+public static class P
+{
+    public static void Main()
+    {
+        Console.WriteLine(UnitsCToF(21.5));
+    }
+}
 ```
 
-`use` names the directory. Nothing is registered, and there is no build file to
-edit.
+`using Kiln.Units;` names the kit's directory, `units`. Its commands are called
+by their names in Kiln 2 spelling — `units_c_to_f` is `UnitsCToF`. Nothing is
+registered, and there is no build file to edit.
 
 ## Where a kit is found
 
@@ -110,15 +112,14 @@ kiln new units-starter converter
 
 ## Shipping declarations
 
-A kit can also carry a bundle of foreign *declarations* — `dll` calls, `is c`
-records and `const` values — in one or more `.kdecl` files beside `lib.json`. A
-small kit keeps them in `<name>.kdecl`; a large one splits them by the library
-they wrap (`user32.kdecl`, `kernel32.kdecl`, `gdi32.kdecl`), and every `.kdecl` in the
-directory is merged into one bundle. `use <name>` merges them into a program as
-if it had typed them, so
-a kit like `win` can supply `MessageBoxA`, `RECT` and `MB_OK` with no
-hand-written `dll` line. A kit may ship declarations, C-implemented commands, or
-both; a kit that is *only* declarations needs no `*_libinfo.c` at all. The file
-format, constants, and the `"platforms"` key that pins a kit to an operating
-system are covered under
+A kit can also carry a bundle of foreign *declarations* — C functions, C-layout
+records and constants — in one or more `.kdecl` files beside `lib.json`. A small
+kit keeps them in `<name>.kdecl`; a large one splits them by the library they
+wrap (`user32.kdecl`, `kernel32.kdecl`, `gdi32.kdecl`), and every `.kdecl` in the
+directory is merged into one bundle. `using Kiln.<Name>;` brings them into a
+program as if it had declared them itself, so a kit like `win` supplies
+`MessageBoxA`, `RECT` and `MB_OK` with no `[Dll]` line in the program. A kit may
+ship declarations, C-implemented commands, or both; a kit that is *only*
+declarations needs no `*_libinfo.c` at all. The file format, constants, and the
+`"platforms"` key that pins a kit to an operating system are covered under
 [Declaration kits](./interop.md#declaration-kits).
