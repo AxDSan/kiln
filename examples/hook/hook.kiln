@@ -1,0 +1,33 @@
+// A shared library that hooks a function the moment it is loaded — no host code
+// has to ask it to. This is the whole native-interop story in one file: a
+// `[Dll]` method to call into C, a method used as a `Ptr` to be called back by C,
+// and `DllAttach` to run under the OS loader (DllMain on Windows, an ELF
+// constructor on Linux).
+//
+//   cc -shared -fPIC hookrt.c -o libhookrt.so
+//   kiln build hook.kiln --target sharedlib -o libhook.so
+//   cc host.c -L. -lhookrt -Wl,-rpath,. -o host && ./host     # before 20, after 21
+//
+// The `hookrt` library beside it owns a function dispatched through a slot;
+// loading this library installs a detour into that slot, so the host's very next
+// call through it lands here instead.
+
+namespace Hook;
+
+public static class Hook
+{
+    [Dll("hookrt", Entry = "hookrt_original")]
+    public static extern int Original(int x);
+
+    [Dll("hookrt", Entry = "hookrt_install")]
+    public static extern void Install(Ptr detour);
+
+    // C's slot points here once the hook is installed. It reaches the original
+    // through the trampoline and adds one, so a hooked call is observably different.
+    public static int Detour(int x) => Original(x) + 1;
+
+    public static void DllAttach()
+    {
+        Install(Detour);
+    }
+}

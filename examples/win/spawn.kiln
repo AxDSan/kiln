@@ -1,0 +1,88 @@
+// Starting a thread and starting a process, with nothing but `using Kiln.Win;`.
+//
+//   kiln build examples/win/spawn.kiln --os windows -o spawn.exe
+//
+// Two things are being proved here that nothing else in `examples/win` proves.
+//
+// A THREAD runs a Kiln method on a stack Windows made: the method itself
+// hands CreateThread a real function pointer with the ThreadProc shape, and
+// what the method returns comes back out of GetExitCodeThread. Windows is
+// calling into this program on a thread this program never created.
+//
+// A PROCESS is the STARTUPINFOA/PROCESS_INFORMATION pair — two structs the
+// whole call turns on, one of which (STARTUPINFOA, 104 bytes) has two WORDs
+// in the middle of it and would silently misalign if the record were wrong.
+//
+// Every line prints `<label> ok` or `<label> FAILED`.
+//
+namespace Spawn;
+
+using Kiln.Win;
+
+public static class Spawn
+{
+    private int threadRan = 0;
+
+    public static void Say(string label, bool ok)
+    {
+        if (ok)
+        {
+            Console.WriteLine(label + " ok");
+        }
+        else
+        {
+            Console.WriteLine(label + " FAILED");
+        }
+    }
+
+    // A Win32 ThreadProc: `DWORD WINAPI proc(LPVOID)`. The parameter is the
+    // LPVOID CreateThread was given; the return is the thread's exit code.
+    public static int Worker(Ptr parameter)
+    {
+        threadRan = PtrReadInt(parameter, 0);
+        return threadRan * 2;
+    }
+
+    public static void Main()
+    {
+        // --- a thread ---------------------------------------------------------
+        Ptr inbox = MemAlloc(4);
+        PtrWriteInt(inbox, 0, 21);
+        Ptr thread = CreateThread(PtrNull(), 0, Worker, inbox, 0, PtrNull());
+        if (PtrIsNull(thread))
+        {
+            Console.WriteLine($"thread FAILED {GetLastError()}");
+            return;
+        }
+        Say("thread", true);
+        Say("wait", WaitForSingleObject(thread, 5000) == WAIT_OBJECT_0);
+        Ptr code = MemAlloc(4);
+        MemZero(code, 4);
+        Say("exit code", GetExitCodeThread(thread, code));
+        Say("thread returned", PtrReadInt(code, 0) == 42);
+        Say("thread saw parameter", threadRan == 21);
+        CloseHandle(thread);
+        // --- a process --------------------------------------------------------
+        // `cbSize` on STARTUPINFOA is `cb`, and it must be the struct's own size
+        // before CreateProcessA will look at it. The command line is a `string`
+        // because this program always supplies one; the application name is a
+        // `Ptr` because NULL is the normal thing to pass there.
+        STARTUPINFOA startup = new STARTUPINFOA();
+        PROCESS_INFORMATION info = new PROCESS_INFORMATION();
+        startup.Cb = Int64ToInt(STARTUPINFOA.Size);
+        bool started = CreateProcessA(PtrNull(), "cmd.exe /c exit 7", PtrNull(), PtrNull(), false, CREATE_NO_WINDOW, PtrNull(), PtrNull(), startup, info);
+        Say("create process", started);
+        if (started)
+        {
+            Say("process wait", WaitForSingleObject(info.HProcess, 20000) == WAIT_OBJECT_0);
+            MemZero(code, 4);
+            Say("process exit", GetExitCodeProcess(info.HProcess, code));
+            Say("process code", PtrReadInt(code, 0) == 7);
+            CloseHandle(info.HThread);
+            CloseHandle(info.HProcess);
+        }
+        MemFree(inbox);
+        MemFree(code);
+        Console.WriteLine("done");
+    }
+}

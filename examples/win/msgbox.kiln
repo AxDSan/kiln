@@ -1,0 +1,25 @@
+// The smallest Win32 program there is, written with nothing but `using Kiln.Win;`.
+//
+//   kiln build examples/win/msgbox.kiln --os windows -o msgbox.exe
+//
+// `MessageBoxA` and `MB_OK` are both the kit's; this file declares neither.
+//
+// It is not run by the test suite, and it should not be: a message box waits
+// for somebody to press OK, and a program that waits forever is a test that
+// hangs. It is here because it is the first Win32 program anyone writes, and
+// because building it is a real check — the symbol, the four parameters, the
+// `string` that crosses as a `char *`, and the ANSI entry point are all bound
+// whether or not a person ever sees the box.
+//
+namespace Msgbox;
+
+using Kiln.Win;
+
+public static class Msgbox
+{
+    public static void Main()
+    {
+        int clicked = MessageBoxA(PtrNull(), "Built with Kiln.", "Hello", MB_OK | MB_ICONINFORMATION);
+        Console.WriteLine(clicked);
+    }
+}

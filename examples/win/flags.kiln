@@ -1,0 +1,95 @@
+// The Win32 half of the same story: an address the loader hands back is called,
+// and the kit's constants are combined and tested as the bits they are.
+//
+// Both were gaps the win kit was written around. `GetProcAddress` answered with
+// a `Ptr` that nothing could call, so an export had to be declared ahead of
+// time; and with no bitwise operator, flags were added together and a single
+// bit could not be read out of a word at all. This program does neither the old
+// way. Every line prints `ok` or `FAIL`, so running it under wine is the test.
+//
+namespace Flags;
+
+using Kiln.Win;
+
+public static class Flags
+{
+    public static void Say(string what, bool passed)
+    {
+        if (passed)
+        {
+            Console.WriteLine("ok " + what);
+        }
+        else
+        {
+            Console.WriteLine("FAIL " + what);
+        }
+    }
+
+    public static void Main()
+    {
+        // --- an address, fetched and called ---------------------------------------
+        // kernel32 is already in the process; LoadLibraryA takes its reference count
+        // up and hands back the same base address a declared import resolves through.
+        Ptr k32 = LoadLibraryA("kernel32.dll");
+        if (PtrIsNull(k32))
+        {
+            Console.WriteLine("FAIL kernel32.dll did not load");
+            return;
+        }
+        // The strongest check available for an indirect call: the same function,
+        // reached both ways. `GetCurrentProcessId` is declared in the kit and linked
+        // by name, and is also looked up as a string and called through its address.
+        // One process has one id, so the two answers must be the same number.
+        int byName = GetCurrentProcessId();
+        Ptr byAddress = GetProcAddress(k32, "GetCurrentProcessId");
+        Say("GetProcAddress found GetCurrentProcessId", !PtrIsNull(byAddress));
+        var viaAddress = (delegate* unmanaged[Stdcall]<int>)byAddress;
+        Say("the address answers what the import does", viaAddress() == byName);
+        // An export that is not there answers null rather than misbehaving, which is
+        // what GetProcAddress is for once every export can be called.
+        Say("a missing export is null", PtrIsNull(GetProcAddress(k32, "NoSuchExportW")));
+        // --- flags, combined and tested ------------------------------------------
+        // The kit declares MEM_COMMIT_RESERVE pre-combined because adding the pair by
+        // hand invited a mistake. `bor` is what it was standing in for.
+        Say("MEM_COMMIT bor MEM_RESERVE is the pair", (MEM_COMMIT | MEM_RESERVE) == MEM_COMMIT_RESERVE);
+        // Disjoint bits, so `+` and `bor` agree — which is why the older spelling was
+        // not wrong, only unable to say what it meant.
+        Say("bor agrees with + on disjoint flags", (MB_ICONINFORMATION | MB_DEFBUTTON2) == MB_ICONINFORMATION + MB_DEFBUTTON2);
+        // A style word, read one bit at a time. WS_OVERLAPPEDWINDOW carries a border
+        // and does not carry WS_VISIBLE, and now that can be asked rather than known.
+        Say("WS_OVERLAPPEDWINDOW has a border", (WS_OVERLAPPEDWINDOW & WS_BORDER) != 0);
+        Say("WS_OVERLAPPEDWINDOW is not visible", (WS_OVERLAPPEDWINDOW & WS_VISIBLE) == 0);
+        // WS_POPUP is written in the kit as the decimal -2147483648, because it was
+        // transcribed before hex literals existed. It is the same 32 bits either way.
+        Say("WS_POPUP is the top bit", (WS_POPUP & 2147483648) != 0);
+        // A style built up and then one flag taken away again.
+        int style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+        Say("a flag can be cleared", (style & ~WS_VISIBLE) == WS_OVERLAPPEDWINDOW);
+        // A packed pair of 16-bit halves, the shape every mouse message's LPARAM has.
+        int packed = 480 << 16 | 640;
+        Say("LOWORD", (packed & 65535) == 640);
+        Say("HIWORD", (packed >>> 16 & 65535) == 480);
+        // --- the flags in a real call --------------------------------------------
+        // VirtualAlloc, with its type word combined here rather than pre-combined in
+        // the kit. Nothing about the call changes; the number reaching Windows is the
+        // same one.
+        Ptr page = VirtualAlloc(PtrNull(), 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        Say("VirtualAlloc took a combined type word", PtrIsNull(page) == false);
+        if (PtrIsNull(page) == false)
+        {
+            PtrWriteInt(page, 0, 3735928559);
+            Say("the page holds what was written", PtrReadInt(page, 0) == 3735928559);
+            // MEM_RELEASE wants a size of zero: the whole reservation goes back.
+            Say("VirtualFree", VirtualFree(page, 0, MEM_RELEASE));
+        }
+        // An access mask combined with `bor`, handed to OpenProcess for this very
+        // process — the flags are read by Windows, not by this program.
+        Ptr me = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, GetCurrentProcessId());
+        Say("OpenProcess took a combined access mask", PtrIsNull(me) == false);
+        if (PtrIsNull(me) == false)
+        {
+            Say("CloseHandle", CloseHandle(me));
+        }
+        Say("FreeLibrary", FreeLibrary(k32));
+    }
+}

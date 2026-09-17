@@ -1,0 +1,109 @@
+// Reading and writing the Windows registry, with nothing but `using Kiln.Win;`.
+//
+//   kiln build examples/win/registry.kiln --os windows -o registry.exe
+//
+// The registry is the third of the kit that has nothing to do with windows or
+// with memory, and it is the one whose declarations are easiest to get subtly
+// wrong: an HKEY is pointer-width but the predefined roots are numbers, a
+// value's size is an in-out cell rather than an argument, and every one of the
+// twelve entry points answers a LONG status rather than a BOOL.
+//
+// Everything below happens under HKEY_CURRENT_USER\Software\Kiln\KitProof,
+// which this program creates and deletes again. RegCreateKeyExA makes the
+// whole path, so `Software\Kiln` is created too and deleted on the way out;
+// RegDeleteKeyA refuses a key that still has subkeys, so the order matters and
+// the parent goes second.
+//
+// Every line prints `<label> ok` or `<label> FAILED`.
+//
+namespace Registry;
+
+using Kiln.Win;
+
+public static class Registry
+{
+    public const string PARENT = "Software\\Kiln";
+    public const string SUBKEY = "Software\\Kiln\\KitProof";
+
+    public static void Say(string label, bool ok)
+    {
+        if (ok)
+        {
+            Console.WriteLine(label + " ok");
+        }
+        else
+        {
+            Console.WriteLine(label + " FAILED");
+        }
+    }
+
+    public static void Main()
+    {
+        Ptr root = PtrFromInt(HKEY_CURRENT_USER);
+        // --- create the key ---------------------------------------------------
+        // `out_key` is a PHKEY: a cell the API writes a handle into. `disposition`
+        // is another out cell, saying whether the key was made or already existed.
+        Ptr keyCell = MemAlloc(8);
+        Ptr dispCell = MemAlloc(4);
+        MemZero(keyCell, 8);
+        MemZero(dispCell, 4);
+        int made = RegCreateKeyExA(root, SUBKEY, 0, PtrNull(), REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, PtrNull(), keyCell, dispCell);
+        Say("create", made == ERROR_SUCCESS);
+        if (made != ERROR_SUCCESS)
+        {
+            return;
+        }
+        Ptr key = PtrReadPtr(keyCell, 0);
+        Say("handle", !PtrIsNull(key));
+        // --- write a DWORD ----------------------------------------------------
+        // RegSetValueExA takes a pointer to the bytes and their count, so a DWORD is
+        // four bytes at a cell this program owns.
+        Ptr dword = MemAlloc(4);
+        PtrWriteInt(dword, 0, 1979);
+        int setNum = RegSetValueExA(key, "Build", 0, REG_DWORD, dword, 4);
+        Say("set dword", setNum == ERROR_SUCCESS);
+        // --- write a string ---------------------------------------------------
+        // A REG_SZ's byte count includes the terminating NUL, which is the classic
+        // off-by-one of the registry API.
+        string name = "Kiln";
+        int setText = RegSetValueExA(key, "Product", 0, REG_SZ, PtrOfText(name), 8);
+        Say("set text", setText == ERROR_SUCCESS);
+        // --- read them back ---------------------------------------------------
+        // `lpcbdata` is in-out: on the way in it is the buffer's size, on the way
+        // out the number of bytes written. It has to be reset before each call.
+        Ptr typeCell = MemAlloc(4);
+        Ptr sizeCell = MemAlloc(4);
+        Ptr buffer = MemAlloc(64);
+        PtrWriteInt(sizeCell, 0, 4);
+        MemZero(buffer, 64);
+        int gotNum = RegQueryValueExA(key, "Build", PtrNull(), typeCell, buffer, sizeCell);
+        Say("query dword", gotNum == ERROR_SUCCESS);
+        Say("dword type", PtrReadInt(typeCell, 0) == REG_DWORD);
+        Say("dword value", PtrReadInt(buffer, 0) == 1979);
+        PtrWriteInt(sizeCell, 0, 64);
+        MemZero(buffer, 64);
+        int gotText = RegQueryValueExA(key, "Product", PtrNull(), typeCell, buffer, sizeCell);
+        Say("query text", gotText == ERROR_SUCCESS);
+        Say("text type", PtrReadInt(typeCell, 0) == REG_SZ);
+        Say("text value", PtrReadText(buffer) == "Kiln");
+        Console.WriteLine("product " + PtrReadText(buffer));
+        // --- and put the machine back -----------------------------------------
+        Say("delete value", RegDeleteValueA(key, "Build") == ERROR_SUCCESS);
+        Say("close", RegCloseKey(key) == ERROR_SUCCESS);
+        Say("delete key", RegDeleteKeyA(root, SUBKEY) == ERROR_SUCCESS);
+        Say("delete parent", RegDeleteKeyA(root, PARENT) == ERROR_SUCCESS);
+        // A key that is gone answers ERROR_FILE_NOT_FOUND rather than success, which
+        // is how the delete above is checked rather than assumed.
+        Ptr reopen = MemAlloc(8);
+        MemZero(reopen, 8);
+        Say("gone", RegOpenKeyExA(root, SUBKEY, 0, KEY_READ, reopen) != ERROR_SUCCESS);
+        MemFree(keyCell);
+        MemFree(dispCell);
+        MemFree(dword);
+        MemFree(typeCell);
+        MemFree(sizeCell);
+        MemFree(buffer);
+        MemFree(reopen);
+        Console.WriteLine("done");
+    }
+}

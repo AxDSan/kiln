@@ -1,0 +1,122 @@
+// Reading a process's memory through the Win32 process API — a console program
+// written with nothing but `using Kiln.Win;`.
+//
+//   kiln build examples/win/meminfo.kiln --os windows -o meminfo.exe
+//
+// This is the proof that the process half and the memory half of the kit are
+// bound to the real thing rather than merely parsed. A wrong struct offset, a
+// DWORD declared as an int64, a symbol spelled the way MSDN prints it rather
+// than the way kernel32 exports it: none of those show up in a build, and all
+// of them show up the moment Windows fills a struct.
+//
+// The process it opens is itself. That is deliberate: reading another process
+// needs a second process to exist and a privilege to be held, and neither
+// belongs in an example. The binding being proved is the same one either way —
+// OpenProcess hands back a handle, ReadProcessMemory reads through it, and the
+// bytes that come back are the bytes that were written.
+//
+// Every line prints `<label> ok` or `<label> FAILED`, so a regression names
+// itself instead of leaving a number to be squinted at.
+//
+namespace Meminfo;
+
+using Kiln.Win;
+
+public static class Meminfo
+{
+    public const int SENTINEL = 305419896;
+    public const int SECOND = 195948557;
+
+    public static void Say(string label, bool ok)
+    {
+        if (ok)
+        {
+            Console.WriteLine(label + " ok");
+        }
+        else
+        {
+            Console.WriteLine(label + " FAILED");
+        }
+    }
+
+    public static void Main()
+    {
+        // --- the process ------------------------------------------------------
+        // GetCurrentProcessId answers a DWORD; OpenProcess turns it into a handle
+        // with the rights asked for. PROCESS_VM_READ, PROCESS_VM_WRITE and
+        // PROCESS_QUERY_INFORMATION are single bits of an access mask, so `bor`
+        // combines them — the same `|` the C headers write.
+        int pid = GetCurrentProcessId();
+        Say("pid", pid > 0);
+        int access = PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_QUERY_INFORMATION;
+        Ptr process = OpenProcess(access, false, pid);
+        if (PtrIsNull(process))
+        {
+            Console.WriteLine($"open FAILED {GetLastError()}");
+            return;
+        }
+        Say("open", true);
+        // --- a page of our own memory, with a known value in it ---------------
+        // VirtualAlloc rather than mem_alloc, so the region VirtualQuery reports on
+        // below is one page with a protection this program chose.
+        Ptr page = VirtualAlloc(PtrNull(), 4096, MEM_COMMIT_RESERVE, PAGE_READWRITE);
+        if (PtrIsNull(page))
+        {
+            Console.WriteLine($"alloc FAILED {GetLastError()}");
+            return;
+        }
+        Say("alloc", true);
+        PtrWriteInt(page, 0, SENTINEL);
+        // --- read it back through the process handle --------------------------
+        // This is the whole point: the value does not come back off the pointer, it
+        // comes back through kernel32, out of the process named by `process`.
+        // `lpNumberOfBytesRead` is a SIZE_T*, so the cell is eight bytes wide and is
+        // read with ptr_read_int64 — four would be a heap overwrite.
+        Ptr into = MemAlloc(8);
+        Ptr moved = MemAlloc(8);
+        MemZero(into, 8);
+        MemZero(moved, 8);
+        bool readOk = ReadProcessMemory(process, page, into, 4, moved);
+        Say("read", readOk);
+        Say("read count", PtrReadInt64(moved, 0) == IntToInt64(4));
+        int got = PtrReadInt(into, 0);
+        Say("read value", got == SENTINEL);
+        Console.WriteLine($"value {got}");
+        // --- and write through it, the other direction ------------------------
+        PtrWriteInt(into, 0, SECOND);
+        MemZero(moved, 8);
+        bool writeOk = WriteProcessMemory(process, page, into, 4, moved);
+        Say("write", writeOk);
+        Say("write count", PtrReadInt64(moved, 0) == IntToInt64(4));
+        Say("write landed", PtrReadInt(page, 0) == SECOND);
+        // --- what Windows says about that page --------------------------------
+        // VirtualQuery fills a MEMORY_BASIC_INFORMATION. Its answer is the return
+        // value's worth of bytes written, which is the struct's own size when the
+        // call succeeds — the first thing a wrong layout gets wrong.
+        MEMORY_BASIC_INFORMATION region = new MEMORY_BASIC_INFORMATION();
+        long written = VirtualQuery(page, region, MEMORY_BASIC_INFORMATION.Size);
+        Say("query", written == MEMORY_BASIC_INFORMATION.Size);
+        Say("query state", region.State == MEM_COMMIT);
+        Say("query protect", region.Protect == PAGE_READWRITE);
+        Say("query base", PtrToInt(region.BaseAddress) == PtrToInt(page));
+        Console.WriteLine($"region {region.RegionSize}");
+        // --- the machine ------------------------------------------------------
+        // One more struct the callee fills, and the number every allocation above
+        // was rounded to.
+        SYSTEM_INFO info = new SYSTEM_INFO();
+        GetSystemInfo(info);
+        Say("page size", info.DwPageSize == 4096);
+        Say("cpus", info.DwNumberOfProcessors > 0);
+        // --- a module and a symbol in it --------------------------------------
+        // LoadLibraryA + GetProcAddress: the pair every plugin loader is built on.
+        Ptr user32 = LoadLibraryA("user32.dll");
+        Say("load", !PtrIsNull(user32));
+        Say("symbol", !PtrIsNull(GetProcAddress(user32, "MessageBoxA")));
+        Say("missing symbol", PtrIsNull(GetProcAddress(user32, "NoSuchExport")));
+        VirtualFree(page, 0, MEM_RELEASE);
+        MemFree(into);
+        MemFree(moved);
+        CloseHandle(process);
+        Console.WriteLine("done");
+    }
+}

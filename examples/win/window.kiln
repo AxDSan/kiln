@@ -1,0 +1,131 @@
+// A real Win32 window, written with nothing but `using Kiln.Win;`.
+//
+//   kiln build examples/win/window.kiln --os windows -o window.exe
+//
+// Not one `[Dll]`, record or constant is declared below: the class struct
+// (WNDCLASSEXA), the message struct (MSG), the paint struct (PAINTSTRUCT),
+// every WM_/WS_/CW_/SW_ number and every user32 and gdi32 entry point come
+// from the kit. That is the whole point of this example — it is the proof
+// that `using Kiln.Win;` is enough to write a Windows program.
+//
+// The shape is the one every Win32 book opens with:
+//
+//   register a window class  ->  RegisterClassExA(WNDCLASSEXA)
+//   create a window          ->  CreateWindowExA
+//   pump messages            ->  PeekMessageA / TranslateMessage / DispatchMessageA
+//   handle them in a WNDPROC ->  a method whose address the class carries
+//
+// The WNDPROC is the method `Wndproc` itself, used where a pointer is wanted, — a real C function pointer that Windows
+// calls back on. Its signature is the pointer-width one a WNDPROC has: WPARAM,
+// LPARAM and LRESULT are `long`, the message is a `int`, the HWND is a `Ptr`.
+//
+// It ends by itself. A window with a person in front of it lives until they
+// close it; this one runs a fixed number of pump turns and then destroys its
+// own window, so it can be built by a test, run to completion and checked.
+// WM_DESTROY posts WM_QUIT the way a real program's does, so the exit path is
+// the real one and not a shortcut around it.
+//
+namespace Window;
+
+using Kiln.Win;
+
+public static class Window
+{
+    public const string CLASS_NAME = "KilnWindowClass";
+    public const int CLOSE_AFTER = 60;
+    public const int FRAME_BUDGET = 400;
+    private int paints = 0;
+    private int destroys = 0;
+
+    // The window procedure. Windows calls this; Kiln does not.
+    public static long Wndproc(Ptr hwnd, int msg, long wparam, long lparam)
+    {
+        if (msg == WM_PAINT)
+        {
+            // BeginPaint hands back a device context and fills the PAINTSTRUCT with
+            // the rectangle that needs repainting; EndPaint releases it. Between them
+            // is the drawing, and gdi32's TextOutA is the smallest drawing there is.
+            var ps = new PAINTSTRUCT();
+            Ptr dc = BeginPaint(hwnd, ps);
+            TextOutA(dc, 10, 10, "Built with Kiln.", 19);
+            EndPaint(hwnd, ps);
+            paints = paints + 1;
+            Console.WriteLine("paint");
+            return 0;
+        }
+        if (msg == WM_DESTROY)
+        {
+            // The window is going away. PostQuitMessage puts WM_QUIT in the queue,
+            // which is what ends the pump in `Main`.
+            destroys = destroys + 1;
+            Console.WriteLine("destroy");
+            PostQuitMessage(0);
+            return 0;
+        }
+        // Everything else is Windows' business, not ours.
+        return DefWindowProcA(hwnd, msg, wparam, lparam);
+    }
+
+    public static void Main()
+    {
+        // GetModuleHandleA(NULL) is the running .exe's own module. The kit binds the
+        // nullable spelling under `GetModuleHandleNull`, because a `string` parameter
+        // has no NULL to pass.
+        Ptr instance = GetModuleHandleNull(PtrNull());
+        // A `[CLayout]` record starts zeroed, which is exactly what a WNDCLASSEXA wants:
+        // every field not set below is a documented "none".
+        WNDCLASSEXA wc = new WNDCLASSEXA();
+        wc.CbSize = (int)WNDCLASSEXA.Size;
+        wc.Style = CS_HREDRAW | CS_VREDRAW;
+        wc.WndProc = Wndproc;
+        wc.Instance = instance;
+        wc.Cursor = LoadCursorA(PtrNull(), PtrFromInt(IDC_ARROW));
+        wc.Background = PtrFromInt(COLOR_WINDOW + 1);
+        wc.ClassName = CLASS_NAME;
+        int atom = RegisterClassExA(wc);
+        if (atom == 0)
+        {
+            Console.WriteLine($"register FAILED {GetLastError()}");
+            return;
+        }
+        Console.WriteLine("registered");
+        // Twelve arguments, in the order CreateWindowExA has always taken them:
+        // extended style, class, title, style, x, y, width, height, parent, menu,
+        // instance, and the LPVOID handed to WM_CREATE.
+        Ptr hwnd = CreateWindowExA(0, CLASS_NAME, "Kiln", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 360, 220, PtrNull(), PtrNull(), instance, PtrNull());
+        if (PtrIsNull(hwnd))
+        {
+            Console.WriteLine($"create FAILED {GetLastError()}");
+            return;
+        }
+        Console.WriteLine("created");
+        ShowWindow(hwnd, SW_SHOW);
+        UpdateWindow(hwnd);
+        // The pump. PeekMessageA rather than GetMessageA because GetMessageA blocks
+        // until a message arrives, and this program must finish on its own.
+        MSG msg = new MSG();
+        int frames = 0;
+        while (frames < FRAME_BUDGET)
+        {
+            frames = frames + 1;
+            if (PeekMessageA(msg, PtrNull(), 0, 0, PM_REMOVE))
+            {
+                if (msg.Message == WM_QUIT)
+                {
+                    break;
+                }
+                TranslateMessage(msg);
+                DispatchMessageA(msg);
+            }
+            if (frames == CLOSE_AFTER)
+            {
+                // What clicking the close box would do, minus the person.
+                DestroyWindow(hwnd);
+            }
+        }
+        UnregisterClassA(CLASS_NAME, instance);
+        Console.WriteLine($"paints {paints}");
+        Console.WriteLine($"destroys {destroys}");
+        Console.WriteLine($"frames {frames}");
+    }
+}
