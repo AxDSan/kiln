@@ -240,7 +240,19 @@ fn todo_note(what: &str) -> String {
 // ─── naming ─────────────────────────────────────────────────────────────────
 
 /// `starter_kit` → `StarterKit`. Types, methods and constants take this.
+/// A name written the way C writes a macro or a struct — `MB_OK`,
+/// `MEMORY_BASIC_INFORMATION` — keeps that spelling. Such names come from C
+/// APIs, and a program reads them against that API's documentation.
+fn c_name(s: &str) -> Option<String> {
+    let capital = s.chars().filter(|c| c.is_ascii_uppercase()).count() >= 2
+        && s.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+    capital.then(|| s.to_string())
+}
+
 fn pascal(s: &str) -> String {
+    if let Some(name) = c_name(s) {
+        return name;
+    }
     let mut out = String::new();
     // 1.x desugaring invents names like `$each$3`; a K2 identifier holds only
     // letters, digits and underscores.
@@ -290,6 +302,9 @@ fn camel(s: &str) -> String {
 /// `ITEM_FLAGS` → `ItemFlags`: a 1.x constant is SCREAMING_CASE, and K2
 /// constants are PascalCase like everything else named at the type level.
 fn const_name(s: &str) -> String {
+    if let Some(name) = c_name(s) {
+        return name;
+    }
     pascal(&s.to_lowercase())
 }
 

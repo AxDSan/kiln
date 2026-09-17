@@ -29,7 +29,7 @@ it cannot produce something that compiles, it says so instead of guessing.
 | `band` `bor` `shl` | `&` `\|` `<<` |
 | `concat(a, b)` | `$"{a}{b}"` |
 | `snake_case` names | `PascalCase` types and methods, `camelCase` locals |
-| `SCREAMING_CASE` constants | `PascalCase` |
+| `SCREAMING_CASE` constants | kept as written — they are usually a C API's names |
 | `check` and the error slot | `Result<T>`, `?` and `??` |
 | `#` comments | `//` comments |
 
@@ -70,13 +70,13 @@ using Kiln.Text;
 
 public static class Greeter
 {
-    public const int Times = 3;
+    public const int TIMES = 3;
 
     public static void Main()
     {
         string name = "world";
         int i = 0;
-        while (i < Times)
+        while (i < TIMES)
         {
             Console.WriteLine($"hello, {name}");
             i = i + 1;

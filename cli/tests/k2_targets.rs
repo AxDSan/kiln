@@ -217,7 +217,7 @@ fn a_kiln_2_program_uses_a_kits_declarations() {
     let src = dir.join("kit.kiln");
     std::fs::write(
         &src,
-        "namespace KitUse;\nusing Kiln.SplitDemo;\n\npublic static class P\n{\n    public static void Main()\n    {\n        var p = new SplitPoint(1, 2);\n        SplitMove(p, 10, 20);\n        Console.WriteLine($\"{SplitAnswer} {SplitTag} {SplitAdd(2, 3)} {p.X} {p.Y} {SplitGreeting()}\");\n    }\n}\n",
+        "namespace KitUse;\nusing Kiln.SplitDemo;\n\npublic static class P\n{\n    public static void Main()\n    {\n        var p = new SplitPoint(1, 2);\n        SplitMove(p, 10, 20);\n        Console.WriteLine($\"{SPLIT_ANSWER} {SPLIT_TAG} {SplitAdd(2, 3)} {p.X} {p.Y} {SplitGreeting()}\");\n    }\n}\n",
     )
     .unwrap();
     let exe = dir.join("kit");
