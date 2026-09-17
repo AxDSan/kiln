@@ -5,6 +5,10 @@
 # by the next release and nobody notices until a reader tries one; asking the
 # compiler what it supports is the only version that stays true.
 set -euo pipefail
+# One collation everywhere: `sort` under a UTF-8 locale ignores `_`, so
+# `process_close_all` sorted before `process_close` here and after it on CI, and
+# the committed pages never matched a fresh run somewhere else.
+export LC_ALL=C
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
