@@ -92,6 +92,12 @@ fn read_ppm(path: &Path) -> Frame {
 /// `tag` must be unique per test: tests run in parallel and two writing one
 /// path race each other.
 fn render(src: &str, tag: &str) -> (Frame, String) {
+    render_with(src, tag, &[])
+}
+
+/// The same, with environment variables the run needs — a theme override, or a
+/// synthetic click.
+fn render_with(src: &str, tag: &str, env: &[(&str, &str)]) -> (Frame, String) {
     let dir = std::env::temp_dir().join(format!("kiln_style_{tag}"));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let source = dir.join("main.kiln");
@@ -110,9 +116,12 @@ fn render(src: &str, tag: &str) -> (Frame, String) {
     assert!(status.success(), "kiln build failed for {tag}");
 
     let dump = dir.join("frame.ppm");
-    let out = Command::new(&bin)
-        .env("KILN_UI_EXIT_AFTER_FRAMES", "4")
-        .env("KILN_UI_DUMP", &dump)
+    let mut run = Command::new(&bin);
+    run.env("KILN_UI_EXIT_AFTER_FRAMES", "4").env("KILN_UI_DUMP", &dump);
+    for (k, v) in env {
+        run.env(k, v);
+    }
+    let out = run
         .output()
         .expect("run built binary");
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
@@ -242,6 +251,85 @@ fn a_ticked_checkbox_fills_with_the_accent() {
 
 /// RCSS is not CSS: a property it does not know is a "Syntax error parsing
 /// property declaration" on stderr and a rule that silently does nothing.
+/// A form that names a theme is drawn from that theme's palette, and a program
+/// that switches theme while it runs redraws every control from the new one
+/// without losing a value or a handler.
+///
+/// In pixels, because a theme is a stylesheet: a token that never reaches the
+/// screen reads fine in the source.
+#[test]
+fn a_theme_paints_the_whole_form() {
+    if !ui_available() {
+        return;
+    }
+    const THEMED: &str = r#"namespace Themed;
+
+using Kiln.Ui;
+
+public partial form MainWindow
+{
+    Title = "themed";
+    Width = 400;
+    Height = 300;
+    Theme = "Dark";
+
+    Button ok { Text = "OK"; Left = 20; Top = 20; Width = 96; Height = 32; }
+    Editbox name { Text = "Ada"; Left = 20; Top = 70; Width = 200; Height = 32; }
+}
+"#;
+    let (f, _) = render(THEMED, "theme_dark");
+    f.expect(2, 2, "#1f1f1f", "the dark theme's ground");
+    f.expect(30, 36, "#333333", "the button's plate in the dark theme");
+    f.expect(20, 36, "#4a4a4a", "the button's outline in the dark theme");
+
+    // The same form, the same source, one environment variable: what a
+    // developer looking at a program in another palette gets, and it outranks
+    // the form's own choice.
+    let (light, _) = render_with(THEMED, "theme_env", &[("KILN_UI_THEME", "HighContrast")]);
+    light.expect(2, 2, "#ffffff", "the high-contrast ground");
+    light.expect(20, 36, "#000000", "the high-contrast outline");
+}
+
+/// Switching while the program runs: the button's handler asks for `Light`, and
+/// the frame after the click is the light palette — including the label, which
+/// reads back the theme now in force.
+#[test]
+fn a_running_program_switches_theme() {
+    if !ui_available() {
+        return;
+    }
+    const SWITCH: &str = r#"namespace Switcher;
+
+using Kiln.Ui;
+
+public partial form MainWindow
+{
+    Title = "switch";
+    Width = 400;
+    Height = 300;
+    Theme = "Dark";
+
+    Label caption { Text = "?"; Left = 20; Top = 120; Width = 200; Height = 24; }
+    Button swap { Text = "Light"; Left = 20; Top = 20; Width = 96; Height = 32; Click += OnSwap; }
+}
+
+public partial form MainWindow
+{
+    void OnSwap()
+    {
+        Ui.SetTheme("Light");
+        caption.Text = Ui.Theme();
+    }
+}
+"#;
+    // Handle 3 is the button: the form is 1, the label 2.
+    let (before, _) = render(SWITCH, "switch_before");
+    before.expect(2, 2, "#1f1f1f", "the form starts dark");
+    let (after, _) = render_with(SWITCH, "switch_after", &[("KILN_UI_SYNTH_CLICK", "3")]);
+    after.expect(2, 2, "#f3f3f3", "the click repainted the form light");
+    after.expect(30, 36, "#ffffff", "and the button with it");
+}
+
 /// The stylesheet must parse clean, or the colours above are the only part of
 /// it anyone ever checked.
 #[test]

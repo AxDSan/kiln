@@ -243,6 +243,55 @@ the form rather than inside it.
 Properties are PascalCase too: `background_color` is `BackgroundColor`,
 `border_radius` is `BorderRadius`.
 
+## Themes
+
+Every control is drawn from a *theme*: one palette of colours, radii and text
+sizes the whole form shares. A form names the one it wants, and a control that
+sets a colour of its own still wins — the theme decides what a control that says
+nothing looks like.
+
+```k2
+namespace Themed;
+
+using Kiln.Ui;
+
+public partial form MainWindow
+{
+    Title = "Themed";
+    Width = 360;
+    Height = 200;
+    Theme = "Dark";
+
+    Label caption { Text = "Dark by default"; Left = 20; Top = 20; Width = 260; Height = 24; }
+    Button swap { Text = "Light"; Left = 20; Top = 70; Width = 120; Height = 34; Click += OnSwap; }
+}
+
+public partial form MainWindow
+{
+    void OnSwap()
+    {
+        Ui.SetTheme("Light");
+        caption.Text = Ui.Theme();
+    }
+}
+```
+
+| Theme | |
+| --- | --- |
+| `Light` | the default: a light grey ground, a blue accent |
+| `Dark` | the same structure with the surfaces and the text swapped |
+| `HighContrast` | black on white, heavier outlines, no shadows |
+| `System` | whichever of light and dark the desktop is set to |
+
+`Ui.SetTheme` switches while the program runs. It repaints every control from
+the new palette and creates nothing: a value being typed, a selected row, a
+wired handler and a scroll position all survive the switch. `Ui.Theme()` answers
+the name in force — `System` stays `System`, because that is what the program
+asked for. A name that is not a theme is refused and the palette is left alone.
+
+`KILN_UI_THEME=Dark ./app` overrides whatever the form says, which is how a
+program is looked at in another palette without touching its source.
+
 ## Studio
 
 Studio reads a Kiln 2 form through `kiln inspect` and writes it through

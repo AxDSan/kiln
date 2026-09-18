@@ -122,7 +122,7 @@ end
 ```
 
 Beyond that: 16 bundled kits — `file`, `text`, `json`, `xml`, `net`, `db`
-and the rest — 397 commands and 21 components, and `use <name>` is the whole
+and the rest — 399 commands and 21 components, and `use <name>` is the whole
 of asking for a kit. `kiln commands --use <name>` lists what each adds;
 the [Commands](https://axdsan.github.io/kiln/docs/reference-commands.html)
 reference is generated from the same answer.

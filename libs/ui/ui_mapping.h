@@ -13,6 +13,7 @@
 #ifndef KILN_UI_MAPPING_H
 #define KILN_UI_MAPPING_H
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -349,50 +350,163 @@ inline std::string rcss_value(const char* property, const char* value) {
 /// Shared by the runtime seed AND the designer canvas — with two copies, a
 /// control would look different in the designer than in the built app, which is
 /// the WYSIWYG drift D9 exists to prevent.
-inline std::string control_styles(const std::string& scope = "") {
+/// A theme: every colour, radius and size the control stylesheet is written
+/// against. One control must not be able to disagree with the control beside it
+/// about what "the outline colour" is, so the rules below name a token and a
+/// theme is the only place a value is written.
+///
+/// The names are the ones the design specification uses.
+struct Theme {
+    std::string name = "Light";
+    std::string card = "#ffffff";         ///< surface.card
+    std::string control = "#ffffff";      ///< control at rest
+    std::string control_alt = "#f9f9f9";  ///< secondary / alt rows
+    std::string hover_bg = "#f5f5f5";     ///< button hover
+    std::string press_bg = "#ededed";     ///< button pressed
+    std::string input_hover = "#fbfbfb";  ///< input hover
+    std::string select_bg = "#f0f0f0";    ///< selected row / item
+    std::string accent = "#005fb8";
+    std::string accent_hover = "#0254a3";
+    std::string text = "#1a1a1a";         ///< text.primary
+    std::string text_2 = "#5c5c5c";       ///< text.secondary
+    std::string on_accent = "#ffffff";
+    std::string border = "#e5e5e5";       ///< border.default
+    std::string border_control = "#d1d1d1";
+    std::string border_strong = "#8a8a8a";
+    std::string ground = "#f3f3f3";       ///< the form's own background
+    /// Radii, on the 4px grid the specification is built on.
+    std::string radius_control = "4px";
+    std::string radius_card = "8px";
+    /// Elevation. RmlUi's colour parser takes an rgba() alpha as 0..255, NOT
+    /// 0..1 — `rgba(0,0,0,0.04)` parses as fully transparent and vanishes — so
+    /// the shadow colours are written as #rrggbbaa.
+    std::string shadow_1 = "#0000000a 0px 2px 4px";
+    std::string shadow_2 = "#0000001f 0px 8px 16px, #0000000a 0px 2px 4px";
+    /// Body text. Named rather than inherited because the designer canvas
+    /// inherits the IDE's 12px and a built app inherited 16px — the same control
+    /// rendered two sizes in the two places this header exists to keep identical.
+    std::string font_size = "14px";
+};
+
+/// The dark theme: the same structure with the surfaces and the text swapped,
+/// and a brighter accent, which a dark ground needs to keep its contrast.
+inline Theme dark_theme() {
+    Theme t;
+    t.name = "Dark";
+    t.card = "#2b2b2b";
+    t.control = "#333333";
+    t.control_alt = "#2f2f2f";
+    t.hover_bg = "#3a3a3a";
+    t.press_bg = "#454545";
+    t.input_hover = "#383838";
+    t.select_bg = "#3d3d3d";
+    t.accent = "#4cc2ff";
+    t.accent_hover = "#77d1ff";
+    t.text = "#f0f0f0";
+    t.text_2 = "#b8b8b8";
+    t.on_accent = "#0a0a0a";
+    t.border = "#3d3d3d";
+    t.border_control = "#4a4a4a";
+    t.border_strong = "#8a8a8a";
+    t.ground = "#1f1f1f";
+    return t;
+}
+
+/// Black on white with a pure-blue accent and heavier outlines: the theme a
+/// person who cannot separate two greys needs, rather than a darker grey.
+inline Theme high_contrast_theme() {
+    Theme t;
+    t.name = "HighContrast";
+    t.card = "#ffffff";
+    t.control = "#ffffff";
+    t.control_alt = "#ffffff";
+    t.hover_bg = "#e0e0ff";
+    t.press_bg = "#c8c8ff";
+    t.input_hover = "#ffffff";
+    t.select_bg = "#e0e0ff";
+    t.accent = "#0000cc";
+    t.accent_hover = "#000099";
+    t.text = "#000000";
+    t.text_2 = "#000000";
+    t.on_accent = "#ffffff";
+    t.border = "#000000";
+    t.border_control = "#000000";
+    t.border_strong = "#000000";
+    t.ground = "#ffffff";
+    t.shadow_1 = "#00000000 0px 0px 0px";
+    t.shadow_2 = "#00000000 0px 0px 0px";
+    return t;
+}
+
+/// A theme by name, matched without regard to case or spacing:
+/// `Light`, `Dark`, `HighContrast`. An unknown name answers `Light`, and
+/// `known_theme` is how a caller tells an unknown name from a deliberate one.
+inline bool known_theme(const std::string& name) {
+    std::string k;
+    for (char c : name) {
+        if (c == ' ' || c == '-' || c == '_') continue;
+        k += (char)std::tolower((unsigned char)c);
+    }
+    return k == "light" || k == "dark" || k == "highcontrast" || k == "system";
+}
+
+/// Whether a name asks to follow the desktop's own light/dark setting.
+inline bool theme_is_system(const std::string& name) {
+    std::string k;
+    for (char c : name) {
+        if (c == ' ' || c == '-' || c == '_') continue;
+        k += (char)std::tolower((unsigned char)c);
+    }
+    return k == "system";
+}
+
+inline Theme theme_named(const std::string& name) {
+    std::string k;
+    for (char c : name) {
+        if (c == ' ' || c == '-' || c == '_') continue;
+        k += (char)std::tolower((unsigned char)c);
+    }
+    if (k == "dark") return dark_theme();
+    if (k == "highcontrast") return high_contrast_theme();
+    return Theme{};
+}
+
+/// Default appearance for every component type, written against `theme`.
+///
+/// RmlUi ships form controls with NO default styling: an `<input>` or
+/// `<progress>` renders as *nothing* until styled. These rules are what make
+/// editbox/checkbox/progressbar real controls rather than invisible ones.
+///
+/// Shared by the runtime seed AND the designer canvas — with two copies, a
+/// control would look different in the designer than in the built app, which is
+/// the WYSIWYG drift D9 exists to prevent.
+inline std::string control_styles(const std::string& scope, const Theme& theme) {
     // `scope` prefixes every selector so these rules can be confined to a
     // subtree. The app document contains only the form, so it uses no scope;
     // the DESIGNER must scope them to its canvas, or `div{position:absolute}`
     // lands on the whole IDE and every panel collapses onto the same point.
     const std::string p = scope.empty() ? std::string() : scope + " ";
 
-    /* The palette is written once, here, and every rule below names a token
-     * rather than a hex literal. A control that wants "the outline colour"
-     * must not be able to disagree with the control beside it about what that
-     * is — which is exactly what a stylesheet full of near-identical greys
-     * turns into. The names are the ones the specification uses. */
-    const std::string CARD        = "#ffffff";   /* surface.card            */
-    const std::string CONTROL     = "#ffffff";   /* control at rest         */
-    const std::string CONTROL_ALT = "#f9f9f9";   /* secondary / alt rows    */
-    const std::string HOVER_BG    = "#f5f5f5";   /* button hover            */
-    const std::string PRESS_BG    = "#ededed";   /* button pressed          */
-    const std::string INPUT_HOVER = "#fbfbfb";   /* input hover             */
-    const std::string SELECT_BG   = "#f0f0f0";   /* selected row / item     */
-    const std::string ACCENT      = "#005fb8";
-    const std::string ACCENT_HOV  = "#0254a3";
-    const std::string TEXT        = "#1a1a1a";   /* text.primary            */
-    const std::string TEXT_2      = "#5c5c5c";   /* text.secondary          */
-    const std::string ON_ACCENT   = "#ffffff";
-    const std::string BORDER      = "#e5e5e5";   /* border.default          */
-    const std::string BORDER_C    = "#d1d1d1";   /* border.control          */
-    const std::string BORDER_S    = "#8a8a8a";   /* border.control.strong   */
-
-    /* Radii and the 4px grid the specification is built on. */
-    const std::string R_CTRL = "4px";   /* buttons, inputs, dropdowns */
-    const std::string R_CARD = "8px";   /* cards, group boxes, flyouts */
-
-    /* Elevation. RmlUi's colour parser takes an rgba() alpha as 0..255, NOT
-     * 0..1 — `rgba(0,0,0,0.04)` parses as fully transparent and vanishes — so
-     * the shadow colours are written as #rrggbbaa. Lengths and colour may come
-     * in either order (PropertyParserBoxShadow), colour first reads clearest. */
-    const std::string L1 = "#0000000a 0px 2px 4px";
-    const std::string L2 = "#0000001f 0px 8px 16px, #0000000a 0px 2px 4px";
-
-    /* Body text. Named here rather than left to inherit because the designer
-     * canvas inherits the IDE's 12px and a built app inherited 16px — the same
-     * control rendered two sizes in the two places this header exists to keep
-     * identical. */
-    const std::string FONT = "14px";
+    const std::string& CARD        = theme.card;
+    const std::string& CONTROL     = theme.control;
+    const std::string& CONTROL_ALT = theme.control_alt;
+    const std::string& HOVER_BG    = theme.hover_bg;
+    const std::string& PRESS_BG    = theme.press_bg;
+    const std::string& INPUT_HOVER = theme.input_hover;
+    const std::string& SELECT_BG   = theme.select_bg;
+    const std::string& ACCENT      = theme.accent;
+    const std::string& ACCENT_HOV  = theme.accent_hover;
+    const std::string& TEXT        = theme.text;
+    const std::string& TEXT_2      = theme.text_2;
+    const std::string& ON_ACCENT   = theme.on_accent;
+    const std::string& BORDER      = theme.border;
+    const std::string& BORDER_C    = theme.border_control;
+    const std::string& BORDER_S    = theme.border_strong;
+    const std::string& R_CTRL      = theme.radius_control;
+    const std::string& R_CARD      = theme.radius_card;
+    const std::string& L1          = theme.shadow_1;
+    const std::string& L2          = theme.shadow_2;
+    const std::string& FONT        = theme.font_size;
 
     return
         p + "div { display: block; position: absolute; }" +
@@ -624,17 +738,37 @@ inline std::string control_styles(const std::string& scope = "") {
 ///
 /// D21: a document created bare drops decorators silently while `SetProperty`
 /// still reports success. Always seed.
-inline std::string seed_document(int width, int height, const std::string& font_family) {
+inline std::string control_styles(const std::string& scope = "") {
+    return control_styles(scope, Theme{});
+}
+
+inline std::string seed_document(int width, int height, const std::string& font_family,
+                                 const Theme& theme) {
     std::string out = "<rml><head><style>";
     // The form's default ground, painted here because a descriptor default is
     // something the inspector shows, not something the runtime applies: a form
     // that set no colour used to clear to black. Light grey is what every
     // desktop the audience has used draws a window in.
-    out += "body { background-color: #f3f3f3; width: " + std::to_string(width) + "px; height: " + std::to_string(height) +
-           "px; font-family: '" + font_family + "'; font-size: 14px; color: #1a1a1a; }";
-    out += control_styles();
+    out += "body { background-color: " + theme.ground + "; width: " + std::to_string(width) +
+           "px; height: " + std::to_string(height) + "px; font-family: '" + font_family +
+           "'; font-size: " + theme.font_size + "; color: " + theme.text + "; }";
+    out += control_styles(std::string(), theme);
     out += "</style></head><body/></rml>";
     return out;
+}
+
+inline std::string seed_document(int width, int height, const std::string& font_family) {
+    return seed_document(width, height, font_family, Theme{});
+}
+
+/// Just the stylesheet a theme change installs: the body rule and the control
+/// rules, without the document around them.
+inline std::string theme_styles(int width, int height, const std::string& font_family,
+                                const Theme& theme) {
+    return "body { background-color: " + theme.ground + "; width: " + std::to_string(width) +
+           "px; height: " + std::to_string(height) + "px; font-family: '" + font_family +
+           "'; font-size: " + theme.font_size + "; color: " + theme.text + "; }" +
+           control_styles(std::string(), theme);
 }
 
 /// Font files to try, with the family name each one registers as.

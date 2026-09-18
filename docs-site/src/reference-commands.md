@@ -2171,6 +2171,40 @@ public static class P
 | `grid_clear` | text | bool |
 | `grid_row_count` | text | int |
 | `grid_set_cell` | text, int, int, text | bool |
+| [`set_theme`](#set_theme) | text | bool |
+| [`theme`](#theme) | — | text |
+
+### `set_theme`
+
+`set_theme(text) -> bool`
+
+Draw every control from the named theme: Light, Dark, HighContrast, or System to follow the desktop..
+
+```k2
+namespace ThemeDemo;
+
+using Kiln.Ui;
+
+public partial form MainWindow
+{
+    Title = "Theme";
+    Button swap { Text = "Dark"; Click += OnSwap; }
+}
+
+public partial form MainWindow
+{
+    void OnSwap()
+    {
+        Ui.SetTheme("Dark");
+    }
+}
+```
+
+### `theme`
+
+`theme() -> text`
+
+The theme in force..
 
 ## units
 

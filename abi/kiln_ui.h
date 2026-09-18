@@ -42,6 +42,17 @@ Kiln_Widget kn_ui_create(Kiln_Widget parent, const char *type_name);
 /* The form root, valid after kn_ui_init. */
 Kiln_Widget kn_ui_root(void);
 
+/* The theme: the palette every control is drawn from. `Light`, `Dark`,
+ * `HighContrast` or `System`, matched without regard to case, spaces or
+ * dashes; an unknown name is refused and the theme is left alone. Setting one
+ * rebuilds the document's stylesheet in place — no control is recreated, and
+ * every value, handler and position survives. Answers 0 on success.
+ *
+ * Callable before `kn_ui_init`, which is how the form's own `theme` property
+ * and `KILN_UI_THEME` reach the first frame. */
+int kn_ui_set_theme(const char *name);
+const char *kn_ui_theme(void);
+
 /* Set/get a property by name. Values are textual at this boundary in v0.
  *
  * `kn_ui_get` returns runtime-owned memory (allocated through the notification

@@ -12,6 +12,7 @@
 #include <string.h>
 #include "kiln_abi.h"
 #include "ui_data.h"
+#include "kiln_ui.h"
 
 typedef struct {
     char  **cells;
@@ -339,6 +340,32 @@ static void cmd_row_count(int32_t kind, Kiln_Slot *ret, Kiln_Slot *argv) {
     if (!t) { kn_ret_int(ret, -1); return; }
     kn_error_clear();
     kn_ret_int(ret, ui_table_row_count(t));
+}
+
+/* The theme: a name in, the stylesheet rebuilt. `kn_ui_set_theme` refuses a
+ * name it does not know rather than falling back to Light, so a typo is visible
+ * at the call rather than at a glance across the window. */
+void ui_set_theme(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+    const char *name = kn_arg_text(argv, 0);
+    if (kn_ui_set_theme(name) != 0) {
+        char msg[96];
+        snprintf(msg, sizeof msg, "`%s` is not a theme — Light, Dark, HighContrast or System",
+                 name ? name : "");
+        kn_error_set(KN_ERR_INVALID_ARG, msg);
+        kn_ret_bool(ret, 0);
+        return;
+    }
+    kn_error_clear();
+    kn_ret_bool(ret, 1);
+}
+
+void ui_theme(Kiln_Slot *ret, int32_t argc, Kiln_Slot *argv) {
+    (void)argc;
+    (void)argv;
+    const char *name = kn_ui_theme();
+    kn_error_clear();
+    kn_ret_text(ret, kn_dup(name, strlen(name)));
 }
 
 #define UI_CMD(name, kind, fn) \

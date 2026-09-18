@@ -16,6 +16,11 @@ static const Kiln_PropertyDesc FORM_PROPS[] = {
      * has used draws a form in light grey; a dark default reads as a theme
      * someone has to switch off before their first app looks normal. */
     { "background_color", KN_SDT_TEXT, "#f3f3f3",             "color" },
+    /* The palette every control on this form is drawn from: `Light`, `Dark`,
+     * `HighContrast`, or `System` to follow the desktop. A colour set on a
+     * component still wins — the theme decides what a control that says
+     * nothing looks like. */
+    { "theme",            KN_SDT_TEXT, "Light",               NULL },
     /* The window's icon: a PNG beside the source, embedded at build time like
      * an image's source, so the shipped binary carries it. */
     { "icon",             KN_SDT_TEXT, "",                    "file" },
@@ -344,11 +349,17 @@ static const Kiln_PropertyDesc DATASOURCE_PROPS[] = {
 /* One signature table per shape; the grid and datasource families share
  * them, and differ only in which component the name is looked up among. */
 static const int32_t A_NAME[]          = { KN_SDT_TEXT };
+static const int32_t A_TEXT[]          = { KN_SDT_TEXT };
 static const int32_t A_NAME_ROW[]      = { KN_SDT_TEXT, KN_SDT_TEXT };
 static const int32_t A_NAME_CELL[]     = { KN_SDT_TEXT, KN_SDT_INT, KN_SDT_INT };
 static const int32_t A_NAME_CELL_VAL[] = { KN_SDT_TEXT, KN_SDT_INT, KN_SDT_INT, KN_SDT_TEXT };
 
 static const Kiln_CommandDesc UI_COMMANDS[] = {
+    { "set_theme",            "ui_set_theme",            KN_SDT_BOOL, 1, A_TEXT,
+      "Draw every control from the named theme: Light, Dark, HighContrast, or System to follow the desktop.",
+      "namespace ThemeDemo;\n\nusing Kiln.Ui;\n\npublic partial form MainWindow\n{\n    Title = \"Theme\";\n    Button swap { Text = \"Dark\"; Click += OnSwap; }\n}\n\npublic partial form MainWindow\n{\n    void OnSwap()\n    {\n        Ui.SetTheme(\"Dark\");\n    }\n}\n" },
+    { "theme",                "ui_theme",                KN_SDT_TEXT, 0, NULL,
+      "The theme in force.", NULL },
     { "grid_clear",           "ui_grid_clear",           KN_SDT_BOOL, 1, A_NAME },
     { "grid_add_row",         "ui_grid_add_row",         KN_SDT_INT,  2, A_NAME_ROW },
     { "grid_cell",            "ui_grid_cell",            KN_SDT_TEXT, 3, A_NAME_CELL },

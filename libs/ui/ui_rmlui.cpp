@@ -49,6 +49,37 @@ namespace {
 /* The one place this file knows the platform (libs/README.md, Portability):
  * setting a variable in our own environment, which POSIX spells setenv and
  * the Microsoft CRT spells _putenv_s. Everything below reads the same on both. */
+/* What the desktop is set to, for `System`. SDL2 cannot answer this — SDL3's
+ * `SDL_GetSystemTheme` is the first version that can — so each platform is
+ * asked the way its own settings are kept: the freedesktop colour scheme on
+ * Linux (`prefer-dark` is 1), and `AppsUseLightTheme` on Windows. Anything
+ * that cannot be read is light, which is what a desktop with no preference
+ * draws. */
+bool desktop_prefers_dark() {
+#ifdef _WIN32
+    HKEY key;
+    if (RegOpenKeyExA(HKEY_CURRENT_USER,
+                      "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                      0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS)
+        return false;
+    DWORD value = 1, size = sizeof value, type = REG_DWORD;
+    const bool got = RegQueryValueExA(key, "AppsUseLightTheme", nullptr, &type,
+                                      (LPBYTE)&value, &size) == ERROR_SUCCESS;
+    RegCloseKey(key);
+    return got && value == 0;
+#else
+    /* `gsettings` reads the same value every GTK and Qt desktop publishes
+     * through the portal, and costs one process at start-up only when a form
+     * actually asks for `System`. */
+    FILE* p = popen("gsettings get org.gnome.desktop.interface color-scheme 2>/dev/null", "r");
+    if (!p) return false;
+    char line[64] = {0};
+    const bool read = fgets(line, sizeof line, p) != nullptr;
+    pclose(p);
+    return read && std::strstr(line, "dark") != nullptr;
+#endif
+}
+
 void ui_setenv(const char* name, const char* value) {
 #ifdef _WIN32
     _putenv_s(name, value);
@@ -66,6 +97,17 @@ struct UiState {
     std::vector<Rml::Element*> widgets;   // index+1 == Kiln_Widget handle
     std::string get_scratch;
     bool initialised = false;
+    /* The theme in force, and what rebuilding its stylesheet needs: the
+     * document's size and the font family that was actually loaded. */
+    kiln::ui::Theme theme;
+    std::string theme_name = "Light";
+    /* KILN_UI_THEME was set: a developer looking at the program in another
+     * palette, which outranks the form's own choice. A program that switches
+     * theme from its own code still switches. */
+    bool theme_forced = false;
+    std::string font_family = "sans-serif";
+    int width = 0;
+    int height = 0;
 };
 UiState g;
 
@@ -1266,7 +1308,21 @@ int kn_ui_init(const char* title, int width, int height) {
     /* D21: forms are ALWAYS instantiated into a stylesheet-seeded document.
      * A bare CreateDocument() silently drops decorators while SetProperty still
      * returns true — the spike's most expensive finding. */
-    const std::string seed = kiln::ui::seed_document(width, height, family);
+    g.font_family = family;
+    g.width = width;
+    g.height = height;
+    /* A theme named before the window exists — `KILN_UI_THEME`, or the form's
+     * `theme` property, which reaches the runtime as a property of the root. */
+    if (const char* want = std::getenv("KILN_UI_THEME")) {
+        if (kiln::ui::known_theme(want)) {
+            g.theme_name = want;
+            g.theme = kiln::ui::theme_is_system(want)
+                          ? (desktop_prefers_dark() ? kiln::ui::dark_theme() : kiln::ui::Theme{})
+                          : kiln::ui::theme_named(want);
+            g.theme_forced = true;
+        }
+    }
+    const std::string seed = kiln::ui::seed_document(width, height, family, g.theme);
     g.document = g.context->LoadDocumentFromMemory(seed);
     if (!g.document) return 1;
     g.document->Show();
@@ -1284,6 +1340,35 @@ int kn_ui_init(const char* title, int width, int height) {
 }
 
 Kiln_Widget kn_ui_root(void) { return g.initialised ? 1 : 0; }
+
+/* --- themes -----------------------------------------------------------
+ *
+ * A theme is the palette every control's rule is written against
+ * (`ui_mapping.h`), so changing one is changing the document's stylesheet and
+ * nothing else: no element is created, destroyed or moved, and every control
+ * keeps its value, its handlers and its place. `SetStyleSheetContainer` is the
+ * one call that does that — reloading the document would rebuild it from the
+ * seed and take the program's own properties with it.
+ */
+extern "C" int kn_ui_set_theme(const char* name) {
+    if (!name || !*name) return 1;
+    if (!kiln::ui::known_theme(name)) return 1;
+    g.theme_name = name;
+    /* `System` is a request to follow the desktop, so it resolves here — and
+     * `kn_ui_theme` still answers `System`, which is what the program asked
+     * for and what it would write back into a settings file. */
+    const bool system = kiln::ui::theme_is_system(name);
+    g.theme = system ? (desktop_prefers_dark() ? kiln::ui::dark_theme() : kiln::ui::Theme{})
+                     : kiln::ui::theme_named(name);
+    if (!g.initialised || !g.document) return 0;
+    auto sheet = Rml::Factory::InstanceStyleSheetString(
+        kiln::ui::theme_styles(g.width, g.height, g.font_family, g.theme));
+    if (!sheet) return 1;
+    g.document->SetStyleSheetContainer(std::move(sheet));
+    return 0;
+}
+
+extern "C" const char* kn_ui_theme(void) { return g.theme_name.c_str(); }
 
 Kiln_Widget kn_ui_create(Kiln_Widget parent, const char* type_name) {
     if (!g.initialised || !type_name) return 0;
@@ -1459,6 +1544,10 @@ int kn_ui_set(Kiln_Widget w, const char* property, const char* value) {
     const std::string v = kiln::ui::rcss_value(property, value);
 
     if (w == 1 && std::strcmp(property, "title") == 0) return 0;  /* window title: set at init */
+    /* The form's own theme. It is a property so the designer can show it and a
+     * program can set it later; both paths land in the one swap above. */
+    if (w == 1 && std::strcmp(property, "theme") == 0)
+        return g.theme_forced ? 0 : kn_ui_set_theme(value);
     if (w == 1 && std::strcmp(property, "icon") == 0) {
         /* Embedded bytes first, the path second, the same order every other
          * resource resolves in — so the icon a program shipped with wins over

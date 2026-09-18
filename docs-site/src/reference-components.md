@@ -157,6 +157,7 @@ list.
 | `width` | int |
 | `height` | int |
 | `background_color` | text |
+| `theme` | text |
 | `icon` | text |
 | `position` | text |
 | `left` | int |
