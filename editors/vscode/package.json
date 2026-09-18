@@ -2,7 +2,7 @@
   "name": "kiln",
   "displayName": "Kiln",
   "description": "Kiln 2 language support: syntax highlighting, snippets, the kiln language server (diagnostics, completion, hover, outline, formatting) and debugging (breakpoints, stepping, variables).",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "publisher": "kiln",
   "license": "MIT",
   "engines": {
