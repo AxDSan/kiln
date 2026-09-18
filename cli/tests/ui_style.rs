@@ -290,6 +290,41 @@ public partial form MainWindow
     light.expect(20, 36, "#000000", "the high-contrast outline");
 }
 
+/// The classic theme is a bevel rather than an outline: the face is the grey
+/// that system drew every control in, the top and left edges are white, and the
+/// bottom and right edges are black. A corner radius would give it away, so the
+/// plate is checked a pixel in from its own edge.
+#[test]
+fn the_classic_theme_is_a_windows_bevel() {
+    if !ui_available() {
+        return;
+    }
+    const CLASSIC: &str = r#"namespace Classic;
+
+using Kiln.Ui;
+
+public partial form MainWindow
+{
+    Title = "classic";
+    Width = 400;
+    Height = 300;
+    Theme = "Classic";
+
+    Button ok { Text = "OK"; Left = 20; Top = 20; Width = 96; Height = 32; }
+    Editbox name { Text = "Ada"; Left = 20; Top = 70; Width = 200; Height = 32; }
+}
+"#;
+    let (f, _) = render(CLASSIC, "theme_classic");
+    f.expect(2, 2, "#c0c0c0", "the classic ground");
+    f.expect(26, 46, "#c0c0c0", "the button's face");
+    f.expect(20, 36, "#ffffff", "the button's lit left edge");
+    f.expect(115, 36, "#000000", "the button's shaded right edge");
+    f.expect(60, 20, "#ffffff", "the button's lit top edge");
+    // A field is the same bevel the other way round, over white paper.
+    f.expect(20, 86, "#808080", "the field's sunk left edge");
+    f.expect(150, 86, "#ffffff", "the field's paper");
+}
+
 /// Switching while the program runs: the button's handler asks for `Light`, and
 /// the frame after the click is the light palette — including the label, which
 /// reads back the theme now in force.

@@ -386,6 +386,14 @@ struct Theme {
     /// inherits the IDE's 12px and a built app inherited 16px — the same control
     /// rendered two sizes in the two places this header exists to keep identical.
     std::string font_size = "14px";
+    /* Classic chrome: square corners and a raised/sunken bevel in place of a
+     * hairline outline, the way Windows drew a control before it drew a card.
+     * The four edge colours are the ones that bevel is made of. */
+    bool bevel = false;
+    std::string bevel_light = "#ffffff";   ///< outer top/left of a raised edge
+    std::string bevel_face = "#dfdfdf";    ///< inner top/left
+    std::string bevel_shadow = "#808080";  ///< inner bottom/right
+    std::string bevel_dark = "#000000";    ///< outer bottom/right
 };
 
 /// The dark theme: the same structure with the surfaces and the text swapped,
@@ -438,6 +446,38 @@ inline Theme high_contrast_theme() {
     return t;
 }
 
+/// Windows 98, as `os-gui` documents it: a grey face, a two-pixel bevel that is
+/// raised at rest and sunk when pressed, square corners, navy selection, and no
+/// shadow anywhere. The palette is that system's own — `#c0c0c0` face,
+/// `#000080` selection, `#808080` shadow.
+inline Theme classic_theme() {
+    Theme t;
+    t.name = "Classic";
+    t.card = "#ffffff";          /* a list or a text field is white paper   */
+    t.control = "#c0c0c0";       /* a button is the face colour             */
+    t.control_alt = "#c0c0c0";
+    t.hover_bg = "#c0c0c0";      /* a classic button does not light up      */
+    t.press_bg = "#c0c0c0";      /* it sinks instead, which the bevel does  */
+    t.input_hover = "#ffffff";
+    t.select_bg = "#000080";
+    t.accent = "#000080";
+    t.accent_hover = "#1084d0";
+    t.text = "#000000";
+    t.text_2 = "#404040";
+    t.on_accent = "#ffffff";
+    t.border = "#808080";
+    t.border_control = "#808080";
+    t.border_strong = "#000000";
+    t.ground = "#c0c0c0";
+    t.radius_control = "0px";
+    t.radius_card = "0px";
+    t.shadow_1 = "#00000000 0px 0px 0px";
+    t.shadow_2 = "#00000000 0px 0px 0px";
+    t.font_size = "12px";
+    t.bevel = true;
+    return t;
+}
+
 /// A theme by name, matched without regard to case or spacing:
 /// `Light`, `Dark`, `HighContrast`. An unknown name answers `Light`, and
 /// `known_theme` is how a caller tells an unknown name from a deliberate one.
@@ -447,7 +487,8 @@ inline bool known_theme(const std::string& name) {
         if (c == ' ' || c == '-' || c == '_') continue;
         k += (char)std::tolower((unsigned char)c);
     }
-    return k == "light" || k == "dark" || k == "highcontrast" || k == "system";
+    return k == "light" || k == "dark" || k == "highcontrast" || k == "classic" ||
+           k == "system";
 }
 
 /// Whether a name asks to follow the desktop's own light/dark setting.
@@ -468,6 +509,7 @@ inline Theme theme_named(const std::string& name) {
     }
     if (k == "dark") return dark_theme();
     if (k == "highcontrast") return high_contrast_theme();
+    if (k == "classic") return classic_theme();
     return Theme{};
 }
 
@@ -507,6 +549,10 @@ inline std::string control_styles(const std::string& scope, const Theme& theme) 
     const std::string& L1          = theme.shadow_1;
     const std::string& L2          = theme.shadow_2;
     const std::string& FONT        = theme.font_size;
+    const std::string& BEVEL_LIGHT  = theme.bevel_light;
+    const std::string& BEVEL_FACE   = theme.bevel_face;
+    const std::string& BEVEL_SHADOW = theme.bevel_shadow;
+    const std::string& BEVEL_DARK   = theme.bevel_dark;
 
     return
         p + "div { display: block; position: absolute; }" +
@@ -731,7 +777,98 @@ inline std::string control_styles(const std::string& scope, const Theme& theme) 
             " border-bottom: 1px " + BORDER + "; }" +
         p + "div.oe-grid div.oe-row:hover { background-color: " + HOVER_BG + "; }" +
         p + "div.oe-grid div.oe-selected { background-color: " + ACCENT + ";"
-            " color: " + ON_ACCENT + "; }";
+            " color: " + ON_ACCENT + "; }" +
+
+        /* Classic chrome, last so it outranks the rules above at equal
+         * specificity — RCSS breaks that tie by source order. A control is a
+         * bevel rather than an outline: two pixels of border for the outer
+         * edge, and an inset shadow for the inner one, which is how the
+         * original drew a raised face in four colours. */
+        (!theme.bevel ? std::string() :
+            p + "button, " + p + "div.oe-spinner button.oe-step {"
+                " border: 2px " + BEVEL_LIGHT + "; border-right-color: " + BEVEL_DARK + ";"
+                " border-bottom-color: " + BEVEL_DARK + "; border-radius: 0px;"
+                " box-shadow: " + BEVEL_FACE + " 1px 1px 0px 0px inset, "
+                                + BEVEL_SHADOW + " -1px -1px 0px 0px inset; }" +
+            /* Pressed: the bevel inverts and the caption moves a pixel down and
+             * right with it, which is the whole of the classic click. */
+            p + "button:active, " + p + "div.oe-spinner button.oe-step:active {"
+                " border: 2px " + BEVEL_DARK + "; border-right-color: " + BEVEL_LIGHT + ";"
+                " border-bottom-color: " + BEVEL_LIGHT + ";"
+                " box-shadow: " + BEVEL_SHADOW + " 1px 1px 0px 0px inset;"
+                " padding: 2px 14px 0 18px; }" +
+            p + "button:hover { background-color: " + CONTROL + "; }" +
+            /* Focus is a dotted ring in the original; RCSS has no dotted
+             * border, so it is the one place this reads as itself: a hairline
+             * inside the bevel. */
+            p + "button:focus { box-shadow: " + BEVEL_FACE + " 1px 1px 0px 0px inset, "
+                              + BEVEL_SHADOW + " -1px -1px 0px 0px inset, "
+                              + TEXT + " 0px 0px 0px 1px inset; }" +
+            /* A field, a list and a grid are sunk instead of raised: the same
+             * four colours the other way round, over white paper. */
+            p + "input.text, " + p + "textarea, " + p + "div.oe-listbox, "
+              + p + "div.oe-grid, " + p + "select, "
+              + p + "div.oe-spinner input.oe-value {"
+                " background-color: " + CARD + ";"
+                " border: 2px " + BEVEL_SHADOW + "; border-right-color: " + BEVEL_LIGHT + ";"
+                " border-bottom-color: " + BEVEL_LIGHT + "; border-radius: 0px;"
+                " box-shadow: " + BEVEL_DARK + " 1px 1px 0px 0px inset; }" +
+            p + "input.text:hover, " + p + "textarea:hover, " + p + "select:hover {"
+                " background-color: " + CARD + "; }" +
+            p + "input.text:focus, " + p + "textarea:focus {"
+                " border-bottom: 2px " + BEVEL_LIGHT + "; background-color: " + CARD + "; }" +
+            /* A group box is a sunken hairline, not a card with a shadow. */
+            p + "div.oe-groupbox { border: 1px " + BEVEL_SHADOW + ";"
+                " border-right-color: " + BEVEL_LIGHT + ";"
+                " border-bottom-color: " + BEVEL_LIGHT + ";"
+                " background-color: " + CONTROL + "; border-radius: 0px;"
+                " box-shadow: none; }" +
+            /* A check box and a radio button are the same sunken well; the
+             * tick fills it with the text colour rather than the accent,
+             * because the classic tick is black on white. */
+            p + "div.oe-checkbox input, " + p + "div.oe-radio input {"
+                " background-color: " + CARD + "; border: 2px " + BEVEL_SHADOW + ";"
+                " border-right-color: " + BEVEL_LIGHT + ";"
+                " border-bottom-color: " + BEVEL_LIGHT + "; border-radius: 0px; }" +
+            /* Checked is a mark inside the white well, not a filled square: an
+             * `<input>` holds no content to draw a tick from, so the mark is an
+             * inset shadow shrunk by its spread — black, four pixels in on
+             * every side, which is what the original tick covers. */
+            p + "div.oe-checkbox input:checked { background-color: " + CARD + ";"
+                " border: 2px " + BEVEL_SHADOW + "; border-right-color: " + BEVEL_LIGHT + ";"
+                " border-bottom-color: " + BEVEL_LIGHT + "; border-radius: 0px;"
+                " box-shadow: " + TEXT + " 0px 0px 0px 3px inset; }" +
+            /* The radio's well is round, and so is its dot. */
+            p + "div.oe-radio input { border-radius: 8px; }" +
+            p + "div.oe-radio input:checked { background-color: " + CARD + ";"
+                " border: 2px " + BEVEL_SHADOW + "; border-right-color: " + BEVEL_LIGHT + ";"
+                " border-bottom-color: " + BEVEL_LIGHT + "; border-radius: 8px;"
+                " box-shadow: " + TEXT + " 0px 0px 0px 3px inset; }" +
+            /* The slider groove is sunk and its handle is a raised face. */
+            p + "input.range slidertrack { background-color: " + BEVEL_SHADOW + ";"
+                " border-radius: 0px; }" +
+            p + "input.range sliderbar { background-color: " + CONTROL + ";"
+                " border: 2px " + BEVEL_LIGHT + "; border-right-color: " + BEVEL_DARK + ";"
+                " border-bottom-color: " + BEVEL_DARK + "; border-radius: 0px; }" +
+            p + "input.range sliderbar:hover { background-color: " + CONTROL + "; }" +
+            /* A progress bar is the classic chunk: a sunken trough, a solid
+             * navy fill, no rounding. */
+            p + "progress { border: 2px " + BEVEL_SHADOW + ";"
+                " border-right-color: " + BEVEL_LIGHT + ";"
+                " border-bottom-color: " + BEVEL_LIGHT + "; border-radius: 0px;"
+                " background-color: " + CONTROL + "; }" +
+            p + "progress fill { background-color: " + ACCENT + "; border-radius: 0px; }" +
+            /* Selection is navy with white on it, everywhere something is
+             * selected. */
+            p + "div.oe-listbox div.oe-item:hover, " + p + "div.oe-grid div.oe-row:hover {"
+                " background-color: " + CONTROL + "; }" +
+            p + "select selectbox { border: 2px " + BEVEL_LIGHT + ";"
+                " border-right-color: " + BEVEL_DARK + "; border-bottom-color: " + BEVEL_DARK + ";"
+                " border-radius: 0px; box-shadow: none; }" +
+            p + "select selectbox option:hover { background-color: " + ACCENT + ";"
+                " color: " + ON_ACCENT + "; border-radius: 0px; }" +
+            p + "select selectbox option:checked { background-color: " + ACCENT + ";"
+                " color: " + ON_ACCENT + "; }");
 }
 
 /// The seed document every Kiln form is built into.

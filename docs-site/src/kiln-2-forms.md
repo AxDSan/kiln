@@ -281,6 +281,7 @@ public partial form MainWindow
 | `Light` | the default: a light grey ground, a blue accent |
 | `Dark` | the same structure with the surfaces and the text swapped |
 | `HighContrast` | black on white, heavier outlines, no shadows |
+| `Classic` | Windows 98: a grey face, a raised bevel that sinks when pressed, square corners, navy selection |
 | `System` | whichever of light and dark the desktop is set to |
 
 `Ui.SetTheme` switches while the program runs. It repaints every control from
@@ -288,6 +289,12 @@ the new palette and creates nothing: a value being typed, a selected row, a
 wired handler and a scroll position all survive the switch. `Ui.Theme()` answers
 the name in force — `System` stays `System`, because that is what the program
 asked for. A name that is not a theme is refused and the palette is left alone.
+
+`Classic` is the old look, down to the two-pixel bevel: white and light grey on
+the top and left edges, grey and black on the bottom and right, inverted while a
+button is held. Controls a Kiln form has and that system did not — the slider,
+the progress bar — follow the same rules. The face colours are that system's
+own; the typeface is whatever the machine has, since MS Sans Serif is not on it.
 
 `KILN_UI_THEME=Dark ./app` overrides whatever the form says, which is how a
 program is looked at in another palette without touching its source.
