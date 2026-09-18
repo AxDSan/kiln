@@ -346,6 +346,10 @@ half-applied would be a window nobody could explain.
 `KILN_UI_THEME=Dark ./app` overrides whatever the form says, which is how a
 program is looked at in another palette without touching its source.
 
+Studio's canvas draws the form from its theme, resolved the same way the built
+program resolves it — so a form set to `Classic` is bevelled grey in the
+designer, and one set to a project's own theme wears it there too.
+
 ## Studio
 
 Studio reads a Kiln 2 form through `kiln inspect` and writes it through

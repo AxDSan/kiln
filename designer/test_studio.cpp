@@ -666,7 +666,7 @@ static void test_sessions(const std::string& kiln, const std::string& designer) 
         check("form: a press on the title bar selects it", has(out, "clickform: selected main_window"));
         check("form: the inspector names it as the form", has(out, "props: main_window (form) name=main_window"));
         check("form: and lists its own properties",
-              has(out, " title=Kiln width=480 height=300 background_color=#1e2233 icon="));
+              has(out, " title=Kiln width=480 height=300 background_color=#1e2233 theme= icon="));
         check("form: it is framed on the canvas", has(out, "formsel=yes"));
         check("form: the Events tab lists load", has(out, "events: load="));
         check("form: a drag does not move it", has(out, "greeting=40,40 form=480x300"));
@@ -789,6 +789,47 @@ static void test_sessions(const std::string& kiln, const std::string& designer) 
         check("typing: what was typed reached the file",
               has(slurp(path), "title = \"Kiln hello there\"") &&
                   has(slurp(path), "text = \"Click me!!!!!!!!!!!!!!!!\""));
+    }
+
+    // The canvas previews the form's theme: the same palette the built program
+    // will draw, resolved the same way — a built-in by name, a `.ktheme` beside
+    // the project, and the default for a name that answers to neither.
+    {
+        const std::string dir = "/tmp/kiln_studio_theme";
+        ::system(("rm -rf " + dir).c_str());
+        ::mkdir(dir.c_str(), 0755);
+        ::mkdir((dir + "/themes").c_str(), 0755);
+        {
+            std::ofstream f(dir + "/themes/ocean.ktheme", std::ios::trunc);
+            f << "{ \"base\": \"Dark\", \"ground\": \"#0b2942\", \"accent\": \"#3fc1ff\" }\n";
+        }
+        const std::string src = dir + "/form.kiln";
+        auto write_form = [&](const char* theme) {
+            std::ofstream f(src, std::ios::trunc);
+            f << "namespace Canvas;\n\nusing Kiln.Ui;\n\npublic partial form MainWindow\n{\n"
+                 "    Title = \"Canvas\";\n    Width = 320;\n    Height = 200;\n    Theme = \""
+              << theme << "\";\n\n    Button ok { Text = \"OK\"; Left = 20; Top = 20;"
+                 " Width = 90; Height = 28; }\n}\n";
+        };
+        auto canvas_theme_of = [&](const char* theme) {
+            write_form(theme);
+            const std::string cmd = "KILN_DESIGNER_SCRIPT='view:design;pump;canvastheme' " +
+                                    designer + " " + src + " " + kiln + " 2>/dev/null";
+            std::string out;
+            if (FILE* p = popen(cmd.c_str(), "r")) {
+                char buf[4096];
+                while (fgets(buf, sizeof buf, p)) out += buf;
+                pclose(p);
+            }
+            return out;
+        };
+        check("canvas: a built-in theme reaches the preview",
+              has(canvas_theme_of("Classic"), "canvastheme: Classic #c0c0c0"));
+        check("canvas: the project's own theme file reaches it too",
+              has(canvas_theme_of("Ocean"), "canvastheme: Ocean #0b2942"));
+        check("canvas: a theme nothing answers to previews the default",
+              has(canvas_theme_of("NoSuchTheme"), "canvastheme: NoSuchTheme #f3f3f3"));
+        ::system(("rm -rf " + dir).c_str());
     }
 
     // The window's own frame: no window-manager frame over it, and the green

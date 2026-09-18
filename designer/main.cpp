@@ -169,6 +169,9 @@ struct Designer {
     /// What the chrome's stylesheet was built from. Kept so a theme change can
     /// build it again without threading three arguments through every caller.
     std::string mono, dot_tile;
+    /// The theme the canvas stylesheet was built for, so a form that changes it
+    /// rebuilds the sheet and one that does not leaves it alone.
+    std::string canvas_theme_name;
     /// The Settings dialog, and the category it is showing.
     Rml::ElementDocument* settings_doc = nullptr;
     std::string settings_cat = "Appearance";
@@ -888,6 +891,11 @@ std::string icon_img(const std::string& name, int px, const char* cls) {
 /// an already-running IDE: every colour in it was copied out of `theme::` as a
 /// string when it was built, so a palette swap reaches the screen only by
 /// building the sheet again and handing it to the document.
+/// Defined beside the model it reads; declared here because the stylesheet is
+/// built before that point in the file.
+kiln::ui::Theme canvas_theme();
+void rebuild_styles();
+
 std::string build_styles(const std::string& family, const std::string& mono,
                          const std::string& dot_tile) {
     using namespace theme;
@@ -1213,7 +1221,7 @@ std::string build_styles(const std::string& family, const std::string& mono,
     // app, from the shared mapping — otherwise the preview lies.
     // SCOPED to the canvas: these rules include `div{position:absolute}`, which
     // would otherwise collapse every panel in the IDE onto one point.
-    s << kiln::ui::control_styles("#canvas");
+    s << kiln::ui::control_styles("#canvas", canvas_theme());
     s << "#canvas{position:relative;overflow:hidden;border-bottom-left-radius:8px;"
          "border-bottom-right-radius:8px}";
     // A faint centred wordmark on the design surface — a maker's mark, not
@@ -1597,6 +1605,34 @@ bool can_write(const Component& c, const char* prop) {
 
 /// set_property behind the guard. False, and nothing written, when the
 /// component does not declare the property.
+/// The theme the open form declares, resolved the way a built program resolves
+/// it: a built-in by name, or a `themes/<name>.ktheme` beside the project. A
+/// name that answers to neither is the default, because the canvas must show
+/// what the program will draw and an unknown theme draws the default.
+kiln::ui::Theme canvas_theme() {
+    const std::string* named = g.model.form.property("theme");
+    if (!named || named->empty()) return kiln::ui::Theme{};
+    if (kiln::ui::known_theme(*named)) {
+        if (kiln::ui::theme_is_system(*named)) {
+            // The canvas follows Studio's own appearance for `System`: the IDE
+            // has already asked the desktop, and asking twice could disagree.
+            return kiln::settings::text("appearance.theme") == "dark" ? kiln::ui::dark_theme()
+                                                                     : kiln::ui::Theme{};
+        }
+        return kiln::ui::theme_named(*named);
+    }
+    std::string file;
+    for (char c : *named) file += (char)std::tolower((unsigned char)c);
+    const size_t slash = g.model.path.find_last_of('/');
+    const std::string dir =
+        slash == std::string::npos ? std::string(".") : g.model.path.substr(0, slash);
+    const std::string path = dir + "/themes/" + file + ".ktheme";
+    kiln::ui::Theme t;
+    std::string why;
+    if (kiln::sys::readable(path) && kiln::ui::parse_theme(md::read_file(path), t, why)) return t;
+    return kiln::ui::Theme{};
+}
+
 bool write_prop(Component& c, const char* prop, const std::string& value) {
     if (!can_write(c, prop)) return false;
     c.set_property(prop, value);
@@ -1717,6 +1753,21 @@ static void announce_window_size(SDL_Window* win, int w, int h) {
 }
 
 void rebuild_canvas() {
+    // A form whose theme changed needs the canvas stylesheet rebuilt, not just
+    // its inline colours: the theme is what every control's rule is written
+    // against. Recorded before the rebuild, so the call below sees no change
+    // and does not come back round.
+    if (const std::string* named = g.model.form.property("theme")) {
+        if (*named != g.canvas_theme_name) {
+            g.canvas_theme_name = *named;
+            rebuild_styles();
+            return;
+        }
+    } else if (!g.canvas_theme_name.empty()) {
+        g.canvas_theme_name.clear();
+        rebuild_styles();
+        return;
+    }
     using theme::SEL_GAP; using theme::HANDLE_PX; using theme::BADGE_H; using theme::BADGE_GAP;
     Rml::Element* formwin = by_id("formwin");
     Rml::Element* canvas = by_id("canvas");
@@ -1734,7 +1785,7 @@ void rebuild_canvas() {
     // The ground a built form actually paints when it declares no colour
     // (the ui library's form default). White here would preview a window
     // the program never renders.
-    const std::string form_bg = bg && is_hex_colour(*bg) ? *bg : "#f3f3f3";
+    const std::string form_bg = bg && is_hex_colour(*bg) ? *bg : canvas_theme().ground;
     canvas->SetProperty("background-color", form_bg);
     if (Rml::Element* t = by_id("formtitle")) {
         const bool dark = dark_colour(form_bg);
@@ -6620,6 +6671,16 @@ void run_script(const char* script) {
                 // nowhere.
                 const bool running = Backend::ProcessEvents(g.context, nullptr, false);
                 std::printf("quitcheck: %s\n", running ? "running" : "quit");
+                std::fflush(stdout);
+            } else if (verb == "canvastheme") {
+                // What the canvas is painting the form from: the name the form
+                // declared and the ground that resolved to, so a scripted
+                // session can check the preview without reading pixels.
+                const std::string* named = g.model.form.property("theme");
+                const kiln::ui::Theme t = canvas_theme();
+                std::printf("canvastheme: %s %s\n",
+                            named && !named->empty() ? named->c_str() : "(none)",
+                            t.ground.c_str());
                 std::fflush(stdout);
             } else if (verb == "winflags") {
                 // What the window manager did with the request; a dump cannot
