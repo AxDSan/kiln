@@ -949,7 +949,9 @@ fn build_k2_for(
     // Windows program carries the table even when it is empty, because a PE
     // link has no weak symbol for the UI library to find missing.
     if !library {
-        match render_resources(&k2_resources(&src), Path::new(&input)) {
+        let mut wanted = k2_resources(&src);
+        wanted.extend(project_themes(Path::new(&input)));
+        match render_resources(&wanted, Path::new(&input)) {
             Ok(Some(table)) => ll.push_str(&table),
             Ok(None) if goal.os == Os::Windows => ll.push_str(EMPTY_RESOURCE_TABLE),
             Ok(None) => {}
@@ -2143,6 +2145,30 @@ fn embed_resources(module: &Module, input: &Path) -> Result<Option<String>, Stri
 
 /// The pictures a Kiln 2 form names — its `Icon`, and each `Image`'s `Source`
 /// — as `(owner, path)`, across every `partial form` block.
+/// Every theme a project ships: `themes/*.ktheme` beside the source, carried
+/// whole into the binary.
+///
+/// The whole directory rather than the themes a form names, because a program
+/// switches theme from its own code — `Ui.SetTheme(setting)` — and what that
+/// string will be is not knowable while compiling. A theme file is a few
+/// hundred bytes.
+fn project_themes(input: &Path) -> Vec<(String, String)> {
+    let base = input.parent().unwrap_or(Path::new("."));
+    let Ok(dir) = std::fs::read_dir(base.join("themes")) else { return Vec::new() };
+    let mut found: Vec<(String, String)> = Vec::new();
+    for entry in dir.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("ktheme") {
+            continue;
+        }
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            found.push(("the themes directory".to_string(), format!("themes/{name}")));
+        }
+    }
+    found.sort();
+    found
+}
+
 fn k2_resources(src: &str) -> Vec<(String, String)> {
     let Ok(toks) = kiln_k2::lexer::lex(src) else { return Vec::new() };
     let Ok(program) = kiln_k2::parser::parse(toks) else { return Vec::new() };

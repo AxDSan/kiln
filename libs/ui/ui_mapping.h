@@ -513,6 +513,135 @@ inline Theme theme_named(const std::string& name) {
     return Theme{};
 }
 
+/// One token of a theme, set by name. Answers false for a name that is not a
+/// token, which is how a `.ktheme` file's typo is reported rather than ignored.
+inline bool set_token(Theme& t, const std::string& key, const std::string& value) {
+    struct Row { const char* key; std::string Theme::*field; };
+    static const Row rows[] = {
+        {"card", &Theme::card},
+        {"control", &Theme::control},
+        {"control_alt", &Theme::control_alt},
+        {"hover", &Theme::hover_bg},
+        {"pressed", &Theme::press_bg},
+        {"input_hover", &Theme::input_hover},
+        {"selection", &Theme::select_bg},
+        {"accent", &Theme::accent},
+        {"accent_hover", &Theme::accent_hover},
+        {"text", &Theme::text},
+        {"text_secondary", &Theme::text_2},
+        {"on_accent", &Theme::on_accent},
+        {"border", &Theme::border},
+        {"border_control", &Theme::border_control},
+        {"border_strong", &Theme::border_strong},
+        {"ground", &Theme::ground},
+        {"radius", &Theme::radius_control},
+        {"radius_card", &Theme::radius_card},
+        {"shadow", &Theme::shadow_1},
+        {"shadow_raised", &Theme::shadow_2},
+        {"font_size", &Theme::font_size},
+        {"bevel_light", &Theme::bevel_light},
+        {"bevel_face", &Theme::bevel_face},
+        {"bevel_shadow", &Theme::bevel_shadow},
+        {"bevel_dark", &Theme::bevel_dark},
+    };
+    for (const Row& r : rows) {
+        if (key == r.key) {
+            /* A bare number is a length: `"radius": 8` is 8px, which is what a
+             * person writing a theme means and what CSS would refuse. */
+            const bool numeric = !value.empty() &&
+                value.find_first_not_of("0123456789") == std::string::npos;
+            t.*(r.field) = numeric ? value + "px" : value;
+            return true;
+        }
+    }
+    if (key == "bevel") {
+        t.bevel = (value == "true" || value == "1");
+        return true;
+    }
+    return false;
+}
+
+/// A theme file: the tokens a project wants different, over the theme it names
+/// as its `base`. The format is JSON's object — `"key": "value"` pairs, commas
+/// between them — read here rather than with a parser, because a theme is a flat
+/// table of strings and numbers and nothing else.
+///
+/// Answers false, and says which line, for a key that is not a token or a file
+/// that is not an object: a theme that half-applied would be a palette nobody
+/// could explain.
+inline bool parse_theme(const std::string& text, Theme& out, std::string& why) {
+    Theme t;
+    std::string base;
+    // Find "base" first, so the tokens beside it apply over the right theme
+    // whatever order they are written in.
+    size_t i = 0;
+    std::vector<std::pair<std::string, std::string>> pairs;
+    while (i < text.size()) {
+        // A string, then a colon, then a string or a bare number.
+        while (i < text.size() && text[i] != '"') {
+            if (text[i] == '/' && i + 1 < text.size() && text[i + 1] == '/') {
+                while (i < text.size() && text[i] != '\n') i++;
+            }
+            i++;
+        }
+        if (i >= text.size()) break;
+        const size_t ks = ++i;
+        while (i < text.size() && text[i] != '"') i++;
+        const std::string key = text.substr(ks, i - ks);
+        i++;
+        while (i < text.size() && (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' ||
+                                   text[i] == '\r'))
+            i++;
+        if (i >= text.size() || text[i] != ':') {
+            why = "`" + key + "` has no value";
+            return false;
+        }
+        i++;
+        while (i < text.size() && (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' ||
+                                   text[i] == '\r'))
+            i++;
+        std::string value;
+        if (i < text.size() && text[i] == '"') {
+            const size_t vs = ++i;
+            while (i < text.size() && text[i] != '"') i++;
+            value = text.substr(vs, i - vs);
+            i++;
+        } else {
+            const size_t vs = i;
+            while (i < text.size() && text[i] != ',' && text[i] != '}' && text[i] != '\n') i++;
+            value = text.substr(vs, i - vs);
+            while (!value.empty() && (value.back() == ' ' || value.back() == '\r')) value.pop_back();
+        }
+        pairs.emplace_back(key, value);
+    }
+    if (pairs.empty()) {
+        why = "it holds no tokens";
+        return false;
+    }
+    for (const auto& kv : pairs) {
+        if (kv.first == "base") base = kv.second;
+    }
+    if (!base.empty()) {
+        if (!known_theme(base) || theme_is_system(base)) {
+            why = "`base` names `" + base + "`, which is not Light, Dark, HighContrast or Classic";
+            return false;
+        }
+        t = theme_named(base);
+    }
+    for (const auto& kv : pairs) {
+        if (kv.first == "base" || kv.first == "name") continue;
+        if (!set_token(t, kv.first, kv.second)) {
+            why = "`" + kv.first + "` is not a theme token";
+            return false;
+        }
+    }
+    for (const auto& kv : pairs) {
+        if (kv.first == "name") t.name = kv.second;
+    }
+    out = t;
+    return true;
+}
+
 /// Default appearance for every component type, written against `theme`.
 ///
 /// RmlUi ships form controls with NO default styling: an `<input>` or

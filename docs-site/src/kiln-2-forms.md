@@ -296,6 +296,53 @@ button is held. Controls a Kiln form has and that system did not — the slider,
 the progress bar — follow the same rules. The face colours are that system's
 own; the typeface is whatever the machine has, since MS Sans Serif is not on it.
 
+### A theme of your own
+
+A `.ktheme` file in the project's `themes/` directory is a theme like any other:
+name it in the form, or hand its name to `Ui.SetTheme`. It sets the tokens it
+cares about over the theme it names as its `base`, and everything it leaves out
+stays what that theme said.
+
+```json
+{
+  "base": "Dark",
+  "name": "Ocean",
+  "ground": "#0b2942",
+  "card": "#123a5c",
+  "control": "#164a73",
+  "accent": "#3fc1ff",
+  "text": "#eaf6ff",
+  "radius": 10
+}
+```
+
+```
+Theme = "Ocean";        // themes/ocean.ktheme, matched without regard to case
+```
+
+Every theme in `themes/` is carried inside the built binary, so a program ships
+as one file and can switch to any of them while it runs. The tokens:
+
+| Token | |
+| --- | --- |
+| `ground` | the form's own background |
+| `card` | a panel, a list, a flyout — and the paper a field is written on |
+| `control` | a control at rest |
+| `control_alt` | a secondary surface: a header row, a stepper |
+| `hover`, `pressed`, `input_hover` | what those states change the surface to |
+| `selection` | a selected row or item |
+| `accent`, `accent_hover`, `on_accent` | the accent, and what is legible on it |
+| `text`, `text_secondary` | the two text weights |
+| `border`, `border_control`, `border_strong` | the three outline weights |
+| `radius`, `radius_card` | corner radii; a bare number is pixels |
+| `shadow`, `shadow_raised` | elevation, as a CSS box-shadow |
+| `font_size` | body text |
+| `bevel` | `true` for classic chrome, with `bevel_light`, `bevel_face`, `bevel_shadow` and `bevel_dark` as its four edges |
+
+A key that is not a token, or a `base` that is not a theme, is refused with a
+line on stderr naming it, and the palette is left as it was — a theme that
+half-applied would be a window nobody could explain.
+
 `KILN_UI_THEME=Dark ./app` overrides whatever the form says, which is how a
 program is looked at in another palette without touching its source.
 

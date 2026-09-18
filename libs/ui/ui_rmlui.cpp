@@ -1350,9 +1350,47 @@ Kiln_Widget kn_ui_root(void) { return g.initialised ? 1 : 0; }
  * one call that does that — reloading the document would rebuild it from the
  * seed and take the program's own properties with it.
  */
+/// A theme the project shipped: `themes/<name>.ktheme`, embedded at build time
+/// and matched without regard to case, so `Ui.SetTheme("ocean")` finds
+/// `themes/Ocean.ktheme`.
+bool project_theme(const std::string& name, kiln::ui::Theme& out, std::string& why) {
+    std::string want;
+    for (char c : name) want += (char)std::tolower((unsigned char)c);
+    want = "themes/" + want + ".ktheme";
+    if (!kn_embedded_resources) return false;
+    for (const Kiln_Resource* r = kn_embedded_resources; r->name; r++) {
+        std::string have;
+        for (const char* c = r->name; *c; c++) have += (char)std::tolower((unsigned char)*c);
+        if (have != want) continue;
+        const std::string text((const char*)r->data, (size_t)r->size);
+        if (kiln::ui::parse_theme(text, out, why)) return true;
+        why = std::string(r->name) + ": " + why;
+        return false;
+    }
+    return false;
+}
+
 extern "C" int kn_ui_set_theme(const char* name) {
     if (!name || !*name) return 1;
-    if (!kiln::ui::known_theme(name)) return 1;
+    if (!kiln::ui::known_theme(name)) {
+        /* Not a built-in: a theme the project ships. A file that is there but
+         * wrong says so on stderr — a palette that silently did not apply is the
+         * one failure a person cannot see by looking at the window. */
+        kiln::ui::Theme custom;
+        std::string why;
+        if (!project_theme(name, custom, why)) {
+            if (!why.empty()) std::fprintf(stderr, "kiln-ui: %s\n", why.c_str());
+            return 1;
+        }
+        g.theme_name = name;
+        g.theme = custom;
+        if (!g.initialised || !g.document) return 0;
+        auto sheet = Rml::Factory::InstanceStyleSheetString(
+            kiln::ui::theme_styles(g.width, g.height, g.font_family, g.theme));
+        if (!sheet) return 1;
+        g.document->SetStyleSheetContainer(std::move(sheet));
+        return 0;
+    }
     g.theme_name = name;
     /* `System` is a request to follow the desktop, so it resolves here — and
      * `kn_ui_theme` still answers `System`, which is what the program asked

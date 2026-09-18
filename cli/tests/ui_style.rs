@@ -98,10 +98,22 @@ fn render(src: &str, tag: &str) -> (Frame, String) {
 /// The same, with environment variables the run needs — a theme override, or a
 /// synthetic click.
 fn render_with(src: &str, tag: &str, env: &[(&str, &str)]) -> (Frame, String) {
+    render_project(src, tag, env, &[])
+}
+
+/// The same, with files written beside the source first — a project's
+/// `themes/ocean.ktheme`, say, which the build embeds.
+fn render_project(src: &str, tag: &str, env: &[(&str, &str)], files: &[(&str, &str)])
+    -> (Frame, String) {
     let dir = std::env::temp_dir().join(format!("kiln_style_{tag}"));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let source = dir.join("main.kiln");
     std::fs::write(&source, src).expect("write source");
+    for (path, body) in files {
+        let at = dir.join(path);
+        std::fs::create_dir_all(at.parent().unwrap()).expect("theme directory");
+        std::fs::write(at, body).expect("write file beside the source");
+    }
     let bin = dir.join("prog");
     let status = Command::new(env!("CARGO_BIN_EXE_kiln"))
         .args([
@@ -323,6 +335,63 @@ public partial form MainWindow
     // A field is the same bevel the other way round, over white paper.
     f.expect(20, 86, "#808080", "the field's sunk left edge");
     f.expect(150, 86, "#ffffff", "the field's paper");
+}
+
+/// A theme the project ships: `themes/<name>.ktheme` beside the source, carried
+/// into the binary and applied by name. It sets the tokens it cares about over
+/// the theme it names as its base, and leaves the rest of that theme alone.
+#[test]
+fn a_project_ships_its_own_theme() {
+    if !ui_available() {
+        return;
+    }
+    const OCEAN: &str = r##"{
+  "base": "Dark",
+  "name": "Ocean",
+  "ground": "#0b2942",
+  "control": "#164a73",
+  "accent": "#3fc1ff",
+  "text": "#eaf6ff"
+}
+"##;
+    const APP: &str = r#"namespace Sea;
+
+using Kiln.Ui;
+
+public partial form MainWindow
+{
+    Title = "ocean";
+    Width = 400;
+    Height = 300;
+    Theme = "Ocean";
+
+    Button ok { Text = "OK"; Left = 20; Top = 20; Width = 96; Height = 32; }
+}
+"#;
+    let (f, _) = render_project(APP, "theme_file", &[], &[("themes/ocean.ktheme", OCEAN)]);
+    f.expect(2, 2, "#0b2942", "the project theme's ground");
+    f.expect(26, 46, "#164a73", "the project theme's control");
+    // A token the file did not set is the base theme's, not the default's.
+    f.expect(20, 46, "#4a4a4a", "the dark base's control outline");
+
+    // A name no theme file answers to is refused, and the form keeps the theme
+    // it had — a palette that silently half-applied is the failure nobody sees.
+    const MISSING: &str = r#"namespace Missing;
+
+using Kiln.Ui;
+
+public partial form MainWindow
+{
+    Title = "missing";
+    Width = 400;
+    Height = 300;
+    Theme = "NoSuchTheme";
+
+    Button ok { Text = "OK"; Left = 20; Top = 20; Width = 96; Height = 32; }
+}
+"#;
+    let (g, _) = render(MISSING, "theme_missing");
+    g.expect(2, 2, "#f3f3f3", "an unknown theme leaves the default in place");
 }
 
 /// Switching while the program runs: the button's handler asks for `Light`, and
