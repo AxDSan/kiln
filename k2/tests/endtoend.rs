@@ -1391,12 +1391,13 @@ end
     assert!(out.contains("public static class Starter"), "{out}");
     assert!(out.contains("StarterWeapon(int profession)"), "{out}");
     assert!(out.contains("public static void Main()"), "{out}");
-    // A 1.x record becomes a record; a SCREAMING constant becomes PascalCase.
+    // A 1.x record becomes a record; a SCREAMING constant keeps its spelling,
+    // because that is how the API it names writes it.
     assert!(
         out.contains("public record ItemSpec(int Slot, int Template)"),
         "{out}"
     );
-    assert!(out.contains("ItemFlags = 16843009"), "{out}");
+    assert!(out.contains("ITEM_FLAGS = 16843009"), "{out}");
     // `use text` becomes a using; printing becomes Console.WriteLine.
     assert!(out.contains("using Kiln.Text;"), "{out}");
     assert!(out.contains("Console.WriteLine"), "{out}");
@@ -1872,8 +1873,10 @@ fn a_migrated_constant_keeps_one_name() {
                \x20 end\n\
                end\n";
     let out = kiln_k2::migrate(src).expect("migrates");
-    assert!(out.contains("Times = 3"), "{out}");
-    assert!(out.contains("i < Times"), "the use site disagrees:\n{out}");
+    // A C-style capital name keeps its spelling, so a program reads against the
+    // API it came from; the use site follows it.
+    assert!(out.contains("TIMES = 3"), "{out}");
+    assert!(out.contains("i < TIMES"), "the use site disagrees:\n{out}");
     assert!(!out.contains("tIMES"), "{out}");
     // And the whole point: what comes out compiles.
     kiln_k2::compile(&out).expect("a migrated program compiles");

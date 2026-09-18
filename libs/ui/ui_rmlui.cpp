@@ -13,6 +13,9 @@
 #if defined(__GNUC__) && !defined(__clang__) && !defined(_Static_assert)
     #define _Static_assert static_assert
 #endif
+#ifdef _WIN32
+#include <windows.h>   /* the registry, for the desktop's light/dark setting */
+#endif
 #include <RmlUi/Core.h>
 #include <RmlUi/Core/ElementInstancer.h>
 #include <RmlUi/Core/Elements/ElementFormControl.h>
